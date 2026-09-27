@@ -1,0 +1,48 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum TaskStatus {
+  NEW
+  SEARCHING
+  NEGOTIATION
+  ORDERED
+  WAITING_PAYMENT
+  WAITING_SHIPMENT
+  IN_TRANSIT
+  READY_FOR_PICKUP
+  RECEIVED
+  HANDED_OVER
+  CLOSED
+  CANCELLED
+}
+
+enum TaskPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+model Task {
+  id          String       @id @default(uuid())
+  number      Int          @unique @default(autoincrement())
+  title       String
+  description String?
+  status      TaskStatus   @default(NEW)
+  priority    TaskPriority @default(NORMAL)
+  deadline    DateTime?
+
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  closedAt    DateTime?
+
+  @@index([status])
+  @@index([priority])
+  @@index([deadline])
+}
