@@ -1,0 +1,234 @@
+@startgantt
+
+title Supply Manager — дорожная карта разработки и внедрения
+caption Статус на 04.10.2026. Будущие сроки являются плановой оценкой и уточняются после пилотной эксплуатации.
+
+Project starts 2026-09-28
+printscale weekly
+
+today is 2026-10-04 and is colored in #FFF3CD
+
+-- ЭТАП 1. ФУНДАМЕНТ И ЯДРО СИСТЕМЫ — ВЫПОЛНЕНО --
+
+[Архитектура проекта, NestJS + Next.js + PostgreSQL + Prisma] as [ARCH] starts 2026-09-28 and ends 2026-09-29
+[ARCH] is 100% completed
+[ARCH] is colored in GreenYellow/Green
+
+[Модель закупочной задачи и история действий] as [TASKCORE] starts 2026-09-28 and ends 2026-09-30
+[TASKCORE] is 100% completed
+[TASKCORE] is colored in GreenYellow/Green
+
+[Позиции закупки и реестр позиций] as [ITEMS] starts 2026-09-29 and ends 2026-10-01
+[ITEMS] is 100% completed
+[ITEMS] is colored in GreenYellow/Green
+
+[Поставщики, предложения и выбор поставщика] as [OFFERS] starts 2026-09-29 and ends 2026-10-01
+[OFFERS] is 100% completed
+[OFFERS] is colored in GreenYellow/Green
+
+[Заказ, счёт, передача на оплату и подтверждение оплаты] as [ORDER] starts 2026-09-30 and ends 2026-10-02
+[ORDER] is 100% completed
+[ORDER] is colored in GreenYellow/Green
+
+[Логистика: отгрузка → путь → прибытие → получение → передача → закрытие] as [LOGISTICS] starts 2026-09-30 and ends 2026-10-03
+[LOGISTICS] is 100% completed
+[LOGISTICS] is colored in GreenYellow/Green
+
+[E2E-тесты основного закупочного процесса] as [CORETESTS] starts 2026-09-30 and ends 2026-10-04
+[CORETESTS] is 100% completed
+[CORETESTS] is colored in GreenYellow/Green
+
+[Готово ядро закупочного процесса] as [M_CORE] happens 2026-10-04
+
+-- ЭТАП 2. ИНТЕРФЕЙС СНАБЖЕНИЯ — ВЫПОЛНЕНО --
+
+[Главный экран и реестр закупок] as [DASH] starts 2026-10-01 and ends 2026-10-03
+[DASH] is 100% completed
+[DASH] is colored in GreenYellow/Green
+
+[Карточка закупки: обзор, позиции, предложения, заказ, логистика, история] as [TASKUI] starts 2026-10-01 and ends 2026-10-04
+[TASKUI] is 100% completed
+[TASKUI] is colored in GreenYellow/Green
+
+[Отдельная страница реестра позиций /registry] as [REGISTRY] starts 2026-10-03 and ends 2026-10-04
+[REGISTRY] is 100% completed
+[REGISTRY] is colored in GreenYellow/Green
+
+-- ЭТАП 3. СОТРУДНИКИ И ДОСТУП — ВЫПОЛНЕНО --
+
+[Модели User, PurchaseRequest и PurchaseRequestItem] as [USERDB] starts 2026-10-03 and ends 2026-10-04
+[USERDB] is 100% completed
+[USERDB] is colored in GreenYellow/Green
+
+[Регистрация, вход, HttpOnly-сессия и выход] as [AUTH] starts 2026-10-03 and ends 2026-10-04
+[AUTH] is 100% completed
+[AUTH] is colored in GreenYellow/Green
+
+[Роли EMPLOYEE / PROCUREMENT / ADMIN и защита API] as [RBAC] starts 2026-10-03 and ends 2026-10-04
+[RBAC] is 100% completed
+[RBAC] is colored in GreenYellow/Green
+
+[E2E-проверка авторизации — 7/7 тестов] as [AUTHTEST] starts 2026-10-04 and ends 2026-10-04
+[AUTHTEST] is 100% completed
+[AUTHTEST] is colored in GreenYellow/Green
+
+[Готов защищённый контур пользователей] as [M_AUTH] happens 2026-10-04
+
+-- ЭТАП 4. ПОРТАЛ СОТРУДНИКА И НОВЫЕ ЗАЯВКИ — БЛИЖАЙШИЙ ПЛАН --
+
+[API заявок сотрудников] as [REQAPI] starts 2026-10-05 and ends 2026-10-06
+[REQAPI] is colored in Orange/OrangeRed
+
+[Страница регистрации сотрудника] as [REGISTERUI] starts 2026-10-07 and ends 2026-10-08
+[REGISTERUI] is colored in LightBlue/Blue
+
+[Страница входа и восстановление сессии] as [LOGINUI] starts 2026-10-07 and ends 2026-10-08
+[LOGINUI] is colored in LightBlue/Blue
+
+[Личный кабинет сотрудника] as [EMPPORTAL] starts 2026-10-09 and ends 2026-10-10
+[EMPPORTAL] is colored in LightBlue/Blue
+
+[Mobile-first форма новой заявки с несколькими позициями] as [REQFORM] starts 2026-10-09 and ends 2026-10-12
+[REQFORM] is colored in LightBlue/Blue
+
+[История и статусы собственных заявок сотрудника] as [MYREQ] starts 2026-10-11 and ends 2026-10-13
+[MYREQ] is colored in LightBlue/Blue
+
+[Очередь входящих заявок для снабжения] as [REQQUEUE] starts 2026-10-13 and ends 2026-10-15
+[REQQUEUE] is colored in LightBlue/Blue
+
+[Уточнение / одобрение / отклонение заявки] as [REQDECISION] starts 2026-10-14 and ends 2026-10-16
+[REQDECISION] is colored in LightBlue/Blue
+
+[Преобразование одобренной заявки в Task без повторного ввода] as [REQ2TASK] starts 2026-10-15 and ends 2026-10-17
+[REQ2TASK] is colored in LightBlue/Blue
+
+[E2E-тест полного пути «сотрудник → заявка → закупка»] as [REQTEST] starts 2026-10-17 and ends 2026-10-18
+[REQTEST] is colored in LightBlue/Blue
+
+[Готов портал подачи заявок] as [M_PORTAL] happens 2026-10-18
+
+-- ЭТАП 5. TELEGRAM И ОПЕРАТИВНЫЕ УВЕДОМЛЕНИЯ --
+
+[Telegram-бот и безопасная привязка пользователя] as [TGBOT] starts 2026-10-19 and ends 2026-10-20
+[TGBOT] is colored in LightBlue/Blue
+
+[Уведомление снабжения о новой заявке] as [TGNEW] starts 2026-10-20 and ends 2026-10-21
+[TGNEW] is colored in LightBlue/Blue
+
+[Уведомления сотрудника об изменении статуса] as [TGSTATUS] starts 2026-10-21 and ends 2026-10-22
+[TGSTATUS] is colored in LightBlue/Blue
+
+[Напоминания по оплате, отгрузке и ожидаемой доставке] as [TGREMIND] starts 2026-10-22 and ends 2026-10-24
+[TGREMIND] is colored in LightBlue/Blue
+
+[Проверка Telegram-сценариев] as [TGTEST] starts 2026-10-24 and ends 2026-10-25
+[TGTEST] is colored in LightBlue/Blue
+
+-- ЭТАП 6. АДМИНИСТРИРОВАНИЕ И БЕЗОПАСНОСТЬ --
+
+[Экран управления сотрудниками] as [USERADMIN] starts 2026-10-23 and ends 2026-10-25
+[USERADMIN] is colored in LightBlue/Blue
+
+[Подтверждение PENDING-аккаунтов и назначение ролей] as [USERAPPROVE] starts 2026-10-24 and ends 2026-10-26
+[USERAPPROVE] is colored in LightBlue/Blue
+
+[Проверка разграничения доступа и защита критичных маршрутов] as [SECURITY] starts 2026-10-26 and ends 2026-10-28
+[SECURITY] is colored in LightBlue/Blue
+
+[Журналирование ключевых действий пользователей] as [AUDIT] starts 2026-10-27 and ends 2026-10-29
+[AUDIT] is colored in LightBlue/Blue
+
+-- ЭТАП 7. РАЗВЁРТЫВАНИЕ И ПИЛОТНАЯ ЭКСПЛУАТАЦИЯ — MVP --
+
+[Подготовка production-сервера и PostgreSQL] as [SERVER] starts 2026-10-27 and ends 2026-10-29
+[SERVER] is colored in LightBlue/Blue
+
+[Развёртывание API и Web] as [DEPLOY] starts 2026-10-29 and ends 2026-10-31
+[DEPLOY] is colored in LightBlue/Blue
+
+[Домен, HTTPS, CORS и production-переменные] as [HTTPS] starts 2026-10-30 and ends 2026-11-01
+[HTTPS] is colored in LightBlue/Blue
+
+[Резервное копирование БД и базовый мониторинг] as [BACKUP] starts 2026-11-01 and ends 2026-11-02
+[BACKUP] is colored in LightBlue/Blue
+
+[Пилот с реальными сотрудниками и реальными заявками] as [PILOT] starts 2026-11-03 and ends 2026-11-09
+[PILOT] is colored in LightBlue/Blue
+
+[Исправления по результатам пилота] as [STABILIZE] starts 2026-11-10 and ends 2026-11-13
+[STABILIZE] is colored in LightBlue/Blue
+
+[Инструкция пользователя и обучение] as [TRAINING] starts 2026-11-12 and ends 2026-11-14
+[TRAINING] is colored in LightBlue/Blue
+
+[MVP готов к промышленной эксплуатации] as [M_MVP] happens 2026-11-14
+
+-- ЭТАП 8. РАСШИРЕНИЕ ФУНКЦИОНАЛА --
+
+[Полноценный справочник поставщиков и карточка поставщика] as [SUPPLIERS] starts 2026-11-16 and ends 2026-11-20
+[SUPPLIERS] is colored in Thistle/Purple
+
+[История работы и показатели по поставщикам] as [SUPPLIERSTAT] starts 2026-11-19 and ends 2026-11-23
+[SUPPLIERSTAT] is colored in Thistle/Purple
+
+[Документы закупки: КП, счёт, накладные и вложения] as [DOCS] starts 2026-11-21 and ends 2026-11-26
+[DOCS] is colored in Thistle/Purple
+
+[Поиск, фильтры и расширенная навигация по данным] as [SEARCH] starts 2026-11-24 and ends 2026-11-27
+[SEARCH] is colored in Thistle/Purple
+
+[Управленческая аналитика и KPI закупок] as [ANALYTICS] starts 2026-11-27 and ends 2026-12-02
+[ANALYTICS] is colored in Thistle/Purple
+
+[Отчёты по срокам, поставщикам, просрочкам и причинам задержек] as [REPORTS] starts 2026-12-01 and ends 2026-12-05
+[REPORTS] is colored in Thistle/Purple
+
+[Расширенная версия системы готова] as [M_EXT] happens 2026-12-05
+
+-- ЭТАП 9. ИНТЕЛЛЕКТУАЛЬНЫЕ ФУНКЦИИ — ПОСЛЕ СТАБИЛИЗАЦИИ MVP --
+
+[Подготовка и нормализация данных для AI-модулей] as [AIDATA] starts 2026-12-07 and ends 2026-12-10
+[AIDATA] is colored in Plum/DarkMagenta
+
+[Импорт и разбор ведомостей дефицита] as [DEFICIT] starts 2026-12-11 and ends 2026-12-16
+[DEFICIT] is colored in Plum/DarkMagenta
+
+[Интеллектуальный поиск и подбор поставщиков] as [AISEARCH] starts 2026-12-17 and ends 2026-12-23
+[AISEARCH] is colored in Plum/DarkMagenta
+
+[Автоматизированное сравнение коммерческих предложений] as [AICOMPARE] starts 2026-12-24 and ends 2026-12-29
+[AICOMPARE] is colored in Plum/DarkMagenta
+
+[Подбор аналогов комплектующих и материалов] as [ANALOGS] starts 2026-12-30 and ends 2027-01-05
+[ANALOGS] is colored in Plum/DarkMagenta
+
+[Рекомендации по выбору поставщика и условиям закупки] as [AIRECOMMEND] starts 2027-01-06 and ends 2027-01-10
+[AIRECOMMEND] is colored in Plum/DarkMagenta
+
+[Тестирование качества рекомендаций на реальных данных] as [AIPILOT] starts 2027-01-11 and ends 2027-01-15
+[AIPILOT] is colored in Plum/DarkMagenta
+
+[Интеллектуальный контур Supply Manager готов] as [M_AI] happens 2027-01-15
+
+-- ЭТАП 10. ПРИЁМКА И ДАЛЬНЕЙШЕЕ РАЗВИТИЕ --
+
+[Финальное нагрузочное и регрессионное тестирование] as [FINALTEST] starts 2027-01-16 and ends 2027-01-19
+[FINALTEST] is colored in Wheat/DarkGoldenRod
+
+[Приёмка заказчиком и фиксация версии 1.0] as [ACCEPT] starts 2027-01-20 and ends 2027-01-21
+[ACCEPT] is colored in Wheat/DarkGoldenRod
+
+[Supply Manager 1.0] as [M_FINAL] happens 2027-01-21
+
+legend
+|= Цвет |= Статус |
+|<#ADFF2F> | Выполнено и проверено |
+|<#FFA500> | Ближайшая задача / текущий фокус |
+|<#ADD8E6> | План MVP |
+|<#D8BFD8> | Расширение функционала |
+|<#DDA0DD> | AI-функции после стабилизации MVP |
+|<#F5DEB3> | Финальное тестирование и приёмка |
+end legend
+
+@endgantt

@@ -29,6 +29,37 @@ enum TaskPriority {
   URGENT
 }
 
+enum SupplierOfferStatus {
+  REQUESTED
+  WAITING_RESPONSE
+  OFFER_RECEIVED
+  NEGOTIATION
+  SELECTED
+  REJECTED
+}
+
+enum UserRole {
+  EMPLOYEE
+  PROCUREMENT
+  ADMIN
+}
+
+enum UserStatus {
+  PENDING
+  ACTIVE
+  BLOCKED
+}
+
+enum PurchaseRequestStatus {
+  NEW
+  IN_REVIEW
+  NEEDS_CLARIFICATION
+  APPROVED
+  REJECTED
+  CONVERTED
+  CANCELLED
+}
+
 model Task {
   id          String       @id @default(uuid())
   number      Int          @unique @default(autoincrement())
@@ -38,11 +69,335 @@ model Task {
   priority    TaskPriority @default(NORMAL)
   deadline    DateTime?
 
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
-  closedAt    DateTime?
+  // Что нужно сделать следующим
+  nextAction String?
+
+  // Когда напомнить о следующем действии
+  reminderAt DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  closedAt  DateTime?
+
+  // История работы по задаче
+  activities TaskActivity[]
+
+  // Закупаемые позиции
+  items TaskItem[]
+
+  // Все предложения поставщиков по этой задаче
+  supplierOffers SupplierOffer[] @relation("TaskSupplierOffers")
+
+  // Выбранное предложение поставщика
+  selectedOfferId String?        @unique
+  selectedOffer   SupplierOffer? @relation("SelectedSupplierOffer", fields: [selectedOfferId], references: [id], onDelete: SetNull)
+
+  // Все оформленные заказы по этой закупке, включая отменённые
+  purchaseOrders PurchaseOrder[] @relation("TaskPurchaseOrders")
+
+  // Текущий активный заказ
+  currentPurchaseOrderId String?        @unique
+  purchaseOrder          PurchaseOrder? @relation("CurrentPurchaseOrder", fields: [currentPurchaseOrderId], references: [id], onDelete: SetNull)
+
+  // Исходная заявка сотрудника, если закупка была создана из заявки
+  sourceRequest PurchaseRequest? @relation("PurchaseRequestTask")
 
   @@index([status])
   @@index([priority])
   @@index([deadline])
+  @@index([reminderAt])
+}
+
+model TaskItem {
+  id String @id @default(uuid())
+
+  taskId String
+  task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  name       String
+  partNumber String?
+  quantity   Decimal  @db.Decimal(14, 3)
+  unit       String
+  unitPrice  Decimal? @db.Decimal(14, 2)
+  currency   String   @default("RUB")
+  notes      String?
+  sortOrder  Int      @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([taskId])
+  @@index([name])
+}
+
+model TaskActivity {
+  id String @id @default(uuid())
+
+  taskId String
+  task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  // Текст записи в истории
+  text String
+
+  createdAt DateTime @default(now())
+
+  @@index([taskId])
+  @@index([createdAt])
+}
+
+model Supplier {
+  id String @id @default(uuid())
+
+  // Основная информация о поставщике
+  name    String
+  contact String?
+  phone   String?
+  email   String?
+  website String?
+
+  // Произвольная заметка о поставщике
+  notes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  offers         SupplierOffer[]
+  purchaseOrders PurchaseOrder[]
+
+  @@index([name])
+}
+
+model SupplierOffer {
+  id String @id @default(uuid())
+
+  taskId String
+  task   Task   @relation("TaskSupplierOffers", fields: [taskId], references: [id], onDelete: Cascade)
+
+  supplierId String
+  supplier   Supplier @relation(fields: [supplierId], references: [id])
+
+  status SupplierOfferStatus @default(REQUESTED)
+
+  // Стоимость товара в рублях
+  price Decimal? @db.Decimal(14, 2)
+
+  // Стоимость доставки
+  deliveryPrice Decimal? @db.Decimal(14, 2)
+
+  // Срок поставки в днях
+  deliveryDays Int?
+
+  // Наличие товара у поставщика
+  inStock Boolean?
+
+  // Комментарий к конкретному предложению
+  notes String?
+
+  // Когда запросили предложение
+  requestedAt DateTime @default(now())
+
+  // Когда поставщик прислал предложение
+  receivedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Обратная сторона связи с выбранным предложением
+  selectedForTask Task? @relation("SelectedSupplierOffer")
+
+  // Все попытки заказа, оформленные на основании этого предложения
+  purchaseOrders PurchaseOrder[]
+
+  @@index([taskId])
+  @@index([supplierId])
+  @@index([status])
+}
+
+model PurchaseOrder {
+  id String @id @default(uuid())
+
+  // Одна закупка может иметь несколько попыток заказа
+  taskId String
+  task   Task   @relation("TaskPurchaseOrders", fields: [taskId], references: [id], onDelete: Cascade)
+
+  // Если этот заказ сейчас является активным для задачи
+  currentForTask Task? @relation("CurrentPurchaseOrder")
+
+  // Поставщик, у которого оформлен заказ
+  supplierId String
+  supplier   Supplier @relation(fields: [supplierId], references: [id])
+
+  // Предложение, на основании которого оформлен заказ
+  // Одно предложение может использоваться для нескольких попыток заказа
+  supplierOfferId String
+  supplierOffer   SupplierOffer @relation(fields: [supplierOfferId], references: [id])
+
+  // Фиксируем условия на момент оформления заказа
+  price         Decimal? @db.Decimal(14, 2)
+  deliveryPrice Decimal? @db.Decimal(14, 2)
+  totalPrice    Decimal? @db.Decimal(14, 2)
+  deliveryDays  Int?
+
+  // Данные счёта
+  invoiceNumber String?
+  invoiceDate   DateTime?
+
+  // Комментарий к заказу
+  notes String?
+
+  // Когда заказ был оформлен
+  orderedAt DateTime @default(now())
+
+  // Когда счёт был передан на оплату
+  sentToPaymentAt DateTime?
+
+  // Когда была подтверждена оплата
+  paidAt DateTime?
+
+  // Логистика после оплаты
+
+  // Когда поставщик фактически отгрузил товар
+  shippedAt DateTime?
+
+  // Транспортная компания / перевозчик
+  carrier String?
+
+  // Трек-номер, ТТН или номер накладной
+  trackingNumber String?
+
+  // Ожидаемая дата прибытия
+  expectedDeliveryAt DateTime?
+
+  // Когда груз прибыл и стал доступен для получения
+  readyForPickupAt DateTime?
+
+  // Когда товар фактически получили
+  receivedAt DateTime?
+
+  // Когда товар передали конечному получателю / исполнителю
+  handedOverAt DateTime?
+
+  // Кому передали товар
+  handedOverTo String?
+
+  // Если от заказа пришлось отказаться
+  cancelledAt  DateTime?
+  cancelReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([taskId])
+  @@index([supplierId])
+  @@index([supplierOfferId])
+  @@index([orderedAt])
+  @@index([cancelledAt])
+}
+
+model User {
+  id String @id @default(uuid())
+
+  // Данные сотрудника
+  fullName   String
+  username   String  @unique
+  email      String? @unique
+  phone      String?
+  department String?
+  position   String?
+
+  // Храним только хеш пароля, никогда не сам пароль
+  passwordHash String
+
+  role   UserRole   @default(EMPLOYEE)
+  status UserStatus @default(PENDING)
+
+  // Для будущих персональных уведомлений через Telegram
+  telegramChatId String? @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Заявки, созданные сотрудником
+  purchaseRequests PurchaseRequest[] @relation("RequestedPurchaseRequests")
+
+  // Заявки, обработанные снабженцем / администратором
+  processedPurchaseRequests PurchaseRequest[] @relation("ProcessedPurchaseRequests")
+
+  @@index([fullName])
+  @@index([department])
+  @@index([role])
+  @@index([status])
+}
+
+model PurchaseRequest {
+  id     String @id @default(uuid())
+  number Int    @unique @default(autoincrement())
+
+  // Зарегистрированный пользователь, если заявка создана из внутренней системы
+  requesterId String?
+  requester   User?   @relation("RequestedPurchaseRequests", fields: [requesterId], references: [id], onDelete: SetNull)
+
+  // ФИО работника для простой публичной формы без регистрации
+  requesterName String?
+
+  title       String
+  description String?
+
+  priority   TaskPriority          @default(NORMAL)
+  status     PurchaseRequestStatus @default(NEW)
+  requiredAt DateTime?
+
+  // Общий комментарий сотрудника к заявке
+  notes String?
+
+  // Результат / комментарий снабженца при обработке
+  decisionComment String?
+
+  // Кто обработал заявку
+  processedById String?
+  processedBy   User?     @relation("ProcessedPurchaseRequests", fields: [processedById], references: [id], onDelete: SetNull)
+  processedAt   DateTime?
+
+  // Позиции внутри заявки
+  items PurchaseRequestItem[]
+
+  // Если заявка принята и превращена в закупку
+  taskId String? @unique
+  task   Task?   @relation("PurchaseRequestTask", fields: [taskId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([requesterId])
+  @@index([processedById])
+  @@index([status])
+  @@index([priority])
+  @@index([requiredAt])
+  @@index([createdAt])
+}
+
+model PurchaseRequestItem {
+  id String @id @default(uuid())
+
+  requestId String
+  request   PurchaseRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  name       String
+  partNumber String?
+  quantity   Decimal @db.Decimal(14, 3)
+  unit       String
+  notes      String?
+
+  // Фото конкретной позиции заявки
+  photoPath         String?
+  photoOriginalName String?
+  photoMimeType     String?
+
+  sortOrder Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([requestId])
+  @@index([name])
 }

@@ -1,0 +1,813 @@
+@startuml
+title SUPPLY MANAGER\nПолная дорожная карта разработки интеллектуальной системы закупок
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundcorner 15
+skinparam defaultFontName Arial
+skinparam defaultFontSize 13
+skinparam ArrowColor #475569
+skinparam packageStyle rectangle
+skinparam linetype ortho
+
+skinparam rectangle {
+    BorderColor #64748B
+    FontColor #111827
+}
+
+top to bottom direction
+
+
+' ============================================================
+' ГЛАВНАЯ ЦЕЛЬ
+' ============================================================
+
+rectangle "ГЛАВНАЯ ЦЕЛЬ\n\nИнтеллектуальная система поддержки закупочной деятельности\nдля закупки комплектующих и материалов судоремонта\n\nВедомость дефицита → позиции → поставщики → КП → сравнение →\nрекомендация AI → решение закупщика → заказ → оплата →\nдоставка → получение → история → накопление знаний" as GOAL #FFF2CC
+
+
+' ============================================================
+' ЭТАП 1 — ФУНДАМЕНТ
+' ============================================================
+
+package "ЭТАП 1. ФУНДАМЕНТ СИСТЕМЫ — ГОТОВО ✓" #E8F5E9 {
+
+    rectangle "Архитектура ✓\n\nNext.js\nNestJS\nPostgreSQL\nPrisma\nREST API\nTypeScript" as ARCH #C8E6C9
+
+    rectangle "Task ✓\n\nЗакупочная задача\nНомер\nНазвание\nОписание\nСтатус\nПриоритет\nДедлайн" as TASK #C8E6C9
+
+    rectangle "Управление задачей ✓\n\nnextAction\nreminderAt\ncreatedAt / updatedAt\nclosedAt" as TASKCONTROL #C8E6C9
+
+    rectangle "TaskActivity ✓\n\nПолная история действий\nпо закупке" as ACTIVITY #C8E6C9
+
+    ARCH --> TASK
+    TASK --> TASKCONTROL
+    TASKCONTROL --> ACTIVITY
+}
+
+
+' ============================================================
+' ЭТАП 2 — ПОЗИЦИИ
+' ============================================================
+
+package "ЭТАП 2. ПОЗИЦИИ ЗАКУПКИ — ГОТОВО ✓" #E8F5E9 {
+
+    rectangle "TaskItem ✓\n\nОтдельная закупаемая позиция" as ITEM #C8E6C9
+
+    rectangle "Структура позиции ✓\n\nname\npartNumber\nquantity\nunit\nnotes\nsortOrder" as ITEMDATA #C8E6C9
+
+    rectangle "CRUD API ✓\n\nДобавить\nИзменить\nУдалить\nПолучить позиции" as ITEMCRUD #C8E6C9
+
+    rectangle "E2E TaskItem ✓\n\nСоздание\nРедактирование\nУдаление" as ITEMTEST #C8E6C9
+
+    ITEM --> ITEMDATA
+    ITEMDATA --> ITEMCRUD
+    ITEMCRUD --> ITEMTEST
+}
+
+
+' ============================================================
+' ЭТАП 3 — ПОСТАВЩИКИ
+' ============================================================
+
+package "ЭТАП 3. ПОСТАВЩИКИ И ПРЕДЛОЖЕНИЯ — ГОТОВО ✓" #E8F5E9 {
+
+    rectangle "Supplier ✓\n\nНазвание\nКонтакт\nТелефон\nEmail\nСайт\nПримечания" as SUPPLIER #C8E6C9
+
+    rectangle "SupplierOffer ✓\n\nЦена\nДоставка\nСрок\nНаличие\nКомментарий\nСтатус" as OFFER #C8E6C9
+
+    rectangle "Несколько предложений ✓\n\nОдна закупка →\nнесколько поставщиков" as OFFERS #C8E6C9
+
+    rectangle "Выбор предложения ✓\n\nselectedOfferId\nSELECTED" as SELECTOFFER #C8E6C9
+
+    SUPPLIER --> OFFER
+    OFFER --> OFFERS
+    OFFERS --> SELECTOFFER
+}
+
+
+' ============================================================
+' ЭТАП 4 — ЗАКАЗ
+' ============================================================
+
+package "ЭТАП 4. ЗАКАЗ И ОПЛАТА — ГОТОВО ✓" #E8F5E9 {
+
+    rectangle "PurchaseOrder ✓\n\nПоставщик\nПредложение\nЦена\nДоставка\nИтог\nСрок" as PO #C8E6C9
+
+    rectangle "Счёт ✓\n\ninvoiceNumber\ninvoiceDate\nnotes" as INVOICE #C8E6C9
+
+    rectangle "Передача на оплату ✓\n\nsentToPaymentAt\nWAITING_PAYMENT" as SENDPAY #C8E6C9
+
+    rectangle "Подтверждение оплаты ✓\n\npaidAt\nWAITING_SHIPMENT" as PAY #C8E6C9
+
+    PO --> INVOICE
+    INVOICE --> SENDPAY
+    SENDPAY --> PAY
+}
+
+
+' ============================================================
+' ЭТАП 5 — СМЕНА ПОСТАВЩИКА
+' ============================================================
+
+package "ЭТАП 5. СМЕНА ПОСТАВЩИКА И ИСТОРИЯ — ГОТОВО ✓" #E8F5E9 {
+
+    rectangle "История заказов ✓\n\nTask → PurchaseOrder[]\n\nСохраняются все\nпопытки заказа" as POHISTORY #C8E6C9
+
+    rectangle "Активный заказ ✓\n\ncurrentPurchaseOrderId" as CURRENTPO #C8E6C9
+
+    rectangle "Отмена до оплаты ✓\n\ncancelledAt\ncancelReason" as CANCELPO #C8E6C9
+
+    rectangle "Смена поставщика ✓\n\nСброс выбранного предложения\nВозврат к поиску\nВыбор нового поставщика" as CHANGESUP #C8E6C9
+
+    rectangle "Защита ✓\n\nОплаченный заказ\nнельзя отменить\nобычным сценарием" as PAYPROTECT #C8E6C9
+
+    POHISTORY --> CURRENTPO
+    CURRENTPO --> CANCELPO
+    CANCELPO --> CHANGESUP
+    PAY --> PAYPROTECT
+}
+
+
+' ============================================================
+' ЭТАП 6 — ПРОБЛЕМЫ
+' ============================================================
+
+package "ВАЖНЫЕ ПРОБЛЕМЫ, КОТОРЫЕ УЖЕ РЕШИЛИ ✓" #E8F5E9 {
+
+    rectangle "Prisma relation errors\nпри изменении схемы" as ERR1 #FFCDD2
+    rectangle "Исправлены связи\nTask / PurchaseOrder ✓" as FIX1 #C8E6C9
+
+    rectangle "Нельзя было хранить\nнесколько заказов задачи" as ERR2 #FFCDD2
+    rectangle "PurchaseOrder[] +\ncurrentPurchaseOrderId ✓" as FIX2 #C8E6C9
+
+    rectangle "P2002\nPurchaseOrder_supplierOfferId_key" as ERR3 #FFCDD2
+    rectangle "Убрано ограничение\nодин SupplierOffer → один заказ ✓" as FIX3 #C8E6C9
+
+    rectangle "Дублирование\npurchaseOrders в Prisma" as ERR4 #FFCDD2
+    rectangle "Prisma schema\nисправлена и мигрирована ✓" as FIX4 #C8E6C9
+
+    rectangle "Ручные curl-тесты\nзанимали много времени" as ERR5 #FFCDD2
+    rectangle "Vitest + Supertest\nE2E автоматизация ✓" as FIX5 #C8E6C9
+
+    ERR1 --> FIX1
+    ERR2 --> FIX2
+    ERR3 --> FIX3
+    ERR4 --> FIX4
+    ERR5 --> FIX5
+}
+
+
+' ============================================================
+' ЭТАП 7 — ТЕСТЫ
+' ============================================================
+
+package "ЭТАП 7. АВТОМАТИЧЕСКОЕ ТЕСТИРОВАНИЕ — РАБОТАЕТ ✓" #E8F5E9 {
+
+    rectangle "Vitest ✓" as VITEST #C8E6C9
+    rectangle "Supertest ✓" as SUPERTEST #C8E6C9
+
+    rectangle "Purchase Flow E2E ✓\n\nПоставщики\nВыбор\nЗаказ\nОплата\nСмена поставщика\nЗащита оплаты" as TESTPO #C8E6C9
+
+    rectangle "TaskItem E2E ✓\n\nCreate\nUpdate\nDelete" as TESTITEM #C8E6C9
+
+    rectangle "Сейчас:\n2 test files\n3 tests\n3 passed ✓" as TESTSTATUS #C8E6C9
+
+    VITEST --> TESTPO
+    SUPERTEST --> TESTPO
+    VITEST --> TESTITEM
+    TESTPO --> TESTSTATUS
+    TESTITEM --> TESTSTATUS
+}
+
+
+' ============================================================
+' ТЕКУЩАЯ ТОЧКА
+' ============================================================
+
+rectangle "ТЕКУЩАЯ ТОЧКА ПРОЕКТА\n\nБазовый путь закупки от создания задачи до оплаты уже работает.\nTaskItem, поставщики, предложения, выбор, заказ,\nотмена/смена поставщика, история и E2E заложены.\n\nДальше заканчиваем обычную систему закупок,\nПОСЛЕ ЧЕГО подключаем полноценный AI-слой." as NOW #FFF59D
+
+
+' ============================================================
+' ЭТАП 8 — UI
+' ============================================================
+
+package "ЭТАП 8. ДОВЕСТИ FRONTEND ДО ПОЛНОЦЕННОГО РАБОЧЕГО МЕСТА" #FFF3E0 {
+
+    rectangle "Таблица TaskItem\n\nУдобный список позиций\nДобавление\nРедактирование\nУдаление" as UIITEM #FFE0B2
+
+    rectangle "История PurchaseOrder\n\nТекущий заказ\nОтменённые заказы\nПричины отмены" as UIHISTORY #FFE0B2
+
+    rectangle "Смена поставщика\nчерез UI\n\nБез curl и ручной работы" as UICHANGE #FFE0B2
+
+    rectangle "Карточка закупки\nкак единое рабочее место\nзакупщика" as WORKPLACE #FFE0B2
+
+    UIITEM --> WORKPLACE
+    UIHISTORY --> WORKPLACE
+    UICHANGE --> WORKPLACE
+}
+
+
+' ============================================================
+' ЭТАП 9 — ЛОГИСТИКА
+' ============================================================
+
+package "ЭТАП 9. ПОЛНЫЙ ЖИЗНЕННЫЙ ЦИКЛ ЗАКУПКИ" #FFF3E0 {
+
+    rectangle "WAITING_SHIPMENT\nОжидание отгрузки" as SHIPPING #FFE0B2
+
+    rectangle "IN_TRANSIT\nТовар в пути" as TRANSIT #FFE0B2
+
+    rectangle "Данные доставки\n\nТК\nТрек-номер\nДата отправки\nПлановая дата\nКомментарий" as DELIVERY #FFE0B2
+
+    rectangle "READY_FOR_PICKUP\nГотов к получению" as READY #FFE0B2
+
+    rectangle "RECEIVED\nПолучено" as RECEIVED #FFE0B2
+
+    rectangle "HANDED_OVER\nПередано заказчику /\nна судно / подразделению" as HANDED #FFE0B2
+
+    rectangle "CLOSED\nЗакупка полностью закрыта" as CLOSED #FFE0B2
+
+    SHIPPING --> TRANSIT
+    TRANSIT --> DELIVERY
+    DELIVERY --> READY
+    READY --> RECEIVED
+    RECEIVED --> HANDED
+    HANDED --> CLOSED
+}
+
+
+' ============================================================
+' ЭТАП 10 — БАЗА ЗНАНИЙ
+' ============================================================
+
+package "ЭТАП 10. НАКОПЛЕНИЕ ДАННЫХ ДЛЯ AI" #FFF3E0 {
+
+    rectangle "История закупленных\nпозиций" as KNOWITEM #FFE0B2
+
+    rectangle "История поставщиков" as KNOWSUP #FFE0B2
+
+    rectangle "История цен" as KNOWPRICE #FFE0B2
+
+    rectangle "Фактические сроки\nпоставки" as KNOWDELIVERY #FFE0B2
+
+    rectangle "Отказы / отмены /\nпроблемы поставщиков" as KNOWPROBLEM #FFE0B2
+
+    rectangle "Использованные аналоги" as KNOWANALOG #FFE0B2
+
+    rectangle "Внутренняя база знаний\nзакупочного отдела" as KNOWLEDGE #FFE0B2
+
+    KNOWITEM --> KNOWLEDGE
+    KNOWSUP --> KNOWLEDGE
+    KNOWPRICE --> KNOWLEDGE
+    KNOWDELIVERY --> KNOWLEDGE
+    KNOWPROBLEM --> KNOWLEDGE
+    KNOWANALOG --> KNOWLEDGE
+}
+
+
+' ============================================================
+' AI 1 — ДОКУМЕНТЫ
+' ============================================================
+
+package "AI-ЭТАП 1. ИНТЕЛЛЕКТУАЛЬНЫЙ РАЗБОР ВХОДЯЩИХ ДОКУМЕНТОВ" #F3E5F5 {
+
+    rectangle "Входящие данные\n\nВедомость дефицита\nExcel\nPDF\nWord\nТекст\nЗаявка" as DOCS #E1BEE7
+
+    rectangle "AI: извлечение позиций\n\nНаименование\nАртикул\nМодель\nКоличество\nЕдиница\nХарактеристики" as AIPARSE #E1BEE7
+
+    rectangle "AI: нормализация\n\nОчистка названий\nИсправление форматов\nВыделение производителя\nКаталожного номера" as NORMALIZE #E1BEE7
+
+    rectangle "AI: поиск дублей\n\nОдинаковые позиции\nРазные написания\nПовторные заявки" as DUPLICATES #E1BEE7
+
+    rectangle "AI предлагает\nготовые TaskItem" as AITASKITEM #E1BEE7
+
+    rectangle "Закупщик проверяет\nи подтверждает" as HUMAN1 #D1C4E9
+
+    DOCS --> AIPARSE
+    AIPARSE --> NORMALIZE
+    NORMALIZE --> DUPLICATES
+    DUPLICATES --> AITASKITEM
+    AITASKITEM --> HUMAN1
+}
+
+
+' ============================================================
+' AI 2 — ПОНИМАНИЕ ПОЗИЦИИ
+' ============================================================
+
+package "AI-ЭТАП 2. ПОНИМАНИЕ ТОГО, ЧТО ИМЕННО НУЖНО КУПИТЬ" #F3E5F5 {
+
+    rectangle "TaskItem" as AIITEM #E1BEE7
+
+    rectangle "AI определяет\nкатегорию оборудования" as CLASSIFY #E1BEE7
+
+    rectangle "AI выделяет\nключевые технические\nхарактеристики" as SPECS #E1BEE7
+
+    rectangle "AI определяет\nкакие параметры критичны\nдля совместимости" as CRITICAL #E1BEE7
+
+    rectangle "AI формирует\nпоисковые запросы" as QUERYGEN #E1BEE7
+
+    rectangle "AI формирует\nописание позиции\nдля запроса поставщику" as RFQDESC #E1BEE7
+
+    AIITEM --> CLASSIFY
+    CLASSIFY --> SPECS
+    SPECS --> CRITICAL
+    CRITICAL --> QUERYGEN
+    CRITICAL --> RFQDESC
+}
+
+
+' ============================================================
+' AI 3 — ПОСТАВЩИКИ
+' ============================================================
+
+package "AI-ЭТАП 3. ПОИСК ПОСТАВЩИКОВ" #F3E5F5 {
+
+    rectangle "Внутренняя база\nпоставщиков" as INTERNALSUP #E1BEE7
+
+    rectangle "Внешний поиск\nпо доступным источникам" as INTERNET #E1BEE7
+
+    rectangle "AI ищет\nпоставщиков нужной\nноменклатуры" as AISEARCH #E1BEE7
+
+    rectangle "AI собирает\nкандидатов" as CANDIDATES #E1BEE7
+
+    rectangle "AI проверяет\nрелевантность поставщика\nконкретной позиции" as RELEVANCE #E1BEE7
+
+    rectangle "Результат:\nсписок поставщиков\nдля запроса КП" as SUPRESULT #E1BEE7
+
+    INTERNALSUP --> AISEARCH
+    INTERNET --> AISEARCH
+    AISEARCH --> CANDIDATES
+    CANDIDATES --> RELEVANCE
+    RELEVANCE --> SUPRESULT
+}
+
+
+' ============================================================
+' AI 4 — ЗАПРОС КП
+' ============================================================
+
+package "AI-ЭТАП 4. АВТОМАТИЗАЦИЯ ЗАПРОСОВ ПОСТАВЩИКАМ" #F3E5F5 {
+
+    rectangle "Выбранные\nпоставщики" as SUPLIST #E1BEE7
+
+    rectangle "AI генерирует\nтекст запроса КП" as AIRFQ #E1BEE7
+
+    rectangle "Автоподстановка\n\nПозиции\nКоличество\nАртикулы\nХарактеристики\nСрок ответа" as RFQDATA #E1BEE7
+
+    rectangle "Готовое письмо /\nзапрос поставщику" as LETTER #E1BEE7
+
+    rectangle "Закупщик проверяет\nперед отправкой" as HUMANRFQ #D1C4E9
+
+    SUPLIST --> AIRFQ
+    AIRFQ --> RFQDATA
+    RFQDATA --> LETTER
+    LETTER --> HUMANRFQ
+}
+
+
+' ============================================================
+' AI 5 — КП
+' ============================================================
+
+package "AI-ЭТАП 5. АВТОМАТИЧЕСКИЙ РАЗБОР КОММЕРЧЕСКИХ ПРЕДЛОЖЕНИЙ" #F3E5F5 {
+
+    rectangle "Полученное КП\n\nPDF\nExcel\nWord\nТекст письма" as KP #E1BEE7
+
+    rectangle "AI извлекает\n\nПозицию\nЦену\nНДС\nКоличество\nНаличие\nСрок\nДоставку\nУсловия оплаты" as KPPARSE #E1BEE7
+
+    rectangle "AI сопоставляет\nстроки КП с TaskItem" as KPMATCH #E1BEE7
+
+    rectangle "Автоматически создаётся\nSupplierOffer" as AIOFFER #E1BEE7
+
+    rectangle "Закупщик проверяет\nраспознанные данные" as HUMANKP #D1C4E9
+
+    KP --> KPPARSE
+    KPPARSE --> KPMATCH
+    KPMATCH --> AIOFFER
+    AIOFFER --> HUMANKP
+}
+
+
+' ============================================================
+' AI 6 — СРАВНЕНИЕ
+' ============================================================
+
+package "AI-ЭТАП 6. ИНТЕЛЛЕКТУАЛЬНОЕ СРАВНЕНИЕ ПРЕДЛОЖЕНИЙ" #F3E5F5 {
+
+    rectangle "Все SupplierOffer" as ALLKP #E1BEE7
+
+    rectangle "Цена товара" as C1 #E1BEE7
+    rectangle "Стоимость доставки" as C2 #E1BEE7
+    rectangle "Срок поставки" as C3 #E1BEE7
+    rectangle "Наличие" as C4 #E1BEE7
+    rectangle "Условия оплаты" as C5 #E1BEE7
+    rectangle "История поставщика" as C6 #E1BEE7
+    rectangle "Фактическая надёжность" as C7 #E1BEE7
+
+    rectangle "AI рассчитывает\nсовокупную привлекательность\nпредложения" as SCORE #E1BEE7
+
+    rectangle "AI формирует рейтинг\nпоставщиков" as RANK #E1BEE7
+
+    ALLKP --> C1
+    ALLKP --> C2
+    ALLKP --> C3
+    ALLKP --> C4
+    ALLKP --> C5
+    ALLKP --> C6
+    ALLKP --> C7
+
+    C1 --> SCORE
+    C2 --> SCORE
+    C3 --> SCORE
+    C4 --> SCORE
+    C5 --> SCORE
+    C6 --> SCORE
+    C7 --> SCORE
+
+    SCORE --> RANK
+}
+
+
+' ============================================================
+' AI 7 — АНАЛОГИ
+' ============================================================
+
+package "AI-ЭТАП 7. ПОИСК АНАЛОГОВ И ЗАМЕН" #F3E5F5 {
+
+    rectangle "Исходная позиция" as ORIGINAL #E1BEE7
+
+    rectangle "Нет в наличии /\nслишком дорого /\nслишком долго" as NEEDANALOG #E1BEE7
+
+    rectangle "AI ищет возможные\nаналоги" as SEARCHANALOG #E1BEE7
+
+    rectangle "Сравнение характеристик\n\nРазмеры\nМатериал\nНапряжение\nДавление\nМощность\nСтандарт\nСовместимость\nи др." as COMPATIBILITY #E1BEE7
+
+    rectangle "AI объясняет\n\nЧто совпадает\nЧто отличается\nКакие есть риски" as ANALOGEXPLAIN #E1BEE7
+
+    rectangle "Инженер / закупщик\nподтверждает допустимость\nзамены" as HUMANANALOG #D1C4E9
+
+    ORIGINAL --> NEEDANALOG
+    NEEDANALOG --> SEARCHANALOG
+    SEARCHANALOG --> COMPATIBILITY
+    COMPATIBILITY --> ANALOGEXPLAIN
+    ANALOGEXPLAIN --> HUMANANALOG
+}
+
+
+' ============================================================
+' AI 8 — РИСК
+' ============================================================
+
+package "AI-ЭТАП 8. АНАЛИЗ РИСКОВ" #F3E5F5 {
+
+    rectangle "Исторические данные" as RISKDATA #E1BEE7
+
+    rectangle "AI ищет признаки риска\n\nПодозрительно низкая цена\nБольшой срок\nНет истории\nЧастые отмены\nПросрочки\nИзменение условий" as RISKAI #E1BEE7
+
+    rectangle "Risk Score\n\nНизкий\nСредний\nВысокий" as RISKSCORE #E1BEE7
+
+    rectangle "Предупреждение\nзакупщику" as WARNING #E1BEE7
+
+    RISKDATA --> RISKAI
+    RISKAI --> RISKSCORE
+    RISKSCORE --> WARNING
+}
+
+
+' ============================================================
+' AI 9 — РЕКОМЕНДАЦИЯ
+' ============================================================
+
+package "AI-ЭТАП 9. ГЛАВНЫЙ AI-ПОМОЩНИК ЗАКУПЩИКА" #EDE7F6 {
+
+    rectangle "Данные позиции" as RD1 #D1C4E9
+    rectangle "Все КП" as RD2 #D1C4E9
+    rectangle "История цен" as RD3 #D1C4E9
+    rectangle "История поставщиков" as RD4 #D1C4E9
+    rectangle "Срок закупки" as RD5 #D1C4E9
+    rectangle "Риски" as RD6 #D1C4E9
+    rectangle "Возможные аналоги" as RD7 #D1C4E9
+
+    rectangle "AI PROCUREMENT COPILOT\n\nАнализирует всю информацию\nпо закупке" as COPILOT #B39DDB
+
+    rectangle "Рекомендация\n\nКакого поставщика выбрать" as REC1 #E1BEE7
+
+    rectangle "Обоснование\n\nПочему именно его" as REC2 #E1BEE7
+
+    rectangle "Альтернативный вариант\n\nЕсли приоритет — цена /\nскорость / надёжность" as REC3 #E1BEE7
+
+    rectangle "Риски решения" as REC4 #E1BEE7
+
+    rectangle "Уверенность AI\nи недостающие данные" as REC5 #E1BEE7
+
+    RD1 --> COPILOT
+    RD2 --> COPILOT
+    RD3 --> COPILOT
+    RD4 --> COPILOT
+    RD5 --> COPILOT
+    RD6 --> COPILOT
+    RD7 --> COPILOT
+
+    COPILOT --> REC1
+    COPILOT --> REC2
+    COPILOT --> REC3
+    COPILOT --> REC4
+    COPILOT --> REC5
+}
+
+
+' ============================================================
+' AI 10 — ЧАТ
+' ============================================================
+
+package "AI-ЭТАП 10. ЧАТ-АССИСТЕНТ ВНУТРИ СИСТЕМЫ" #F3E5F5 {
+
+    rectangle "Закупщик задаёт вопрос\nобычным языком" as CHAT #E1BEE7
+
+    rectangle "«Какие закупки просрочены?»" as Q1 #E1BEE7
+    rectangle "«Где ждём КП?»" as Q2 #E1BEE7
+    rectangle "«Кто дешевле по этому клапану?»" as Q3 #E1BEE7
+    rectangle "«Что нужно сделать сегодня?»" as Q4 #E1BEE7
+    rectangle "«Покажи проблемных поставщиков»" as Q5 #E1BEE7
+    rectangle "«Найди похожую прошлую закупку»" as Q6 #E1BEE7
+    rectangle "«Почему AI рекомендует этого поставщика?»" as Q7 #E1BEE7
+
+    rectangle "RAG / база данных /\nистория закупок" as RAG #E1BEE7
+
+    rectangle "AI отвечает на основании\nреальных данных системы" as CHATANSWER #E1BEE7
+
+    CHAT --> RAG
+
+    Q1 --> CHAT
+    Q2 --> CHAT
+    Q3 --> CHAT
+    Q4 --> CHAT
+    Q5 --> CHAT
+    Q6 --> CHAT
+    Q7 --> CHAT
+
+    RAG --> CHATANSWER
+}
+
+
+' ============================================================
+' AI 11 — КОНТРОЛЬ
+' ============================================================
+
+package "AI-ЭТАП 11. ПРОАКТИВНЫЙ КОНТРОЛЬ ЗАКУПОК" #F3E5F5 {
+
+    rectangle "AI регулярно анализирует\nактивные закупки" as MONITOR #E1BEE7
+
+    rectangle "Просрочен ответ\nпоставщика" as ALERT1 #E1BEE7
+
+    rectangle "Не проверена оплата" as ALERT2 #E1BEE7
+
+    rectangle "Поставщик должен был\nуже отгрузить товар" as ALERT3 #E1BEE7
+
+    rectangle "Срок поставки угрожает\nдедлайну закупки" as ALERT4 #E1BEE7
+
+    rectangle "Нет следующего действия" as ALERT5 #E1BEE7
+
+    rectangle "AI предлагает\nследующее действие" as NEXTAI #E1BEE7
+
+    rectangle "Умные напоминания\nзакупщику" as REMINDERS #E1BEE7
+
+    MONITOR --> ALERT1
+    MONITOR --> ALERT2
+    MONITOR --> ALERT3
+    MONITOR --> ALERT4
+    MONITOR --> ALERT5
+
+    ALERT1 --> NEXTAI
+    ALERT2 --> NEXTAI
+    ALERT3 --> NEXTAI
+    ALERT4 --> NEXTAI
+    ALERT5 --> NEXTAI
+
+    NEXTAI --> REMINDERS
+}
+
+
+' ============================================================
+' AI 12 — АНАЛИТИКА
+' ============================================================
+
+package "AI-ЭТАП 12. АНАЛИТИКА И НАКОПЛЕНИЕ ОПЫТА" #F3E5F5 {
+
+    rectangle "Все завершённые закупки" as FINISHED #E1BEE7
+
+    rectangle "AI анализирует\nдинамику цен" as ANALYTICS1 #E1BEE7
+
+    rectangle "AI анализирует\nреальные сроки поставки" as ANALYTICS2 #E1BEE7
+
+    rectangle "AI оценивает\nпоставщиков" as ANALYTICS3 #E1BEE7
+
+    rectangle "AI ищет повторяющиеся\nзакупки" as ANALYTICS4 #E1BEE7
+
+    rectangle "AI находит возможности\nэкономии" as ANALYTICS5 #E1BEE7
+
+    rectangle "Система становится лучше\nс накоплением истории" as EXPERIENCE #E1BEE7
+
+    FINISHED --> ANALYTICS1
+    FINISHED --> ANALYTICS2
+    FINISHED --> ANALYTICS3
+    FINISHED --> ANALYTICS4
+    FINISHED --> ANALYTICS5
+
+    ANALYTICS1 --> EXPERIENCE
+    ANALYTICS2 --> EXPERIENCE
+    ANALYTICS3 --> EXPERIENCE
+    ANALYTICS4 --> EXPERIENCE
+    ANALYTICS5 --> EXPERIENCE
+}
+
+
+' ============================================================
+' AI АРХИТЕКТУРА
+' ============================================================
+
+package "ТЕХНИЧЕСКАЯ AI-АРХИТЕКТУРА" #E3F2FD {
+
+    rectangle "LLM\n\nЛокальная модель\nили API-модель" as LLM #BBDEFB
+
+    rectangle "Document Parser\n\nPDF / DOCX / XLSX /\nтекстовые документы" as PARSER #BBDEFB
+
+    rectangle "Embeddings" as EMBEDDINGS #BBDEFB
+
+    rectangle "RAG" as RAGTECH #BBDEFB
+
+    rectangle "PostgreSQL\nданные системы" as PG #BBDEFB
+
+    rectangle "Векторный поиск\nпо знаниям и истории" as VECTOR #BBDEFB
+
+    rectangle "Поисковые интеграции\nдля поиска поставщиков\nи информации о товарах" as SEARCHTOOLS #BBDEFB
+
+    rectangle "Rule Engine\n\nЖёсткие бизнес-правила\nи ограничения" as RULES #BBDEFB
+
+    rectangle "AI Service\nNestJS" as AISERVICE #90CAF9
+
+    LLM --> AISERVICE
+    PARSER --> AISERVICE
+    EMBEDDINGS --> RAGTECH
+    VECTOR --> RAGTECH
+    PG --> RAGTECH
+    RAGTECH --> AISERVICE
+    SEARCHTOOLS --> AISERVICE
+    RULES --> AISERVICE
+}
+
+
+' ============================================================
+' БЕЗОПАСНОСТЬ AI
+' ============================================================
+
+package "ПРИНЦИП HUMAN-IN-THE-LOOP" #E0F2F1 {
+
+    rectangle "AI МОЖЕТ\n\nИскать\nИзвлекать данные\nСравнивать\nРанжировать\nПредлагать\nОбъяснять\nПредупреждать\nГотовить документы" as AICAN #B2DFDB
+
+    rectangle "AI НЕ ДОЛЖЕН САМОВОЛЬНО\n\nПодтверждать технический аналог\nВыбирать критичную замену\nПодтверждать оплату\nЗакрывать финансовое решение\nсовершать критические действия" as AICANNOT #FFCDD2
+
+    rectangle "Критическое решение\nподтверждает человек" as HUMANFINAL #C8E6C9
+
+    AICAN --> HUMANFINAL
+    AICANNOT --> HUMANFINAL
+}
+
+
+' ============================================================
+' ЭТАП ПРОДУКТА
+' ============================================================
+
+package "ФИНАЛЬНАЯ ПОДГОТОВКА ПРОДУКТА" #E3F2FD {
+
+    rectangle "Авторизация\nи роли пользователей" as AUTH #BBDEFB
+
+    rectangle "Логи и аудит" as AUDIT #BBDEFB
+
+    rectangle "Обработка ошибок" as ERRORS #BBDEFB
+
+    rectangle "Unit + Integration + E2E" as FULLTEST #BBDEFB
+
+    rectangle "Резервное копирование БД" as BACKUP #BBDEFB
+
+    rectangle "Docker / Deployment" as DEPLOY #BBDEFB
+
+    rectangle "Документация API\nи системы" as DOC #BBDEFB
+
+    rectangle "Демонстрационный\nнабор данных" as DEMODATA #BBDEFB
+
+    rectangle "Метрики эффективности\nAI и всей системы" as METRICS #BBDEFB
+
+    AUTH --> AUDIT
+    AUDIT --> ERRORS
+    ERRORS --> FULLTEST
+    FULLTEST --> BACKUP
+    BACKUP --> DEPLOY
+    DEPLOY --> DOC
+    DOC --> DEMODATA
+    DEMODATA --> METRICS
+}
+
+
+' ============================================================
+' ВКР — ЭКСПЕРИМЕНТ
+' ============================================================
+
+package "ЭКСПЕРИМЕНТАЛЬНАЯ ЧАСТЬ ВКР" #FFF8E1 {
+
+    rectangle "Контрольный набор\nреальных / тестовых закупок" as EXPDATA #FFF3CD
+
+    rectangle "Работа без AI" as NOAI #FFF3CD
+
+    rectangle "Работа с AI" as WITHAI #FFF3CD
+
+    rectangle "Сравнить\n\nВремя обработки\nКоличество ручных действий\nТочность извлечения данных\nКачество рекомендаций\nКоличество найденных вариантов" as COMPARISON #FFF3CD
+
+    rectangle "Оценить эффект\nвнедрения интеллектуальной\nсистемы" as RESULTEXP #FFF3CD
+
+    EXPDATA --> NOAI
+    EXPDATA --> WITHAI
+    NOAI --> COMPARISON
+    WITHAI --> COMPARISON
+    COMPARISON --> RESULTEXP
+}
+
+
+' ============================================================
+' ФИНАЛ
+' ============================================================
+
+rectangle "ПОЛНОЦЕННЫЙ РЕЗУЛЬТАТ\n\nИНТЕЛЛЕКТУАЛЬНЫЙ ПОМОЩНИК ЗАКУПЩИКА\n\n1. Получает ведомость / заявку\n2. Выделяет закупаемые позиции\n3. Нормализует характеристики\n4. Ищет подходящих поставщиков\n5. Помогает запросить КП\n6. Разбирает полученные КП\n7. Сравнивает предложения\n8. Ищет возможные аналоги\n9. Анализирует риски\n10. Рекомендует лучший вариант\n11. Объясняет свою рекомендацию\n12. Контролирует оплату и поставку\n13. Напоминает о проблемах\n14. Сохраняет историю\n15. Использует прошлый опыт\n\nЧеловек контролирует критические решения." as FINAL #A5D6A7
+
+
+' ============================================================
+' ГЛАВНАЯ ЦЕПОЧКА РАЗРАБОТКИ
+' ============================================================
+
+GOAL ==> ARCH
+
+ACTIVITY ==> ITEM
+ITEMTEST ==> SUPPLIER
+SELECTOFFER ==> PO
+PAY ==> POHISTORY
+CHANGESUP ==> TESTSTATUS
+
+TESTSTATUS ==> NOW
+
+NOW ==> WORKPLACE : следующий этап
+WORKPLACE ==> SHIPPING
+CLOSED ==> KNOWLEDGE
+
+KNOWLEDGE ==> DOCS : начинаем AI-слой
+
+HUMAN1 ==> AIITEM
+QUERYGEN ==> AISEARCH
+RFQDESC ==> AIRFQ
+SUPRESULT ==> SUPLIST
+HUMANRFQ ==> KP
+HUMANKP ==> ALLKP
+
+RANK ==> COPILOT
+HUMANANALOG ==> COPILOT
+WARNING ==> COPILOT
+
+COPILOT ==> HUMANFINAL
+
+HUMANFINAL ==> SHIPPING : подтверждённое решение
+
+KNOWLEDGE ==> RAG
+KNOWLEDGE ==> RISKDATA
+KNOWLEDGE ==> FINISHED
+
+AISERVICE ==> COPILOT
+AISERVICE ==> AIPARSE
+AISERVICE ==> AISEARCH
+AISERVICE ==> KPPARSE
+AISERVICE ==> SEARCHANALOG
+AISERVICE ==> MONITOR
+AISERVICE ==> CHATANSWER
+
+EXPERIENCE ==> FINAL
+CHATANSWER ==> FINAL
+REMINDERS ==> FINAL
+METRICS ==> FINAL
+RESULTEXP ==> FINAL
+
+
+' ============================================================
+' ЛЕГЕНДА
+' ============================================================
+
+legend bottom
+|= Цвет |= Состояние |
+|<#C8E6C9>| Уже реализовано / работает |
+|<#FFF59D>| Текущая точка проекта |
+|<#FFE0B2>| Следующие этапы обычной системы |
+|<#E1BEE7>| AI-функциональность |
+|<#BBDEFB>| Техническая инфраструктура / финальная подготовка |
+|<#FFCDD2>| Ограничения, ошибки или запрещённые AI-действия |
+|<#A5D6A7>| Конечный результат |
+endlegend
+
+@enduml

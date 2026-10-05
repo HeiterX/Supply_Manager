@@ -1,0 +1,5 @@
+cd ~/projects/supply-manager/apps/web
+npm run dev -- -p 3001
+
+cd ~/projects/supply-manager/apps/api
+npm run start:dev
