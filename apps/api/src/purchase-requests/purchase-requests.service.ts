@@ -8,6 +8,7 @@ import {
 import { join } from 'node:path';
 
 import {
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -232,6 +233,103 @@ export class PurchaseRequestsService {
       mimeType:
         item.photoMimeType ?? 'application/octet-stream',
     };
+  }
+
+  async accept(user: AuthUser, id: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const purchaseRequest = await tx.purchaseRequest.findUnique({
+        where: { id },
+        include: {
+          requester: {
+            select: {
+              fullName: true,
+            },
+          },
+          items: {
+            orderBy: [
+              { sortOrder: 'asc' },
+              { createdAt: 'asc' },
+            ],
+          },
+        },
+      });
+
+      if (!purchaseRequest) {
+        throw new NotFoundException('Заявка не найдена');
+      }
+
+      /*
+       * Повторное нажатие не должно создавать вторую закупку.
+       */
+      if (purchaseRequest.taskId) {
+        return tx.purchaseRequest.findUnique({
+          where: { id },
+          include: requestInclude,
+        });
+      }
+
+      if (
+        purchaseRequest.status === 'REJECTED' ||
+        purchaseRequest.status === 'CANCELLED'
+      ) {
+        throw new ConflictException(
+          'Эту заявку нельзя принять в работу',
+        );
+      }
+
+      const requesterName =
+        purchaseRequest.requesterName?.trim() ||
+        purchaseRequest.requester?.fullName ||
+        'Не указан';
+
+      const taskDescription = [
+        purchaseRequest.description?.trim(),
+        `Исходная заявка №${purchaseRequest.number}`,
+        `Заявитель: ${requesterName}`,
+      ]
+        .filter(Boolean)
+        .join('\n\n');
+
+      const task = await tx.task.create({
+        data: {
+          title: purchaseRequest.title,
+          description: taskDescription,
+          priority: purchaseRequest.priority,
+          deadline: purchaseRequest.requiredAt,
+          nextAction: 'Начать поиск поставщиков',
+
+          items: {
+            create: purchaseRequest.items.map((item) => ({
+              name: item.name,
+              partNumber: item.partNumber,
+              quantity: item.quantity,
+              unit: item.unit,
+              notes: item.notes,
+              sortOrder: item.sortOrder,
+            })),
+          },
+
+          activities: {
+            create: {
+              text:
+                `Закупка создана из заявки №${purchaseRequest.number}. ` +
+                `Заявитель: ${requesterName}`,
+            },
+          },
+        },
+      });
+
+      return tx.purchaseRequest.update({
+        where: { id },
+        data: {
+          status: 'CONVERTED',
+          taskId: task.id,
+          processedById: user.id,
+          processedAt: new Date(),
+        },
+        include: requestInclude,
+      });
+    });
   }
 
   async findMine(user: AuthUser) {

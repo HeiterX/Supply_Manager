@@ -4,6 +4,7 @@ import {
   Get,
   HttpStatus,
   Param,
+  Patch,
   ParseFilePipeBuilder,
   Post,
   Res,
@@ -118,6 +119,16 @@ export class PurchaseRequestsController {
   @Roles('PROCUREMENT', 'ADMIN')
   findAll() {
     return this.purchaseRequestsService.findAll();
+  }
+
+  @Patch(':id/accept')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('PROCUREMENT', 'ADMIN')
+  accept(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+  ) {
+    return this.purchaseRequestsService.accept(user, id);
   }
 
   @Get(':id')

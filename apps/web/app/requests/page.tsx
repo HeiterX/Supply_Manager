@@ -431,7 +431,21 @@ export default function RequestsPage() {
       ) : (
         <div className="mt-5 space-y-4">
           {filteredRequests.map((request) => (
-            <RequestCard key={request.id} request={request} />
+            <RequestCard
+              key={request.id}
+              request={request}
+              onAccepted={(updatedRequest) => {
+                setRequests((current) =>
+                  current.map((item) =>
+                    item.id === updatedRequest.id ? updatedRequest : item,
+                  ),
+                );
+
+                // После принятия статус станет CONVERTED.
+                // Показываем все заявки, чтобы карточка не исчезла.
+                setOnlyNew(false);
+              }}
+            />
           ))}
         </div>
       )}
@@ -465,8 +479,63 @@ function StatCard({
   );
 }
 
-function RequestCard({ request }: { request: PurchaseRequest }) {
+function RequestCard({
+  request,
+  onAccepted,
+}: {
+  request: PurchaseRequest;
+  onAccepted: (request: PurchaseRequest) => void;
+}) {
   const [expanded, setExpanded] = useState(request.status === 'NEW');
+  const [accepting, setAccepting] = useState(false);
+  const [acceptError, setAcceptError] = useState('');
+
+  async function handleAccept() {
+    if (accepting) return;
+
+    setAccepting(true);
+    setAcceptError('');
+
+    try {
+      const response = await fetch(
+        `${API_URL}/purchase-requests/${request.id}/accept`,
+        {
+          method: 'PATCH',
+          credentials: 'include',
+        },
+      );
+
+      const data = (await response.json().catch(() => null)) as unknown;
+
+      if (response.status === 401) {
+        throw new Error(
+          'Сессия истекла. Обновите страницу и войдите снова.',
+        );
+      }
+
+      if (response.status === 403) {
+        throw new Error(
+          'Недостаточно прав для принятия заявки.',
+        );
+      }
+
+      if (!response.ok) {
+        throw new Error(
+          getErrorMessage(data, 'Не удалось принять заявку в работу'),
+        );
+      }
+
+      onAccepted(data as PurchaseRequest);
+    } catch (requestError) {
+      setAcceptError(
+        requestError instanceof Error
+          ? requestError.message
+          : 'Не удалось принять заявку в работу',
+      );
+    } finally {
+      setAccepting(false);
+    }
+  }
 
   const statusClass =
     statusStyles[request.status] ??
@@ -589,14 +658,22 @@ function RequestCard({ request }: { request: PurchaseRequest }) {
                 Следующий этап — принятие заявки и создание закупки.
               </p>
 
-              <button
-                type="button"
-                disabled
-                title="Подключим на следующем этапе"
-                className="h-11 rounded-xl bg-blue-600 px-5 text-sm font-semibold text-white opacity-50"
-              >
-                Принять в работу
-              </button>
+              <div className="sm:text-right">
+                <button
+                  type="button"
+                  onClick={() => void handleAccept()}
+                  disabled={accepting}
+                  className="h-11 w-full rounded-xl bg-blue-600 px-5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+                >
+                  {accepting ? 'Принимаем...' : 'Принять в работу'}
+                </button>
+
+                {acceptError && (
+                  <p className="mt-2 max-w-sm text-sm leading-5 text-red-600">
+                    {acceptError}
+                  </p>
+                )}
+              </div>
             </div>
           )}
         </div>
