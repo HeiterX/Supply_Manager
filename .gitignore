@@ -19,4 +19,4 @@ out/
 .vscode/
 
 # Prisma generated client
-apps/api/src/generated/prisma/
+apps/api/src/generated/prisma/apps/api/.env.test
