@@ -16,6 +16,7 @@ import {
 
 import type { AuthUser } from '../auth/auth.types.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { TelegramService } from '../telegram/telegram.service.js';
 import type {
   CreatePublicPurchaseRequestDto,
   CreatePurchaseRequestDto,
@@ -60,7 +61,10 @@ const requestInclude = {
 
 @Injectable()
 export class PurchaseRequestsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly telegramService: TelegramService,
+  ) {}
 
   /*
    * Существующее создание заявки зарегистрированным пользователем.
@@ -99,32 +103,50 @@ export class PurchaseRequestsService {
   async createPublic(dto: CreatePublicPurchaseRequestDto) {
     const firstItem = dto.items[0];
 
-    return this.prisma.purchaseRequest.create({
-      data: {
-        requesterName: dto.requesterName.trim(),
+    const purchaseRequest =
+      await this.prisma.purchaseRequest.create({
+        data: {
+          requesterName: dto.requesterName.trim(),
 
-        /*
-         * title нужен существующей внутренней модели.
-         * Для простой формы автоматически используем
-         * название первой позиции.
-         */
-        title: firstItem.name.trim(),
+          /*
+           * title нужен существующей внутренней модели.
+           * Для простой формы автоматически используем
+           * название первой позиции.
+           */
+          title: firstItem.name.trim(),
 
-        priority: 'NORMAL',
-        status: 'NEW',
+          priority: 'NORMAL',
+          status: 'NEW',
 
-        items: {
-          create: dto.items.map((item, index) => ({
-            name: item.name.trim(),
-            quantity: item.quantity,
-            unit: item.unit.trim(),
-            notes: this.optionalText(item.description),
-            sortOrder: index,
-          })),
+          items: {
+            create: dto.items.map((item, index) => ({
+              name: item.name.trim(),
+              quantity: item.quantity,
+              unit: item.unit.trim(),
+              notes: this.optionalText(item.description),
+              sortOrder: index,
+            })),
+          },
         },
-      },
-      include: requestInclude,
-    });
+        include: requestInclude,
+      });
+
+    /*
+     * Telegram — только дополнительный канал уведомления.
+     * Ошибка Telegram не должна отменять уже созданную заявку.
+     */
+    try {
+      await this.telegramService.sendNewPurchaseRequest(
+        purchaseRequest,
+      );
+    } catch (error) {
+      console.error(
+        `Не удалось отправить Telegram-уведомление о заявке №${purchaseRequest.number}:`,
+        error,
+      );
+    }
+
+    return purchaseRequest;
   }
 
   /*
