@@ -38,6 +38,17 @@ enum SupplierOfferStatus {
   REJECTED
 }
 
+enum PurchaseOrderStatus {
+  ORDERED
+  WAITING_PAYMENT
+  WAITING_SHIPMENT
+  IN_TRANSIT
+  READY_FOR_PICKUP
+  RECEIVED
+  HANDED_OVER
+  CANCELLED
+}
+
 enum UserRole {
   EMPLOYEE
   PROCUREMENT
@@ -122,6 +133,12 @@ model TaskItem {
   currency   String   @default("RUB")
   notes      String?
   sortOrder  Int      @default(0)
+
+  // Предложения поставщиков по этой позиции
+  supplierOfferItems SupplierOfferItem[]
+
+  // В какие реальные заказы вошла эта позиция
+  purchaseOrderItems PurchaseOrderItem[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -208,6 +225,9 @@ model SupplierOffer {
   // Все попытки заказа, оформленные на основании этого предложения
   purchaseOrders PurchaseOrder[]
 
+  // Позиции, которые поставщик предлагает в рамках этого предложения
+  items SupplierOfferItem[]
+
   @@index([taskId])
   @@index([supplierId])
   @@index([status])
@@ -215,6 +235,9 @@ model SupplierOffer {
 
 model PurchaseOrder {
   id String @id @default(uuid())
+
+  // Собственный этап конкретного заказа у поставщика
+  status PurchaseOrderStatus @default(ORDERED)
 
   // Одна закупка может иметь несколько попыток заказа
   taskId String
@@ -284,12 +307,16 @@ model PurchaseOrder {
   cancelledAt  DateTime?
   cancelReason String?
 
+  // Конкретные позиции, вошедшие в этот заказ
+  items PurchaseOrderItem[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([taskId])
   @@index([supplierId])
   @@index([supplierOfferId])
+  @@index([status])
   @@index([orderedAt])
   @@index([cancelledAt])
 }
@@ -400,4 +427,69 @@ model PurchaseRequestItem {
 
   @@index([requestId])
   @@index([name])
+}
+
+// Позиция коммерческого предложения поставщика.
+// Один поставщик может предложить только часть исходной ведомости.
+model SupplierOfferItem {
+  id String @id @default(uuid())
+
+  supplierOfferId String
+  supplierOffer   SupplierOffer @relation(fields: [supplierOfferId], references: [id], onDelete: Cascade)
+
+  taskItemId String
+  taskItem   TaskItem @relation(fields: [taskItemId], references: [id], onDelete: Cascade)
+
+  // Какое количество этой позиции готов предложить поставщик
+  quantity Decimal @db.Decimal(14, 3)
+
+  // Цена за единицу именно у этого поставщика
+  unitPrice Decimal? @db.Decimal(14, 2)
+  currency  String   @default("RUB")
+
+  inStock Boolean?
+  notes   String?
+
+  // Заказы, созданные на основании этой строки предложения
+  purchaseOrderItems PurchaseOrderItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([supplierOfferId, taskItemId])
+  @@index([taskItemId])
+}
+
+// Конкретная позиция внутри заказа поставщику.
+// Здесь хранится снимок данных на момент оформления заказа,
+// поэтому последующее редактирование TaskItem не изменит историю заказа.
+model PurchaseOrderItem {
+  id String @id @default(uuid())
+
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+
+  // Исходная позиция закупки.
+  // Связь nullable, чтобы история заказа сохранилась даже при удалении позиции.
+  taskItemId String?
+  taskItem   TaskItem? @relation(fields: [taskItemId], references: [id], onDelete: SetNull)
+
+  // Строка предложения, из которой сформирован заказ
+  supplierOfferItemId String?
+  supplierOfferItem   SupplierOfferItem? @relation(fields: [supplierOfferItemId], references: [id], onDelete: SetNull)
+
+  // Снимок позиции на момент заказа
+  name       String
+  partNumber String?
+  quantity   Decimal  @db.Decimal(14, 3)
+  unit       String
+  unitPrice  Decimal? @db.Decimal(14, 2)
+  currency   String   @default("RUB")
+  notes      String?
+
+  createdAt DateTime @default(now())
+
+  @@index([purchaseOrderId])
+  @@index([taskItemId])
+  @@index([supplierOfferItemId])
 }
