@@ -6,25 +6,10 @@ import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 're
 import AppShell from '../../components/AppShell';
 
 type Activity = { id: string; taskId: string; text: string; createdAt: string };
-type Supplier = { id: string; name: string; contact: string | null; phone: string | null; email: string | null; website: string | null; notes: string | null };
-type SupplierOffer = {
-  id: string; status: string; price: string | null; deliveryPrice: string | null; deliveryDays: number | null;
-  inStock: boolean | null; notes: string | null; requestedAt: string; receivedAt: string | null; supplier: Supplier;
-};
-type PurchaseOrder = {
-  id: string; taskId: string; supplierId: string; supplierOfferId: string;
-  price: string | null; deliveryPrice: string | null; totalPrice: string | null; deliveryDays: number | null;
-  invoiceNumber: string | null; invoiceDate: string | null; notes: string | null; orderedAt: string;
-  sentToPaymentAt: string | null; paidAt: string | null; shippedAt: string | null; carrier: string | null;
-  trackingNumber: string | null; expectedDeliveryAt: string | null; readyForPickupAt: string | null;
-  receivedAt: string | null; handedOverAt: string | null; handedOverTo: string | null;
-  cancelledAt?: string | null; cancelReason?: string | null; createdAt: string; updatedAt: string;
-  supplier: Supplier; supplierOffer: SupplierOffer;
-};
-type TaskItem = {
-  id: string; taskId: string; name: string; partNumber: string | null; quantity: string | number; unit: string;
-  unitPrice: string | number | null; currency: string; notes: string | null; sortOrder: number; createdAt: string; updatedAt: string;
-};
+import ProcurementWorkspace, {
+  type SupplierOffer, type PurchaseOrder, type TaskItem,
+} from './ProcurementWorkspace';
+
 type Task = {
   id: string; number: number; title: string; description: string | null; status: string; priority: string;
   deadline: string | null; nextAction: string | null; reminderAt: string | null; createdAt: string; updatedAt: string; closedAt: string | null;
@@ -248,7 +233,7 @@ export default function TaskPage() {
   }
   useEffect(() => { void loadTask(); }, [taskId]);
 
-  async function apiAction(path: string, init: RequestInit, success: string) {
+  async function apiAction(path: string, init: RequestInit, success: string, onFailure?: (message: string) => void) {
     setBusy(true); setMessage(''); setActionError('');
     try {
       const response = await fetch(`${API_URL}/tasks/${taskId}${path}`, init);
@@ -257,7 +242,21 @@ export default function TaskPage() {
         throw new Error(text || 'Ошибка запроса');
       }
       await loadTask(); setMessage(success); return true;
-    } catch (error) { console.error(error); setActionError('Не удалось выполнить действие. Проверьте данные и повторите.'); return false; }
+    } catch (error) {
+      console.error(error);
+      let message = 'Не удалось выполнить действие. Проверьте данные и повторите.';
+      if (error instanceof Error) {
+        try {
+          const parsed = JSON.parse(error.message);
+          const details = parsed.message;
+          if (Array.isArray(details)) message = details.join('; ');
+          else if (typeof details === 'string') message = details;
+        } catch { /* network error */ }
+      }
+      setActionError(message);
+      onFailure?.(message);
+      return false;
+    }
     finally { setBusy(false); }
   }
 
@@ -360,8 +359,33 @@ export default function TaskPage() {
     if (ok) setActivityText('');
   }
 
+  // Legacy orders have no line items; keep their original UI and endpoints.
+  const legacyMode = Boolean(task?.purchaseOrders?.some(order =>
+    !order.cancelledAt && (!order.items || order.items.length === 0)));
+
   const progress = useMemo(() => {
     if (!task) return [];
+    if (!legacyMode) {
+      const active = (task.purchaseOrders ?? []).filter(order => !order.cancelledAt);
+      const ordered = new Map<string, number>();
+      const handed = new Map<string, number>();
+      for (const order of active) for (const item of order.items ?? []) {
+        if (!item.taskItemId) continue;
+        ordered.set(item.taskItemId, (ordered.get(item.taskItemId) ?? 0) + Number(item.quantity));
+        if (order.status === 'HANDED_OVER') handed.set(item.taskItemId, (handed.get(item.taskItemId) ?? 0) + Number(item.quantity));
+      }
+      const allOrdered = task.items.length > 0 && task.items.every(item =>
+        Math.round((ordered.get(item.id) ?? 0) * 1000) >= Math.round(Number(item.quantity) * 1000));
+      const allHanded = task.items.length > 0 && task.items.every(item =>
+        Math.round((handed.get(item.id) ?? 0) * 1000) >= Math.round(Number(item.quantity) * 1000));
+      return [
+        ['Карточка создана', task.createdAt, true],
+        ['Получены предложения', task.supplierOffers[0]?.receivedAt ?? null, task.supplierOffers.length > 0],
+        ['Все позиции заказаны', null, allOrdered],
+        ['Все позиции переданы', null, allHanded],
+        ['Закупка закрыта', task.closedAt, task.status === 'CLOSED'],
+      ] as Array<[string, string | null, boolean]>;
+    }
     const po = task.purchaseOrder;
     return [
       ['Карточка создана', task.createdAt, true],
@@ -375,7 +399,7 @@ export default function TaskPage() {
       ['Передано', po?.handedOverAt ?? null, Boolean(po?.handedOverAt)],
       ['Закрыто', task.closedAt, task.status === 'CLOSED'],
     ] as Array<[string, string | null, boolean]>;
-  }, [task]);
+  }, [task, legacyMode]);
 
   const currentProgressIndex = useMemo(() => {
     const firstIncomplete = progress.findIndex(([, , done]) => !done);
@@ -551,6 +575,15 @@ export default function TaskPage() {
 
   function CurrentAction() {
     if (!task) return null;
+    if (!legacyMode) {
+      if (task.status === 'CLOSED') return <div className="rounded-xl bg-emerald-50 px-4 py-3 text-center text-sm font-semibold text-emerald-700">Закупка завершена</div>;
+      if (task.status === 'CANCELLED') return null;
+      const activeOrders = (task.purchaseOrders ?? []).filter(order => !order.cancelledAt);
+      return <button onClick={() => setActiveTab(activeOrders.length ? 'order' : 'offers')}
+        className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-700">
+        {activeOrders.length ? 'Управлять заказами поставщиков' : 'Добавить предложение поставщика'}
+      </button>;
+    }
     const status = task.status;
     const base = 'w-full rounded-xl px-4 py-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50';
     if (status === 'NEW' || status === 'SEARCHING') return <button onClick={() => setActiveTab('offers')} className={`${base} bg-blue-600 text-white hover:bg-blue-700`}>Добавить / выбрать поставщика</button>;
@@ -569,8 +602,13 @@ export default function TaskPage() {
   if (loading) return <AppShell title="Закупка"><div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500">Загружаем карточку...</div></AppShell>;
   if (loadError || !task) return <AppShell title="Закупка"><div className="rounded-2xl border border-rose-200 bg-rose-50 p-5 text-rose-700">{loadError || 'Закупка не найдена'}</div></AppShell>;
 
+  const lockedItemIds = new Set((task.purchaseOrders ?? [])
+    .filter(order => !order.cancelledAt)
+    .flatMap(order => (order.items ?? []).map(line => line.taskItemId)));
+  const itemLocked = (id: string) => lockedItemIds.has(id) || task.status === 'CLOSED' || task.status === 'CANCELLED';
+
   const tabDefs: Array<[Tab, string, number | null]> = [
-    ['overview', 'Обзор', null], ['items', 'Позиции', task.items.length], ['offers', 'Предложения', task.supplierOffers.length], ['order', 'Заказ', task.purchaseOrder ? 1 : null], ['history', 'История', task.activities.length],
+    ['overview', 'Обзор', null], ['items', 'Позиции', task.items.length], ['offers', 'Предложения', task.supplierOffers.length], ['order', 'Заказы', task.purchaseOrders?.length ?? 0], ['history', 'История', task.activities.length],
   ];
 
   return (
@@ -636,7 +674,12 @@ export default function TaskPage() {
                 })}
               </div>
             </section>
-            {task.purchaseOrder && <section className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm"><div className="text-sm font-semibold">Заказ и логистика</div><dl className="mt-4 space-y-3 text-sm"><div className="flex justify-between gap-4"><dt className="text-slate-400">Поставщик</dt><dd className="text-right font-medium">{task.purchaseOrder.supplier.name}</dd></div><div className="flex justify-between gap-4"><dt className="text-slate-400">Счёт</dt><dd className="text-right font-medium">{task.purchaseOrder.invoiceNumber || '—'}</dd></div><div className="flex justify-between gap-4"><dt className="text-slate-400">Сумма</dt><dd className="text-right font-medium">{formatMoney(task.purchaseOrder.totalPrice)}</dd></div>{task.purchaseOrder.carrier && <div className="flex justify-between gap-4"><dt className="text-slate-400">Перевозчик</dt><dd className="text-right font-medium">{task.purchaseOrder.carrier}</dd></div>}{task.purchaseOrder.trackingNumber && <div className="flex justify-between gap-4"><dt className="text-slate-400">Трек / ТТН</dt><dd className="text-right font-medium text-blue-700">{task.purchaseOrder.trackingNumber}</dd></div>}</dl><button onClick={() => setActiveTab('order')} className="mt-5 w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold hover:bg-slate-50">Открыть заказ</button></section>}
+            {!legacyMode && (task.purchaseOrders?.length ?? 0) > 0 && <section className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
+              <h3 className="text-sm font-semibold">Заказы поставщикам</h3>
+              <p className="mt-2 text-sm text-slate-500">Действующих: {(task.purchaseOrders ?? []).filter(o => !o.cancelledAt).length} · Всего с отменёнными: {task.purchaseOrders?.length ?? 0}</p>
+              <button onClick={() => setActiveTab('order')} className="mt-4 w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold hover:bg-slate-50">Открыть все заказы</button>
+            </section>}
+            {legacyMode && task.purchaseOrder && <section className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm"><div className="text-sm font-semibold">Заказ и логистика</div><dl className="mt-4 space-y-3 text-sm"><div className="flex justify-between gap-4"><dt className="text-slate-400">Поставщик</dt><dd className="text-right font-medium">{task.purchaseOrder.supplier.name}</dd></div><div className="flex justify-between gap-4"><dt className="text-slate-400">Счёт</dt><dd className="text-right font-medium">{task.purchaseOrder.invoiceNumber || '—'}</dd></div><div className="flex justify-between gap-4"><dt className="text-slate-400">Сумма</dt><dd className="text-right font-medium">{formatMoney(task.purchaseOrder.totalPrice)}</dd></div>{task.purchaseOrder.carrier && <div className="flex justify-between gap-4"><dt className="text-slate-400">Перевозчик</dt><dd className="text-right font-medium">{task.purchaseOrder.carrier}</dd></div>}{task.purchaseOrder.trackingNumber && <div className="flex justify-between gap-4"><dt className="text-slate-400">Трек / ТТН</dt><dd className="text-right font-medium text-blue-700">{task.purchaseOrder.trackingNumber}</dd></div>}</dl><button onClick={() => setActiveTab('order')} className="mt-5 w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold hover:bg-slate-50">Открыть заказ</button></section>}
           </aside>
         </div>
       )}
@@ -651,7 +694,7 @@ export default function TaskPage() {
               </p>
             </div>
             <button
-              onClick={openNewItem}
+              onClick={openNewItem} disabled={task.status === 'CLOSED' || task.status === 'CANCELLED'}
               className="shrink-0 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700"
             >
               ＋ Добавить позицию
@@ -770,10 +813,10 @@ export default function TaskPage() {
                               {total === null ? '—' : formatMoney(total, item.currency || 'RUB')}
                             </td>
                             <td className="whitespace-nowrap px-5 py-4 text-right">
-                              <button onClick={() => openEditItem(item)} className="rounded-lg px-2.5 py-1.5 text-sm font-semibold text-blue-600 transition hover:bg-blue-50">
+                              <button disabled={itemLocked(item.id)} title={itemLocked(item.id) ? 'Позиция уже в действующем заказе или закупка закрыта' : undefined} onClick={() => openEditItem(item)} className="rounded-lg px-2.5 py-1.5 text-sm font-semibold text-blue-600 transition hover:bg-blue-50">
                                 Изменить
                               </button>
-                              <button onClick={() => void deleteItem(item)} className="ml-1 rounded-lg px-2.5 py-1.5 text-sm font-medium text-slate-400 transition hover:bg-rose-50 hover:text-rose-600">
+                              <button disabled={itemLocked(item.id)} title={itemLocked(item.id) ? 'Позиция уже в действующем заказе или закупка закрыта' : undefined} onClick={() => void deleteItem(item)} className="ml-1 rounded-lg px-2.5 py-1.5 text-sm font-medium text-slate-400 transition hover:bg-rose-50 hover:text-rose-600">
                                 Удалить
                               </button>
                             </td>
@@ -822,10 +865,10 @@ export default function TaskPage() {
                         {item.notes && <div className="mt-3 rounded-xl bg-slate-50 px-3 py-2.5 text-sm text-slate-500">{item.notes}</div>}
 
                         <div className="mt-4 flex gap-2">
-                          <button onClick={() => openEditItem(item)} className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700">
+                          <button disabled={itemLocked(item.id)} title={itemLocked(item.id) ? 'Позиция уже в действующем заказе или закупка закрыта' : undefined} onClick={() => openEditItem(item)} className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700">
                             Изменить
                           </button>
-                          <button onClick={() => void deleteItem(item)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-400" aria-label={`Удалить ${item.name}`}>
+                          <button disabled={itemLocked(item.id)} title={itemLocked(item.id) ? 'Позиция уже в действующем заказе или закупка закрыта' : undefined} onClick={() => void deleteItem(item)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-400" aria-label={`Удалить ${item.name}`}>
                             Удалить
                           </button>
                         </div>
@@ -839,7 +882,7 @@ export default function TaskPage() {
         </section>
       )}
 
-      {activeTab === 'offers' && (
+      {activeTab === 'offers' && legacyMode && (
         <section className="space-y-5">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
@@ -1091,7 +1134,7 @@ export default function TaskPage() {
         </section>
       )}
 
-      {activeTab === 'order' && (
+      {activeTab === 'order' && legacyMode && (
         <section className="space-y-5">
           {!task.purchaseOrder ? (
             <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center">
@@ -1413,6 +1456,16 @@ export default function TaskPage() {
         </section>
       )}
 
+      {!legacyMode && (activeTab === 'offers' || activeTab === 'order') && (
+        <ProcurementWorkspace
+          task={task}
+          mode={activeTab === 'offers' ? 'offers' : 'orders'}
+          busy={busy}
+          onAction={apiAction}
+          onNavigate={(next) => setActiveTab(next === 'orders' ? 'order' : 'offers')}
+        />
+      )}
+
       {activeTab === 'history' && (
         <section className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
           <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm">
@@ -1698,7 +1751,7 @@ export default function TaskPage() {
         </Modal>
       )}
 
-      {supplierFormOpen && (
+      {legacyMode && supplierFormOpen && (
         <Modal title="Новое предложение поставщика" onClose={() => setSupplierFormOpen(false)}>
           <form onSubmit={addSupplier} className="space-y-5">
             <div>
@@ -1792,7 +1845,7 @@ export default function TaskPage() {
         </Modal>
       )}
 
-      {orderFormOpen && task.selectedOffer && (
+      {legacyMode && orderFormOpen && task.selectedOffer && (
         <Modal title={`Оформить заказ у «${task.selectedOffer.supplier.name}»`} onClose={() => setOrderFormOpen(false)}>
           <form onSubmit={createOrder} className="space-y-5">
             <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
@@ -1856,7 +1909,7 @@ export default function TaskPage() {
         </Modal>
       )}
 
-      {shipModalOpen && (
+      {legacyMode && shipModalOpen && (
         <Modal title="Подтвердить отгрузку" onClose={() => setShipModalOpen(false)}>
           <form onSubmit={submitShipment} className="space-y-5">
             <div className="rounded-xl bg-blue-50 px-4 py-3 text-sm text-blue-800">
@@ -1916,9 +1969,9 @@ export default function TaskPage() {
         </Modal>
       )}
 
-      {handOverModalOpen && <Modal title="Передать товар" onClose={() => setHandOverModalOpen(false)}><form onSubmit={submitHandOver} className="space-y-4"><Field label="Кому передан товар *"><input autoFocus value={handedOverTo} onChange={(e) => setHandedOverTo(e.target.value)} placeholder="Механик Иванов И.И., склад №2..." className="input" /></Field><p className="text-sm text-slate-500">Дата и время передачи будут зафиксированы автоматически.</p><ModalActions busy={busy} onCancel={() => setHandOverModalOpen(false)} submitLabel="Подтвердить передачу" /></form></Modal>}
+      {legacyMode && handOverModalOpen && <Modal title="Передать товар" onClose={() => setHandOverModalOpen(false)}><form onSubmit={submitHandOver} className="space-y-4"><Field label="Кому передан товар *"><input autoFocus value={handedOverTo} onChange={(e) => setHandedOverTo(e.target.value)} placeholder="Механик Иванов И.И., склад №2..." className="input" /></Field><p className="text-sm text-slate-500">Дата и время передачи будут зафиксированы автоматически.</p><ModalActions busy={busy} onCancel={() => setHandOverModalOpen(false)} submitLabel="Подтвердить передачу" /></form></Modal>}
 
-      {cancelModalOpen && <Modal title="Отменить заказ" onClose={() => setCancelModalOpen(false)}><form onSubmit={cancelOrder} className="space-y-4"><div className="rounded-xl border border-rose-100 bg-rose-50 p-4 text-sm text-rose-700">Заказ останется в истории, а закупка вернётся к выбору поставщика.</div><Field label="Причина отмены *"><textarea autoFocus rows={3} value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} className="input resize-none" /></Field><ModalActions busy={busy} onCancel={() => setCancelModalOpen(false)} submitLabel="Отменить заказ" danger /></form></Modal>}
+      {legacyMode && cancelModalOpen && <Modal title="Отменить заказ" onClose={() => setCancelModalOpen(false)}><form onSubmit={cancelOrder} className="space-y-4"><div className="rounded-xl border border-rose-100 bg-rose-50 p-4 text-sm text-rose-700">Заказ останется в истории, а закупка вернётся к выбору поставщика.</div><Field label="Причина отмены *"><textarea autoFocus rows={3} value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} className="input resize-none" /></Field><ModalActions busy={busy} onCancel={() => setCancelModalOpen(false)} submitLabel="Отменить заказ" danger /></form></Modal>}
 
       <style jsx global>{`
         .input { width: 100%; border-radius: 0.75rem; border: 1px solid rgb(226 232 240); padding: 0.75rem 0.875rem; font-size: 0.875rem; outline: none; background: white; }

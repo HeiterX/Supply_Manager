@@ -1,10 +1,25 @@
+import { Type } from 'class-transformer';
 import {
+  IsArray,
   IsDateString,
+  IsNumber,
   IsOptional,
+  IsPositive,
   IsString,
+  IsUUID,
   MaxLength,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
+
+export class CreatePurchaseOrderItemDto {
+  @IsUUID()
+  supplierOfferItemId!: string;
+
+  @IsNumber({ maxDecimalPlaces: 3 })
+  @IsPositive()
+  quantity!: number;
+}
 
 export class CreatePurchaseOrderDto {
   @IsString()
@@ -26,4 +41,16 @@ export class CreatePurchaseOrderDto {
   @IsString()
   @MaxLength(2000)
   notes?: string;
+
+  /*
+   * Для нового многопоставочного сценария.
+   *
+   * Пока поле необязательное, чтобы старый endpoint
+   * оформления заказа продолжал работать.
+   */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreatePurchaseOrderItemDto)
+  items?: CreatePurchaseOrderItemDto[];
 }

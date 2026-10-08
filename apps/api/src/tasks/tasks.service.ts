@@ -59,6 +59,14 @@ export class TasksService {
         supplierOffers: {
           include: {
             supplier: true,
+            items: {
+              include: {
+                taskItem: true,
+              },
+              orderBy: {
+                createdAt: 'asc',
+              },
+            },
           },
           orderBy: {
             createdAt: 'desc',
@@ -67,18 +75,36 @@ export class TasksService {
         selectedOffer: {
           include: {
             supplier: true,
+            items: {
+              include: {
+                taskItem: true,
+              },
+              orderBy: {
+                createdAt: 'asc',
+              },
+            },
           },
         },
         purchaseOrder: {
           include: {
             supplier: true,
             supplierOffer: true,
+            items: {
+              orderBy: {
+                createdAt: 'asc',
+              },
+            },
           },
         },
         purchaseOrders: {
           include: {
             supplier: true,
             supplierOffer: true,
+            items: {
+              orderBy: {
+                createdAt: 'asc',
+              },
+            },
           },
           orderBy: {
             createdAt: 'desc',
@@ -107,6 +133,17 @@ export class TasksService {
       throw new BadRequestException(
         'Закупку нельзя закрыть вручную. Используйте действие «Закрыть закупку» после передачи товара',
       );
+    }
+
+    if (dto.status !== undefined) {
+      const hasMultiOrders = await this.prisma.purchaseOrder.findFirst({
+        where: { taskId: id, items: { some: {} } }, select: { id: true },
+      });
+      if (hasMultiOrders) throw new ConflictException('Этап многопоставочной закупки меняется через действия с заказами');
+    }
+
+    if (currentTask.status === 'CLOSED' && dto.status !== undefined) {
+      throw new ConflictException('Закрытую закупку нельзя повторно открыть вручную');
     }
 
     const nextStatus = dto.status ?? currentTask.status;
@@ -253,6 +290,7 @@ export class TasksService {
 
   async addTaskItem(taskId: string, dto: CreateTaskItemDto) {
     await this.ensureTaskExists(taskId);
+    await this.ensureTaskOpen(taskId);
 
     const name = dto.name.trim();
     const unit = dto.unit.trim();
@@ -308,6 +346,7 @@ export class TasksService {
     dto: UpdateTaskItemDto,
   ) {
     await this.ensureTaskExists(taskId);
+    await this.ensureTaskOpen(taskId);
 
     const currentItem = await this.prisma.taskItem.findFirst({
       where: { id: itemId, taskId },
@@ -316,6 +355,12 @@ export class TasksService {
     if (!currentItem) {
       throw new NotFoundException('Позиция закупки не найдена');
     }
+
+    const activeLine = await this.prisma.purchaseOrderItem.findFirst({
+      where: { taskItemId: itemId, purchaseOrder: { taskId, cancelledAt: null } },
+      select: { id: true },
+    });
+    if (activeLine) throw new ConflictException('Позицию с действующим заказом нельзя изменить или удалить. Сначала отмените неоплаченный заказ');
 
     const name = dto.name !== undefined ? dto.name.trim() : undefined;
     const unit = dto.unit !== undefined ? dto.unit.trim() : undefined;
@@ -363,6 +408,7 @@ export class TasksService {
 
   async deleteTaskItem(taskId: string, itemId: string) {
     await this.ensureTaskExists(taskId);
+    await this.ensureTaskOpen(taskId);
 
     const item = await this.prisma.taskItem.findFirst({
       where: { id: itemId, taskId },
@@ -371,6 +417,12 @@ export class TasksService {
     if (!item) {
       throw new NotFoundException('Позиция закупки не найдена');
     }
+
+    const activeLine = await this.prisma.purchaseOrderItem.findFirst({
+      where: { taskItemId: itemId, purchaseOrder: { taskId, cancelledAt: null } },
+      select: { id: true },
+    });
+    if (activeLine) throw new ConflictException('Позицию с действующим заказом нельзя изменить или удалить. Сначала отмените неоплаченный заказ');
 
     return this.prisma.$transaction(async (tx) => {
       const deletedItem = await tx.taskItem.delete({
@@ -392,48 +444,199 @@ export class TasksService {
     taskId: string,
     dto: CreateSupplierOfferDto,
   ) {
-    await this.ensureTaskExists(taskId);
+    const task = await this.prisma.task.findUnique({ where: { id: taskId }, select: { status: true } });
+    if (!task) throw new NotFoundException('Закупка не найдена');
+    if (task.status === 'CLOSED' || task.status === 'CANCELLED') {
+      throw new ConflictException('Нельзя добавлять КП к закрытой или отменённой закупке');
+    }
 
-    return this.prisma.$transaction(async (tx) => {
-      const supplier = await tx.supplier.create({
-        data: {
-          name: dto.supplierName.trim(),
-          contact: dto.contact?.trim() || null,
-          phone: dto.phone?.trim() || null,
-          email: dto.email?.trim() || null,
-          website: dto.website?.trim() || null,
-        },
-      });
+    const supplierName = dto.supplierName.trim();
 
-      const offer = await tx.supplierOffer.create({
-        data: {
-          taskId,
-          supplierId: supplier.id,
-          status: 'OFFER_RECEIVED',
-          price: dto.price,
-          deliveryPrice: dto.deliveryPrice,
-          deliveryDays: dto.deliveryDays,
-          inStock: dto.inStock,
-          notes: dto.notes?.trim() || null,
-          receivedAt: new Date(),
-        },
-        include: {
-          supplier: true,
-        },
-      });
+    if (!supplierName) {
+      throw new BadRequestException(
+        'Укажите наименование поставщика',
+      );
+    }
 
-      await tx.taskActivity.create({
-        data: {
-          taskId,
-          text: `Добавлено предложение поставщика «${supplier.name}»`,
-        },
-      });
+    const offerItems = dto.items ?? [];
 
-      return offer;
-    });
+    const taskItemIds = offerItems.map(
+      (item) => item.taskItemId,
+    );
+
+    if (
+      new Set(taskItemIds).size !==
+      taskItemIds.length
+    ) {
+      throw new BadRequestException(
+        'Одна позиция закупки не может повторяться в одном предложении поставщика',
+      );
+    }
+
+    if (taskItemIds.length > 0) {
+      const taskItems =
+        await this.prisma.taskItem.findMany({
+          where: {
+            taskId,
+            id: {
+              in: taskItemIds,
+            },
+          },
+          select: {
+            id: true,
+            name: true,
+            quantity: true,
+          },
+        });
+
+      if (
+        taskItems.length !==
+        taskItemIds.length
+      ) {
+        throw new BadRequestException(
+          'Одна или несколько позиций предложения не относятся к этой закупке',
+        );
+      }
+      const taskItemMap = new Map<string, (typeof taskItems)[number]>(taskItems.map(item => [item.id, item]));
+      for (const line of offerItems) {
+        const item = taskItemMap.get(line.taskItemId);
+        if (!item) continue;
+        if (Math.round(line.quantity * 1000) > Math.round(item.quantity.toNumber() * 1000)) {
+          throw new BadRequestException(`По позиции «${item.name}» предложение превышает требуемое количество`);
+        }
+      }
+    }
+
+    /*
+     * Если для всех строк указана цена,
+     * общую стоимость товара рассчитываем автоматически.
+     *
+     * Старое dto.price пока сохраняется как fallback,
+     * чтобы существующий frontend продолжал работать.
+     */
+    const canCalculatePrice =
+      offerItems.length > 0 &&
+      offerItems.every(
+        (item) => item.unitPrice !== undefined,
+      );
+
+    const calculatedPrice = canCalculatePrice
+      ? offerItems.reduce(
+          (sum, item) =>
+            sum +
+            item.quantity *
+              (item.unitPrice ?? 0),
+          0,
+        )
+      : undefined;
+
+    return this.prisma.$transaction(
+      async (tx) => {
+        const supplier =
+          await tx.supplier.create({
+            data: {
+              name: supplierName,
+              contact:
+                dto.contact?.trim() || null,
+              phone:
+                dto.phone?.trim() || null,
+              email:
+                dto.email?.trim() || null,
+              website:
+                dto.website?.trim() || null,
+            },
+          });
+
+        const offer =
+          await tx.supplierOffer.create({
+            data: {
+              taskId,
+              supplierId: supplier.id,
+              status: 'OFFER_RECEIVED',
+
+              price:
+                calculatedPrice ??
+                dto.price,
+
+              deliveryPrice:
+                dto.deliveryPrice,
+
+              deliveryDays:
+                dto.deliveryDays,
+
+              inStock:
+                dto.inStock,
+
+              notes:
+                dto.notes?.trim() || null,
+
+              receivedAt: new Date(),
+
+              items:
+                offerItems.length > 0
+                  ? {
+                      create:
+                        offerItems.map(
+                          (item) => ({
+                            taskItemId:
+                              item.taskItemId,
+
+                            quantity:
+                              item.quantity,
+
+                            unitPrice:
+                              item.unitPrice,
+
+                            currency:
+                              item.currency
+                                ?.trim()
+                                .toUpperCase() ||
+                              'RUB',
+
+                            inStock:
+                              item.inStock,
+
+                            notes:
+                              item.notes?.trim() ||
+                              null,
+                          }),
+                        ),
+                    }
+                  : undefined,
+            },
+
+            include: {
+              supplier: true,
+
+              items: {
+                include: {
+                  taskItem: true,
+                },
+
+                orderBy: {
+                  createdAt: 'asc',
+                },
+              },
+            },
+          });
+
+        await tx.taskActivity.create({
+          data: {
+            taskId,
+            text:
+              offerItems.length > 0
+                ? `Добавлено предложение поставщика «${supplier.name}» — ${offerItems.length} поз.`
+                : `Добавлено предложение поставщика «${supplier.name}»`,
+          },
+        });
+
+        return offer;
+      },
+    );
   }
 
   async selectSupplierOffer(taskId: string, offerId: string) {
+    await this.ensureLegacyOrderFlow(taskId);
   await this.ensureTaskExists(taskId);
 
   const existingOrder = await this.prisma.purchaseOrder.findFirst({
@@ -554,6 +757,7 @@ export class TasksService {
     taskId: string,
     dto: CreatePurchaseOrderDto,
   ) {
+    await this.ensureLegacyOrderFlow(taskId);
     const task = await this.prisma.task.findUnique({
       where: {
         id: taskId,
@@ -656,6 +860,7 @@ export class TasksService {
   }
 
   async sendPurchaseOrderToPayment(taskId: string) {
+    await this.ensureLegacyOrderFlow(taskId);
     const task = await this.prisma.task.findUnique({
       where: {
         id: taskId,
@@ -787,6 +992,7 @@ export class TasksService {
   }
 
   async cancelPurchaseOrder(taskId: string, reason?: string) {
+    await this.ensureLegacyOrderFlow(taskId);
     const cancelReason = reason?.trim();
 
     if (!cancelReason) {
@@ -908,6 +1114,7 @@ export class TasksService {
   }
 
   async confirmPurchaseOrderPayment(taskId: string) {
+    await this.ensureLegacyOrderFlow(taskId);
     const task = await this.prisma.task.findUnique({
       where: { id: taskId },
       include: {
@@ -1018,6 +1225,7 @@ export class TasksService {
 
 
   async shipPurchaseOrder(taskId: string, dto: ShipPurchaseOrderDto) {
+    await this.ensureLegacyOrderFlow(taskId);
     const task = await this.prisma.task.findUnique({
       where: { id: taskId },
       include: {
@@ -1146,6 +1354,7 @@ export class TasksService {
   }
 
   async markPurchaseOrderReadyForPickup(taskId: string) {
+    await this.ensureLegacyOrderFlow(taskId);
     const task = await this.prisma.task.findUnique({
       where: { id: taskId },
       include: {
@@ -1258,6 +1467,7 @@ export class TasksService {
   }
 
   async receivePurchaseOrder(taskId: string) {
+    await this.ensureLegacyOrderFlow(taskId);
     const task = await this.prisma.task.findUnique({
       where: { id: taskId },
       include: {
@@ -1374,6 +1584,7 @@ export class TasksService {
     taskId: string,
     dto: HandOverPurchaseOrderDto,
   ) {
+    await this.ensureLegacyOrderFlow(taskId);
     const task = await this.prisma.task.findUnique({
       where: { id: taskId },
       include: {
@@ -1480,6 +1691,7 @@ export class TasksService {
   }
 
   async closePurchaseOrder(taskId: string) {
+    await this.ensureLegacyOrderFlow(taskId);
     const task = await this.prisma.task.findUnique({
       where: { id: taskId },
       include: {
@@ -1613,6 +1825,24 @@ export class TasksService {
         createdAt: 'desc',
       },
     });
+  }
+
+  private async ensureTaskOpen(taskId: string) {
+    const task = await this.prisma.task.findUnique({ where: { id: taskId }, select: { status: true } });
+    if (!task) throw new NotFoundException('Закупка не найдена');
+    if (task.status === 'CLOSED' || task.status === 'CANCELLED') {
+      throw new ConflictException('Нельзя изменять позиции закрытой или отменённой закупки');
+    }
+  }
+
+  private async ensureLegacyOrderFlow(taskId: string) {
+    const multiOrder = await this.prisma.purchaseOrder.findFirst({
+      where: { taskId, items: { some: {} } },
+      select: { id: true },
+    });
+    if (multiOrder) {
+      throw new ConflictException('Для этой закупки используйте действия с отдельными заказами поставщиков');
+    }
   }
 
   private async ensureTaskExists(id: string) {

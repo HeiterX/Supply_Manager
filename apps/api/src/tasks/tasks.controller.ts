@@ -18,10 +18,14 @@ import { ShipPurchaseOrderDto } from './dto/ship-purchase-order.dto.js';
 import { UpdateTaskDto } from './dto/update-task.dto.js';
 import { UpdateTaskItemDto } from './dto/update-task-item.dto.js';
 import { TasksService } from './tasks.service.js';
+import { MultiOrdersService } from './multi-orders.service.js';
 
 @Controller('tasks')
 export class TasksController {
-  constructor(private readonly tasksService: TasksService) {}
+  constructor(
+    private readonly tasksService: TasksService,
+    private readonly multiOrders: MultiOrdersService,
+  ) {}
 
   @Post()
   create(@Body() dto: CreateTaskDto) {
@@ -94,12 +98,47 @@ export class TasksController {
     return this.tasksService.addSupplierOffer(id, dto);
   }
 
+  @Patch(':taskId/supplier-offers/:offerId')
+  updateSupplierOffer(
+    @Param('taskId') taskId: string,
+    @Param('offerId') offerId: string,
+    @Body() dto: CreateSupplierOfferDto,
+  ) {
+    return this.multiOrders.updateOffer(taskId, offerId, dto);
+  }
+
   @Patch(':taskId/supplier-offers/:offerId/select')
   selectSupplierOffer(
     @Param('taskId') taskId: string,
     @Param('offerId') offerId: string,
   ) {
     return this.tasksService.selectSupplierOffer(taskId, offerId);
+  }
+
+  @Post(
+    ':taskId/supplier-offers/:offerId/purchase-order',
+  )
+  createPurchaseOrderForOffer(
+    @Param('taskId') taskId: string,
+    @Param('offerId') offerId: string,
+    @Body() dto: CreatePurchaseOrderDto,
+  ) {
+    return this.multiOrders.createOrder(taskId, offerId, dto);
+  }
+
+  @Patch(':taskId/orders/close')
+  closeMultiSupplierTask(@Param('taskId') taskId: string) {
+    return this.multiOrders.closeTask(taskId);
+  }
+
+  @Patch(':taskId/orders/:orderId/:action')
+  changeSupplierOrder(
+    @Param('taskId') taskId: string,
+    @Param('orderId') orderId: string,
+    @Param('action') action: string,
+    @Body() body: Record<string, string>,
+  ) {
+    return this.multiOrders.action(taskId, orderId, action, body);
   }
 
   @Post(':id/purchase-order')
