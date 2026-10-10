@@ -15,9 +15,20 @@ export class PrismaService
       throw new Error('DATABASE_URL is not defined');
     }
 
-    const adapter = new PrismaPg({
-      connectionString,
-    });
+    const schema =
+      new URL(connectionString).searchParams.get('schema') ?? 'public';
+
+    // Never let test processes silently connect to the working schema.
+    if (process.env.NODE_ENV === 'test' && schema !== 'e2e') {
+      throw new Error(
+        `E2E-тесты должны использовать схему e2e, сейчас: ${schema}`,
+      );
+    }
+
+    const adapter = new PrismaPg(
+      { connectionString },
+      { schema },
+    );
 
     super({ adapter });
   }
