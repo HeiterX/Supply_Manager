@@ -20,3 +20,6 @@ out/
 
 # Prisma generated client
 apps/api/src/generated/prisma/apps/api/.env.test
+
+# Windows metadata
+*:Zone.Identifier
