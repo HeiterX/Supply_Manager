@@ -47,12 +47,12 @@ describe('Task items (e2e)', () => {
       });
     }
 
-    if (app) {
-      if (authUserId) {
+    if (authUserId) {
       await prisma.user.deleteMany({ where: { id: authUserId } });
     }
 
-    await app.close();
+    if (app) {
+      await app.close();
     }
   });
 
