@@ -3,14 +3,18 @@ import 'dotenv/config';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
+import cookieParser from 'cookie-parser';
 import { App } from 'supertest/types';
 
 import { AppModule } from './../src/app.module.js';
 import { PrismaService } from './../src/prisma/prisma.service.js';
+import { createAuthenticatedAgent } from './authenticated-agent.helper.js';
 
 describe('Task items (e2e)', () => {
   let app: INestApplication<App>;
   let prisma: PrismaService;
+  let client: ReturnType<typeof request.agent>;
+  let authUserId = '';
   let taskId: string | undefined;
 
   beforeAll(async () => {
@@ -20,6 +24,7 @@ describe('Task items (e2e)', () => {
 
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix('api/v1');
+    app.use(cookieParser());
     app.useGlobalPipes(
       new ValidationPipe({
         whitelist: true,
@@ -30,6 +35,9 @@ describe('Task items (e2e)', () => {
 
     await app.init();
     prisma = app.get(PrismaService);
+    const auth = await createAuthenticatedAgent(app, prisma, 'PROCUREMENT');
+    client = auth.client;
+    authUserId = auth.userId;
   });
 
   afterAll(async () => {
@@ -40,12 +48,16 @@ describe('Task items (e2e)', () => {
     }
 
     if (app) {
-      await app.close();
+      if (authUserId) {
+      await prisma.user.deleteMany({ where: { id: authUserId } });
+    }
+
+    await app.close();
     }
   });
 
   it('создаёт, изменяет и удаляет позиции закупки', async () => {
-    const createTaskResponse = await request(app.getHttpServer())
+    const createTaskResponse = await client
       .post('/api/v1/tasks')
       .send({
         title: 'E2E: позиции закупки',
@@ -55,7 +67,7 @@ describe('Task items (e2e)', () => {
 
     taskId = createTaskResponse.body.id;
 
-    const valveResponse = await request(app.getHttpServer())
+    const valveResponse = await client
       .post(`/api/v1/tasks/${taskId}/items`)
       .send({
         name: 'Регулирующий клапан',
@@ -74,7 +86,7 @@ describe('Task items (e2e)', () => {
     expect(Number(valveResponse.body.quantity)).toBe(2);
     expect(valveResponse.body.unit).toBe('шт.');
 
-    const gasketResponse = await request(app.getHttpServer())
+    const gasketResponse = await client
       .post(`/api/v1/tasks/${taskId}/items`)
       .send({
         name: 'Прокладка',
@@ -87,7 +99,7 @@ describe('Task items (e2e)', () => {
 
     const gasketId = gasketResponse.body.id;
 
-    await request(app.getHttpServer())
+    await client
       .post(`/api/v1/tasks/${taskId}/items`)
       .send({
         name: 'Масло',
@@ -97,7 +109,7 @@ describe('Task items (e2e)', () => {
       })
       .expect(201);
 
-    const itemsResponse = await request(app.getHttpServer())
+    const itemsResponse = await client
       .get(`/api/v1/tasks/${taskId}/items`)
       .expect(200);
 
@@ -108,13 +120,13 @@ describe('Task items (e2e)', () => {
       'Масло',
     ]);
 
-    const taskResponse = await request(app.getHttpServer())
+    const taskResponse = await client
       .get(`/api/v1/tasks/${taskId}`)
       .expect(200);
 
     expect(taskResponse.body.items).toHaveLength(3);
 
-    const updateResponse = await request(app.getHttpServer())
+    const updateResponse = await client
       .patch(`/api/v1/tasks/${taskId}/items/${valveId}`)
       .send({
         quantity: 3,
@@ -127,11 +139,11 @@ describe('Task items (e2e)', () => {
       'Количество изменено автоматическим E2E-тестом',
     );
 
-    await request(app.getHttpServer())
+    await client
       .delete(`/api/v1/tasks/${taskId}/items/${gasketId}`)
       .expect(200);
 
-    const afterDeleteResponse = await request(app.getHttpServer())
+    const afterDeleteResponse = await client
       .get(`/api/v1/tasks/${taskId}`)
       .expect(200);
 
@@ -155,7 +167,7 @@ describe('Task items (e2e)', () => {
       throw new Error('Тестовая задача не была создана');
     }
 
-    await request(app.getHttpServer())
+    await client
       .post(`/api/v1/tasks/${taskId}/items`)
       .send({
         name: '',
@@ -164,7 +176,7 @@ describe('Task items (e2e)', () => {
       })
       .expect(400);
 
-    await request(app.getHttpServer())
+    await client
       .post(`/api/v1/tasks/${taskId}/items`)
       .send({
         name: 'Некорректное количество',
@@ -173,7 +185,7 @@ describe('Task items (e2e)', () => {
       })
       .expect(400);
 
-    await request(app.getHttpServer())
+    await client
       .post(`/api/v1/tasks/${taskId}/items`)
       .send({
         name: 'Позиция без единицы измерения',
