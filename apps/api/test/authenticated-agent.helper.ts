@@ -16,7 +16,7 @@ export async function createAuthenticatedAgent(
   role: TestRole,
 ) {
   const client = request.agent(app.getHttpServer());
-  const username = `e2e_${role.toLowerCase()}_${randomUUID().replace(/-/g, '')}`;
+  const username = `e2e_${role.toLowerCase()}_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
   const password = 'Strong-Test-Password-2026';
 
   const registered = await client
