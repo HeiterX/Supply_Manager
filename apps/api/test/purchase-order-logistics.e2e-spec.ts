@@ -3,14 +3,18 @@ import 'dotenv/config';
 import { ValidationPipe, type INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
+import cookieParser from 'cookie-parser';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { AppModule } from '../src/app.module.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
+import { createAuthenticatedAgent } from './authenticated-agent.helper.js';
 
 describe('Purchase order logistics (e2e)', () => {
   let app: INestApplication;
   let prisma: PrismaService;
+  let client: ReturnType<typeof request.agent>;
+  let authUserId = '';
 
   let taskId = '';
   let supplierId = '';
@@ -22,6 +26,7 @@ describe('Purchase order logistics (e2e)', () => {
 
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix('api/v1');
+    app.use(cookieParser());
     app.useGlobalPipes(
       new ValidationPipe({
         whitelist: true,
@@ -31,6 +36,9 @@ describe('Purchase order logistics (e2e)', () => {
 
     await app.init();
     prisma = app.get(PrismaService);
+    const auth = await createAuthenticatedAgent(app, prisma, 'PROCUREMENT');
+    client = auth.client;
+    authUserId = auth.userId;
   });
 
   afterAll(async () => {
@@ -46,6 +54,10 @@ describe('Purchase order logistics (e2e)', () => {
         .catch(() => undefined);
     }
 
+    if (authUserId) {
+      await prisma.user.deleteMany({ where: { id: authUserId } });
+    }
+
     await app.close();
   });
 
@@ -53,7 +65,7 @@ describe('Purchase order logistics (e2e)', () => {
     /*
      * 1. Создаём закупку
      */
-    const taskResponse = await request(app.getHttpServer())
+    const taskResponse = await client
       .post('/api/v1/tasks')
       .send({
         title: `E2E logistics ${Date.now()}`,
@@ -67,7 +79,7 @@ describe('Purchase order logistics (e2e)', () => {
      * Нельзя вручную перескочить сразу в CLOSED
      * через обычное редактирование задачи.
      */
-    await request(app.getHttpServer())
+    await client
       .patch(`/api/v1/tasks/${taskId}`)
       .send({
         status: 'CLOSED',
@@ -77,7 +89,7 @@ describe('Purchase order logistics (e2e)', () => {
     /*
      * 2. Добавляем предложение поставщика
      */
-    const offerResponse = await request(app.getHttpServer())
+    const offerResponse = await client
       .post(`/api/v1/tasks/${taskId}/supplier-offers`)
       .send({
         supplierName: `E2E Logistics Supplier ${Date.now()}`,
@@ -94,14 +106,14 @@ describe('Purchase order logistics (e2e)', () => {
     /*
      * 3. Выбираем предложение
      */
-    await request(app.getHttpServer())
+    await client
       .patch(`/api/v1/tasks/${taskId}/supplier-offers/${offerId}/select`)
       .expect(200);
 
     /*
      * 4. Оформляем заказ
      */
-    await request(app.getHttpServer())
+    await client
       .post(`/api/v1/tasks/${taskId}/purchase-order`)
       .send({
         invoiceNumber: 'E2E-LOG-001',
@@ -112,7 +124,7 @@ describe('Purchase order logistics (e2e)', () => {
     /*
      * Нельзя закрыть закупку до передачи товара.
      */
-    await request(app.getHttpServer())
+    await client
       .patch(`/api/v1/tasks/${taskId}/purchase-order/close`)
       .expect(400);
 
@@ -122,15 +134,15 @@ describe('Purchase order logistics (e2e)', () => {
      * - подтвердить получение;
      * - передать товар.
      */
-    await request(app.getHttpServer())
+    await client
       .patch(`/api/v1/tasks/${taskId}/purchase-order/ready-for-pickup`)
       .expect(400);
 
-    await request(app.getHttpServer())
+    await client
       .patch(`/api/v1/tasks/${taskId}/purchase-order/receive`)
       .expect(400);
 
-    await request(app.getHttpServer())
+    await client
       .patch(`/api/v1/tasks/${taskId}/purchase-order/hand-over`)
       .send({
         handedOverTo: 'Механик Иванов И.И.',
@@ -140,14 +152,14 @@ describe('Purchase order logistics (e2e)', () => {
     /*
      * 5. Передаём счёт на оплату
      */
-    await request(app.getHttpServer())
+    await client
       .patch(`/api/v1/tasks/${taskId}/purchase-order/send-to-payment`)
       .expect(200);
 
     /*
      * 6. Подтверждаем оплату
      */
-    const paidResponse = await request(app.getHttpServer())
+    const paidResponse = await client
       .patch(`/api/v1/tasks/${taskId}/purchase-order/confirm-payment`)
       .expect(200);
 
@@ -163,7 +175,7 @@ describe('Purchase order logistics (e2e)', () => {
       shippedAt.getTime() + 3 * 24 * 60 * 60 * 1000,
     );
 
-    const shipResponse = await request(app.getHttpServer())
+    const shipResponse = await client
       .patch(`/api/v1/tasks/${taskId}/purchase-order/ship`)
       .send({
         shippedAt: shippedAt.toISOString(),
@@ -204,14 +216,14 @@ describe('Purchase order logistics (e2e)', () => {
      * Пока груз находится в пути,
      * подтвердить получение нельзя.
      */
-    await request(app.getHttpServer())
+    await client
       .patch(`/api/v1/tasks/${taskId}/purchase-order/receive`)
       .expect(400);
 
     /*
      * И передать его тоже нельзя.
      */
-    await request(app.getHttpServer())
+    await client
       .patch(`/api/v1/tasks/${taskId}/purchase-order/hand-over`)
       .send({
         handedOverTo: 'Механик Иванов И.И.',
@@ -221,14 +233,14 @@ describe('Purchase order logistics (e2e)', () => {
     /*
      * Закрыть закупку в пути тоже нельзя.
      */
-    await request(app.getHttpServer())
+    await client
       .patch(`/api/v1/tasks/${taskId}/purchase-order/close`)
       .expect(400);
 
     /*
      * 8. Груз прибывает
      */
-    const readyResponse = await request(app.getHttpServer())
+    const readyResponse = await client
       .patch(`/api/v1/tasks/${taskId}/purchase-order/ready-for-pickup`)
       .expect(200);
 
@@ -262,14 +274,14 @@ describe('Purchase order logistics (e2e)', () => {
     /*
      * Повторно отметить прибытие нельзя.
      */
-    await request(app.getHttpServer())
+    await client
       .patch(`/api/v1/tasks/${taskId}/purchase-order/ready-for-pickup`)
       .expect(409);
 
     /*
      * Товар ещё не получен — передавать его нельзя.
      */
-    await request(app.getHttpServer())
+    await client
       .patch(`/api/v1/tasks/${taskId}/purchase-order/hand-over`)
       .send({
         handedOverTo: 'Механик Иванов И.И.',
@@ -279,14 +291,14 @@ describe('Purchase order logistics (e2e)', () => {
     /*
      * Закрывать закупку тоже ещё нельзя.
      */
-    await request(app.getHttpServer())
+    await client
       .patch(`/api/v1/tasks/${taskId}/purchase-order/close`)
       .expect(400);
 
     /*
      * 9. Получаем товар
      */
-    const receiveResponse = await request(app.getHttpServer())
+    const receiveResponse = await client
       .patch(`/api/v1/tasks/${taskId}/purchase-order/receive`)
       .expect(200);
 
@@ -322,7 +334,7 @@ describe('Purchase order logistics (e2e)', () => {
     /*
      * Повторно получить товар нельзя.
      */
-    await request(app.getHttpServer())
+    await client
       .patch(`/api/v1/tasks/${taskId}/purchase-order/receive`)
       .expect(409);
 
@@ -330,14 +342,14 @@ describe('Purchase order logistics (e2e)', () => {
      * Пока товар не передан конечному получателю,
      * закупку закрыть нельзя.
      */
-    await request(app.getHttpServer())
+    await client
       .patch(`/api/v1/tasks/${taskId}/purchase-order/close`)
       .expect(400);
 
     /*
      * Пустой получатель должен отклоняться ValidationPipe.
      */
-    await request(app.getHttpServer())
+    await client
       .patch(`/api/v1/tasks/${taskId}/purchase-order/hand-over`)
       .send({
         handedOverTo: '',
@@ -347,7 +359,7 @@ describe('Purchase order logistics (e2e)', () => {
     /*
      * 10. Передаём товар конечному получателю
      */
-    const handOverResponse = await request(app.getHttpServer())
+    const handOverResponse = await client
       .patch(`/api/v1/tasks/${taskId}/purchase-order/hand-over`)
       .send({
         handedOverTo: 'Механик Иванов И.И.',
@@ -394,7 +406,7 @@ describe('Purchase order logistics (e2e)', () => {
     /*
      * 11. Повторная передача запрещена.
      */
-    await request(app.getHttpServer())
+    await client
       .patch(`/api/v1/tasks/${taskId}/purchase-order/hand-over`)
       .send({
         handedOverTo: 'Другой получатель',
@@ -404,7 +416,7 @@ describe('Purchase order logistics (e2e)', () => {
     /*
      * 12. Закрываем закупку.
      */
-    const closeResponse = await request(app.getHttpServer())
+    const closeResponse = await client
       .patch(`/api/v1/tasks/${taskId}/purchase-order/close`)
       .expect(200);
 
@@ -451,13 +463,13 @@ describe('Purchase order logistics (e2e)', () => {
     /*
      * 13. Повторно закрыть закупку нельзя.
      */
-    await request(app.getHttpServer())
+    await client
       .patch(`/api/v1/tasks/${taskId}/purchase-order/close`)
       .expect(409);
   });
 
   it('rejects shipping before payment confirmation', async () => {
-    const taskResponse = await request(app.getHttpServer())
+    const taskResponse = await client
       .post('/api/v1/tasks')
       .send({
         title: `E2E logistics invalid ${Date.now()}`,
@@ -470,7 +482,7 @@ describe('Purchase order logistics (e2e)', () => {
     let invalidSupplierId = '';
 
     try {
-      const offerResponse = await request(app.getHttpServer())
+      const offerResponse = await client
         .post(`/api/v1/tasks/${invalidTaskId}/supplier-offers`)
         .send({
           supplierName: `E2E Invalid Supplier ${Date.now()}`,
@@ -484,13 +496,13 @@ describe('Purchase order logistics (e2e)', () => {
       const offerId = offerResponse.body.id as string;
       invalidSupplierId = offerResponse.body.supplier.id as string;
 
-      await request(app.getHttpServer())
+      await client
         .patch(
           `/api/v1/tasks/${invalidTaskId}/supplier-offers/${offerId}/select`,
         )
         .expect(200);
 
-      await request(app.getHttpServer())
+      await client
         .post(`/api/v1/tasks/${invalidTaskId}/purchase-order`)
         .send({
           invoiceNumber: 'E2E-LOG-INVALID',
@@ -502,7 +514,7 @@ describe('Purchase order logistics (e2e)', () => {
        * Нельзя отметить заказ отгруженным,
        * пока оплата не подтверждена.
        */
-      await request(app.getHttpServer())
+      await client
         .patch(`/api/v1/tasks/${invalidTaskId}/purchase-order/ship`)
         .send({
           shippedAt: new Date().toISOString(),
@@ -513,7 +525,7 @@ describe('Purchase order logistics (e2e)', () => {
       /*
        * И тем более нельзя закрыть такую закупку.
        */
-      await request(app.getHttpServer())
+      await client
         .patch(`/api/v1/tasks/${invalidTaskId}/purchase-order/close`)
         .expect(400);
     } finally {

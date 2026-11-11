@@ -6,7 +6,12 @@ import {
   Param,
   Patch,
   Post,
+  UseGuards,
 } from '@nestjs/common';
+
+import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
+import { RolesGuard } from '../auth/roles.guard.js';
+import { Roles } from '../auth/roles.decorator.js';
 
 import { HandOverPurchaseOrderDto } from './dto/hand-over-purchase-order.dto.js';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto.js';
@@ -21,6 +26,8 @@ import { TasksService } from './tasks.service.js';
 import { MultiOrdersService } from './multi-orders.service.js';
 
 @Controller('tasks')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('PROCUREMENT', 'ADMIN')
 export class TasksController {
   constructor(
     private readonly tasksService: TasksService,
