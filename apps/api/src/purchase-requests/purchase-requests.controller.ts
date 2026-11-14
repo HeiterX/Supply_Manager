@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Header,
   Headers,
   HttpStatus,
   Param,
@@ -39,6 +40,7 @@ export class PurchaseRequestsController {
    * Регистрация и авторизация работнику не нужны.
    */
   @Post('public')
+  @Header('Cache-Control', 'no-store')
   @UseGuards(PublicRequestRateLimitGuard)
   createPublic(@Body() dto: CreatePublicPurchaseRequestDto) {
     return this.purchaseRequestsService.createPublic(dto);
