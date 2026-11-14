@@ -26,6 +26,8 @@ type CreatedRequest = {
   items: CreatedRequestItem[];
 };
 
+type CreatedRequestResponse = CreatedRequest & { uploadToken: string };
+
 function createEmptyItem(key = crypto.randomUUID()): RequestItem {
   return {
     key,
@@ -153,7 +155,7 @@ export default function RequestPage() {
   }
 
   async function uploadPhotos(
-    request: CreatedRequest,
+    request: CreatedRequestResponse,
     submittedItems: RequestItem[],
   ) {
     const orderedCreatedItems = [...request.items].sort(
@@ -178,6 +180,7 @@ export default function RequestPage() {
           `${API_URL}/purchase-requests/public/${request.id}/items/${createdItem.id}/photo`,
           {
             method: 'POST',
+            headers: { 'X-Upload-Token': request.uploadToken },
             body: formData,
           },
         );
@@ -269,7 +272,7 @@ export default function RequestPage() {
         throw new Error('Сервер вернул некорректный ответ');
       }
 
-      const request = data as CreatedRequest;
+      const request = data as CreatedRequestResponse;
 
       const failedPhotos = await uploadPhotos(
         request,
@@ -284,7 +287,12 @@ export default function RequestPage() {
         );
       }
 
-      setCreatedRequest(request);
+      // Do not retain the short-lived upload credential in React state.
+      setCreatedRequest({
+        id: request.id,
+        number: request.number,
+        items: request.items,
+      });
 
       window.scrollTo({
         top: 0,

@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   HttpStatus,
   Param,
   Patch,
@@ -25,6 +26,7 @@ import {
   CreatePurchaseRequestDto,
 } from './dto/create-purchase-request.dto.js';
 import { PurchaseRequestsService } from './purchase-requests.service.js';
+import { PublicRequestRateLimitGuard } from './public-request-rate-limit.guard.js';
 
 @Controller('purchase-requests')
 export class PurchaseRequestsController {
@@ -37,6 +39,7 @@ export class PurchaseRequestsController {
    * Регистрация и авторизация работнику не нужны.
    */
   @Post('public')
+  @UseGuards(PublicRequestRateLimitGuard)
   createPublic(@Body() dto: CreatePublicPurchaseRequestDto) {
     return this.purchaseRequestsService.createPublic(dto);
   }
@@ -45,6 +48,7 @@ export class PurchaseRequestsController {
    * Загрузка фотографии конкретной позиции.
    */
   @Post('public/:requestId/items/:itemId/photo')
+  @UseGuards(PublicRequestRateLimitGuard)
   @UseInterceptors(
     FileInterceptor('photo', {
       limits: {
@@ -56,6 +60,7 @@ export class PurchaseRequestsController {
   uploadPublicItemPhoto(
     @Param('requestId') requestId: string,
     @Param('itemId') itemId: string,
+    @Headers('x-upload-token') uploadToken: string | undefined,
     @UploadedFile(
       new ParseFilePipeBuilder()
         .addFileTypeValidator({
@@ -74,6 +79,7 @@ export class PurchaseRequestsController {
       requestId,
       itemId,
       photo,
+      uploadToken,
     );
   }
 
@@ -81,17 +87,20 @@ export class PurchaseRequestsController {
    * Получение фотографии позиции.
    */
   @Get('public/items/:itemId/photo')
+  @UseGuards(JwtAuthGuard)
   async getPublicItemPhoto(
+    @CurrentUser() user: AuthUser,
     @Param('itemId') itemId: string,
     @Res() response: Response,
   ) {
     const photo =
-      await this.purchaseRequestsService.getPublicItemPhoto(itemId);
+      await this.purchaseRequestsService.getPublicItemPhoto(user, itemId);
 
     return response.sendFile(photo.absolutePath, {
       headers: {
         'Content-Type': photo.mimeType,
-        'Cache-Control': 'private, max-age=3600',
+        'Cache-Control': 'private, no-store',
+        'X-Content-Type-Options': 'nosniff',
       },
     });
   }

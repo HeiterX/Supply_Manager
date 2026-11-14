@@ -1,17 +1,19 @@
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import {
   access,
   mkdir,
   unlink,
   writeFile,
 } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 
 import type { AuthUser } from '../auth/auth.types.js';
@@ -27,6 +29,11 @@ const PHOTO_DIRECTORY = join(
   'uploads',
   'purchase-requests',
 );
+
+const UPLOAD_TOKEN_TTL_SECONDS = 15 * 60;
+const MAX_PHOTO_SIZE = 8 * 1024 * 1024;
+const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+const SAFE_PHOTO_NAME = /^[0-9a-f-]{36}-[0-9a-f-]{36}\.(jpg|png|webp)$/i;
 
 const userSelect = {
   id: true,
@@ -146,114 +153,229 @@ export class PurchaseRequestsService {
       );
     }
 
-    return purchaseRequest;
+    return {
+      ...purchaseRequest,
+      // The capability is returned only once, never saved on the request.
+      uploadToken: this.createPublicUploadToken(purchaseRequest.id),
+    };
   }
 
+
   /*
-   * Прикрепляет фотографию к конкретной позиции.
+   * The public form returns a short-lived signed upload capability.
+   * Knowing a request/item UUID alone is not sufficient to upload.
    */
+  private createPublicUploadToken(requestId: string): string {
+    const expiresAt = Math.floor(Date.now() / 1000) + UPLOAD_TOKEN_TTL_SECONDS;
+    const payload = requestId + '.' + expiresAt;
+    return payload + '.' + this.signPublicUploadPayload(payload);
+  }
+
+  private signPublicUploadPayload(payload: string): string {
+    // Domain separation prevents interpreting a JWT as an upload capability.
+    const secret = process.env.JWT_SECRET;
+    if (!secret || secret.length < 32) {
+      throw new Error('JWT_SECRET must contain at least 32 characters');
+    }
+
+    return createHmac('sha256', secret)
+      .update('supply-manager:public-photo-upload:v1:' + payload)
+      .digest('hex');
+  }
+
+  private assertPublicUploadToken(requestId: string, token?: string): void {
+    if (!token || token.length > 200) {
+      throw new UnauthorizedException('Требуется токен загрузки фотографии');
+    }
+
+    const parts = token.split('.');
+    if (
+      parts.length !== 3 ||
+      parts[0] !== requestId ||
+      !/^\d{10}$/.test(parts[1]) ||
+      !/^[0-9a-f]{64}$/.test(parts[2])
+    ) {
+      throw new UnauthorizedException('Недействительный токен загрузки');
+    }
+
+    const payload = parts[0] + '.' + parts[1];
+    const expected = Buffer.from(this.signPublicUploadPayload(payload), 'hex');
+    const signature = Buffer.from(parts[2], 'hex');
+
+    if (!timingSafeEqual(expected, signature)) {
+      throw new UnauthorizedException('Недействительный токен загрузки');
+    }
+
+    if (Number(parts[1]) <= Math.floor(Date.now() / 1000)) {
+      throw new UnauthorizedException('Срок действия токена загрузки истёк');
+    }
+  }
+
+  private detectImageType(buffer: Buffer): {
+    mimeType: string;
+    extension: string;
+  } | null {
+    if (
+      buffer.length >= 45 &&
+      buffer.subarray(0, 8).equals(PNG_SIGNATURE) &&
+      buffer.readUInt32BE(8) === 13 &&
+      buffer.toString('ascii', 12, 16) === 'IHDR' &&
+      buffer.readUInt32BE(buffer.length - 12) === 0 &&
+      buffer.toString('ascii', buffer.length - 8, buffer.length - 4) === 'IEND'
+    ) {
+      return { mimeType: 'image/png', extension: '.png' };
+    }
+
+    if (
+      buffer.length >= 4 &&
+      buffer[0] === 0xff &&
+      buffer[1] === 0xd8 &&
+      buffer[2] === 0xff &&
+      buffer[buffer.length - 2] === 0xff &&
+      buffer[buffer.length - 1] === 0xd9
+    ) {
+      return { mimeType: 'image/jpeg', extension: '.jpg' };
+    }
+
+    if (
+      buffer.length >= 20 &&
+      buffer.toString('ascii', 0, 4) === 'RIFF' &&
+      buffer.toString('ascii', 8, 12) === 'WEBP' &&
+      buffer.readUInt32LE(4) + 8 === buffer.length &&
+      /^(VP8 |VP8L|VP8X)$/.test(buffer.toString('ascii', 12, 16))
+    ) {
+      return { mimeType: 'image/webp', extension: '.webp' };
+    }
+
+    return null;
+  }
+
   async attachPublicItemPhoto(
     requestId: string,
     itemId: string,
     photo: Express.Multer.File,
+    uploadToken?: string,
   ) {
+    this.assertPublicUploadToken(requestId, uploadToken);
+
     const item = await this.prisma.purchaseRequestItem.findFirst({
-      where: {
-        id: itemId,
-        requestId,
+      where: { id: itemId, requestId },
+      select: {
+        photoPath: true,
+        request: {
+          select: { status: true, taskId: true, requesterId: true },
+        },
       },
     });
 
     if (!item) {
-      throw new NotFoundException(
-        'Позиция заявки не найдена',
+      throw new NotFoundException('Позиция заявки не найдена');
+    }
+
+    // Only unprocessed requests created by the public form can use this route.
+    if (
+      item.request.status !== 'NEW' ||
+      item.request.taskId !== null ||
+      item.request.requesterId !== null
+    ) {
+      throw new ForbiddenException('Заявка больше не принимает фотографии');
+    }
+
+    if (item.photoPath !== null) {
+      throw new ConflictException('Фотография уже загружена');
+    }
+
+    const buffer = photo?.buffer;
+    if (!buffer || buffer.length === 0 || buffer.length > MAX_PHOTO_SIZE) {
+      throw new BadRequestException('Недопустимый размер фотографии');
+    }
+
+    const detected = this.detectImageType(buffer);
+    if (!detected || detected.mimeType !== photo.mimetype) {
+      throw new BadRequestException(
+        'Содержимое файла не соответствует допустимому изображению JPG, PNG или WebP',
       );
     }
 
-    const extensions: Record<string, string> = {
-      'image/jpeg': '.jpg',
-      'image/png': '.png',
-      'image/webp': '.webp',
-    };
+    const filename = itemId + '-' + randomUUID() + detected.extension;
+    await mkdir(PHOTO_DIRECTORY, { recursive: true });
+    const absolutePath = join(PHOTO_DIRECTORY, filename);
+    await writeFile(absolutePath, buffer, { flag: 'wx' });
 
-    const extension = extensions[photo.mimetype] ?? '.jpg';
-
-    await mkdir(PHOTO_DIRECTORY, {
-      recursive: true,
-    });
-
-    const filename =
-      `${item.id}-${randomUUID()}${extension}`;
-
-    const absolutePath = join(
-      PHOTO_DIRECTORY,
-      filename,
-    );
-
-    await writeFile(absolutePath, photo.buffer);
-
-    const previousPhotoPath = item.photoPath
-      ? join(PHOTO_DIRECTORY, item.photoPath)
-      : null;
-
-    const updatedItem =
-      await this.prisma.purchaseRequestItem.update({
+    try {
+      // Atomic conditional write prevents races/replays, and checks status
+      // again in case procurement accepted the request during upload.
+      const result = await this.prisma.purchaseRequestItem.updateMany({
         where: {
-          id: item.id,
+          id: itemId,
+          requestId,
+          photoPath: null,
+          request: {
+            is: {
+              status: 'NEW',
+              taskId: null,
+              requesterId: null,
+            },
+          },
         },
         data: {
           photoPath: filename,
-          photoOriginalName: photo.originalname,
-          photoMimeType: photo.mimetype,
+          photoOriginalName: basename(photo.originalname.replace(/\\/g, '/')).slice(0, 255),
+          photoMimeType: detected.mimeType,
         },
       });
 
-    if (previousPhotoPath) {
-      await unlink(previousPhotoPath).catch(() => undefined);
+      if (result.count !== 1) {
+        throw new ConflictException(
+          'Фотография уже добавлена или заявка принята в работу',
+        );
+      }
+    } catch (error) {
+      await unlink(absolutePath).catch(() => undefined);
+      throw error;
     }
 
     return {
-      ...updatedItem,
-      photoUrl:
-        `/api/v1/purchase-requests/public/items/${item.id}/photo`,
+      id: itemId,
+      photoUrl: '/api/v1/purchase-requests/public/items/' + itemId + '/photo',
     };
   }
 
-  async getPublicItemPhoto(itemId: string) {
-    const item =
-      await this.prisma.purchaseRequestItem.findUnique({
-        where: {
-          id: itemId,
-        },
-        select: {
-          photoPath: true,
-          photoMimeType: true,
-        },
-      });
+  async getPublicItemPhoto(user: AuthUser, itemId: string) {
+    const item = await this.prisma.purchaseRequestItem.findUnique({
+      where: { id: itemId },
+      select: {
+        photoPath: true,
+        photoMimeType: true,
+        request: { select: { requesterId: true } },
+      },
+    });
 
-    if (!item?.photoPath) {
-      throw new NotFoundException(
-        'Фотография не найдена',
-      );
+    if (!item) {
+      throw new NotFoundException('Фотография не найдена');
     }
 
-    const absolutePath = join(
-      PHOTO_DIRECTORY,
-      item.photoPath,
-    );
+    const canSeeAll = user.role === 'PROCUREMENT' || user.role === 'ADMIN';
+    if (!canSeeAll && (!item.request.requesterId || item.request.requesterId !== user.id)) {
+      throw new ForbiddenException('Нет доступа к фотографии этой заявки');
+    }
 
+    if (!item.photoPath || !SAFE_PHOTO_NAME.test(item.photoPath)) {
+      throw new NotFoundException('Фотография не найдена');
+    }
+
+    // The filename must be from the server-generated allowlist; never use
+    // an arbitrary file path from the database for sendFile.
+    const absolutePath = join(PHOTO_DIRECTORY, item.photoPath);
     try {
       await access(absolutePath);
     } catch {
-      throw new NotFoundException(
-        'Файл фотографии не найден',
-      );
+      throw new NotFoundException('Файл фотографии не найден');
     }
 
     return {
       absolutePath,
-      mimeType:
-        item.photoMimeType ?? 'application/octet-stream',
+      mimeType: item.photoMimeType ?? 'application/octet-stream',
     };
   }
 
