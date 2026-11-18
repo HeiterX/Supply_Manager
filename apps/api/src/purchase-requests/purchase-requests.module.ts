@@ -6,6 +6,7 @@ import { TelegramModule } from '../telegram/telegram.module.js';
 import { PurchaseRequestsController } from './purchase-requests.controller.js';
 import { PurchaseRequestsService } from './purchase-requests.service.js';
 import { PublicRequestRateLimitGuard } from './public-request-rate-limit.guard.js';
+import { PublicUploadTokenGuard } from './public-upload-token.guard.js';
 import { TelegramUpdatesService } from './telegram-updates.service.js';
 
 @Module({
@@ -18,6 +19,7 @@ import { TelegramUpdatesService } from './telegram-updates.service.js';
   providers: [
     PurchaseRequestsService,
     PublicRequestRateLimitGuard,
+    PublicUploadTokenGuard,
     TelegramUpdatesService,
   ],
   exports: [PurchaseRequestsService],

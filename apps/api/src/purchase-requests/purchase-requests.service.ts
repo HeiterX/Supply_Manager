@@ -6,6 +6,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import sharp from 'sharp';
 
 import {
   BadRequestException,
@@ -16,6 +17,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 
+import { Prisma } from '../generated/prisma/client.js';
 import type { AuthUser } from '../auth/auth.types.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { TelegramService } from '../telegram/telegram.service.js';
@@ -32,7 +34,6 @@ const PHOTO_DIRECTORY = join(
 
 const UPLOAD_TOKEN_TTL_SECONDS = 15 * 60;
 const MAX_PHOTO_SIZE = 8 * 1024 * 1024;
-const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const SAFE_PHOTO_NAME = /^[0-9a-f-]{36}-[0-9a-f-]{36}\.(jpg|png|webp)$/i;
 
 const userSelect = {
@@ -183,7 +184,7 @@ export class PurchaseRequestsService {
       .digest('hex');
   }
 
-  private assertPublicUploadToken(requestId: string, token?: string): void {
+  assertPublicUploadToken(requestId: string, token?: string): void {
     if (!token || token.length > 200) {
       throw new UnauthorizedException('Требуется токен загрузки фотографии');
     }
@@ -211,43 +212,41 @@ export class PurchaseRequestsService {
     }
   }
 
-  private detectImageType(buffer: Buffer): {
+  private async sanitizeImage(
+    buffer: Buffer,
+    mimeType: string,
+  ): Promise<{
     mimeType: string;
     extension: string;
-  } | null {
-    if (
-      buffer.length >= 45 &&
-      buffer.subarray(0, 8).equals(PNG_SIGNATURE) &&
-      buffer.readUInt32BE(8) === 13 &&
-      buffer.toString('ascii', 12, 16) === 'IHDR' &&
-      buffer.readUInt32BE(buffer.length - 12) === 0 &&
-      buffer.toString('ascii', buffer.length - 8, buffer.length - 4) === 'IEND'
-    ) {
-      return { mimeType: 'image/png', extension: '.png' };
+    buffer: Buffer;
+  }> {
+    try {
+      const image = sharp(buffer, {
+        failOn: 'warning',
+        limitInputPixels: 20_000_000,
+      });
+      const metadata = await image.metadata();
+      const formats = {
+        jpeg: { mimeType: 'image/jpeg', extension: '.jpg' },
+        png: { mimeType: 'image/png', extension: '.png' },
+        webp: { mimeType: 'image/webp', extension: '.webp' },
+      };
+      const format = metadata.format;
+      if (!format || !(format in formats) || (metadata.pages ?? 1) !== 1) {
+        throw new Error('Unsupported image');
+      }
+      const detected = formats[format as keyof typeof formats];
+      if (detected.mimeType !== mimeType) throw new Error('MIME mismatch');
+      // Fully decode and re-encode: reject corrupt pixel data and strip metadata
+      // and trailing payloads. Metadata inspection alone does not decode pixels.
+      const sanitized = await image.rotate().toFormat(format).toBuffer();
+      if (sanitized.length > MAX_PHOTO_SIZE) throw new Error('Output too large');
+      return { ...detected, buffer: sanitized };
+    } catch {
+      throw new BadRequestException(
+        'Недопустимое или повреждённое изображение JPG, PNG или WebP',
+      );
     }
-
-    if (
-      buffer.length >= 4 &&
-      buffer[0] === 0xff &&
-      buffer[1] === 0xd8 &&
-      buffer[2] === 0xff &&
-      buffer[buffer.length - 2] === 0xff &&
-      buffer[buffer.length - 1] === 0xd9
-    ) {
-      return { mimeType: 'image/jpeg', extension: '.jpg' };
-    }
-
-    if (
-      buffer.length >= 20 &&
-      buffer.toString('ascii', 0, 4) === 'RIFF' &&
-      buffer.toString('ascii', 8, 12) === 'WEBP' &&
-      buffer.readUInt32LE(4) + 8 === buffer.length &&
-      /^(VP8 |VP8L|VP8X)$/.test(buffer.toString('ascii', 12, 16))
-    ) {
-      return { mimeType: 'image/webp', extension: '.webp' };
-    }
-
-    return null;
   }
 
   async attachPublicItemPhoto(
@@ -290,39 +289,40 @@ export class PurchaseRequestsService {
       throw new BadRequestException('Недопустимый размер фотографии');
     }
 
-    const detected = this.detectImageType(buffer);
-    if (!detected || detected.mimeType !== photo.mimetype) {
-      throw new BadRequestException(
-        'Содержимое файла не соответствует допустимому изображению JPG, PNG или WebP',
-      );
-    }
+    const detected = await this.sanitizeImage(buffer, photo.mimetype);
 
     const filename = itemId + '-' + randomUUID() + detected.extension;
     await mkdir(PHOTO_DIRECTORY, { recursive: true });
     const absolutePath = join(PHOTO_DIRECTORY, filename);
-    await writeFile(absolutePath, buffer, { flag: 'wx' });
-
     try {
+      await writeFile(absolutePath, detected.buffer, { flag: 'wx' });
       // Atomic conditional write prevents races/replays, and checks status
       // again in case procurement accepted the request during upload.
-      const result = await this.prisma.purchaseRequestItem.updateMany({
-        where: {
-          id: itemId,
-          requestId,
-          photoPath: null,
-          request: {
-            is: {
-              status: 'NEW',
-              taskId: null,
-              requesterId: null,
+      const result = await this.prisma.$transaction(async (tx) => {
+        // Serialize with accept(), including its read of the request items.
+        await this.lockRequest(tx, requestId);
+        this.assertPublicUploadToken(requestId, uploadToken);
+        return tx.purchaseRequestItem.updateMany({
+          where: {
+            id: itemId,
+            requestId,
+            photoPath: null,
+            request: {
+              is: {
+                status: 'NEW',
+                taskId: null,
+                requesterId: null,
+              },
             },
           },
-        },
-        data: {
-          photoPath: filename,
-          photoOriginalName: basename(photo.originalname.replace(/\\/g, '/')).slice(0, 255),
-          photoMimeType: detected.mimeType,
-        },
+          data: {
+            photoPath: filename,
+            photoOriginalName: basename(
+              photo.originalname.replace(/\\/g, '/'),
+            ).slice(0, 255),
+            photoMimeType: detected.mimeType,
+          },
+        });
       });
 
       if (result.count !== 1) {
@@ -356,7 +356,10 @@ export class PurchaseRequestsService {
     }
 
     const canSeeAll = user.role === 'PROCUREMENT' || user.role === 'ADMIN';
-    if (!canSeeAll && (!item.request.requesterId || item.request.requesterId !== user.id)) {
+    if (
+      !canSeeAll &&
+      (!item.request.requesterId || item.request.requesterId !== user.id)
+    ) {
       throw new ForbiddenException('Нет доступа к фотографии этой заявки');
     }
 
@@ -374,13 +377,15 @@ export class PurchaseRequestsService {
     }
 
     return {
-      absolutePath,
+      filename: item.photoPath,
+      directory: PHOTO_DIRECTORY,
       mimeType: item.photoMimeType ?? 'application/octet-stream',
     };
   }
 
   async accept(user: AuthUser, id: string) {
     return this.prisma.$transaction(async (tx) => {
+      await this.lockRequest(tx, id);
       const purchaseRequest = await tx.purchaseRequest.findUnique({
         where: { id },
         include: {
@@ -527,6 +532,18 @@ export class PurchaseRequestsService {
     }
 
     return purchaseRequest;
+  }
+
+  private async lockRequest(tx: Prisma.TransactionClient, id: string) {
+    // PrismaPg's schema option does not set search_path for raw SQL.
+    const schema =
+      new URL(process.env.DATABASE_URL!).searchParams.get('schema') ?? 'public';
+    const table = Prisma.raw(
+      '"' + schema.replace(/"/g, '""') + '"."PurchaseRequest"',
+    );
+    await tx.$queryRaw(
+      Prisma.sql`SELECT id FROM ${table} WHERE id = ${id} FOR UPDATE`,
+    );
   }
 
   private optionalText(value?: string) {

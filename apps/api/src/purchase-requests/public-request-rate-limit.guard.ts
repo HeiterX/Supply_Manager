@@ -23,13 +23,15 @@ export class PublicRequestRateLimitGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<Request>();
     const response = context.switchToHttp().getResponse<Response>();
     const now = Date.now();
-    const isSubmission = request.path.replace(/\/$/, '').endsWith(
-      '/purchase-requests/public',
-    );
+    const isSubmission = request.path
+      .toLowerCase()
+      .replace(/\/$/, '')
+      .endsWith('/purchase-requests/public');
     const limit = isSubmission ? 10 : 60;
     // Express's request.ip uses the socket address while trust proxy is off.
     // Do not trust attacker-controlled X-Forwarded-For by default.
-    const key = (isSubmission ? 'create:' : 'photo:') +
+    const key =
+      (isSubmission ? 'create:' : 'photo:') +
       (request.ip || request.socket.remoteAddress || 'unknown');
 
     let current = this.counters.get(key);
@@ -40,6 +42,13 @@ export class PublicRequestRateLimitGuard implements CanActivate {
           if (now >= bucket.resetAt) this.counters.delete(candidate);
         }
         if (this.counters.size >= MAX_CLIENTS && !this.counters.has(key)) {
+          const earliestReset = Math.min(
+            ...Array.from(this.counters.values(), (bucket) => bucket.resetAt),
+          );
+          response.setHeader(
+            'Retry-After',
+            String(Math.max(1, Math.ceil((earliestReset - now) / 1000))),
+          );
           throw new HttpException(
             'Слишком много запросов. Повторите попытку позже',
             HttpStatus.TOO_MANY_REQUESTS,

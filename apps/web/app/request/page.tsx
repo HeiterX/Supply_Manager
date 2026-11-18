@@ -168,7 +168,15 @@ export default function RequestPage() {
       const photo = submittedItems[index].photo;
       const createdItem = orderedCreatedItems[index];
 
-      if (!photo || !createdItem) {
+      if (!photo) {
+        continue;
+      }
+      if (
+        !createdItem ||
+        typeof request.uploadToken !== 'string' ||
+        !request.uploadToken
+      ) {
+        failedPhotos += 1;
         continue;
       }
 

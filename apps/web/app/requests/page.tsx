@@ -625,6 +625,7 @@ function RequestCard({
                     className="mt-3 flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-2.5 transition hover:border-blue-200 hover:bg-blue-50/40"
                   >
                     <img
+                      crossOrigin="use-credentials"
                       src={`${API_URL}/purchase-requests/public/items/${item.id}/photo`}
                       alt={`Фото: ${item.name}`}
                       className="h-16 w-16 rounded-lg bg-slate-100 object-cover"

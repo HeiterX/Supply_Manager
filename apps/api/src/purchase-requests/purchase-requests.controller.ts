@@ -28,6 +28,7 @@ import {
 } from './dto/create-purchase-request.dto.js';
 import { PurchaseRequestsService } from './purchase-requests.service.js';
 import { PublicRequestRateLimitGuard } from './public-request-rate-limit.guard.js';
+import { PublicUploadTokenGuard } from './public-upload-token.guard.js';
 
 @Controller('purchase-requests')
 export class PurchaseRequestsController {
@@ -50,12 +51,14 @@ export class PurchaseRequestsController {
    * Загрузка фотографии конкретной позиции.
    */
   @Post('public/:requestId/items/:itemId/photo')
-  @UseGuards(PublicRequestRateLimitGuard)
+  @UseGuards(PublicRequestRateLimitGuard, PublicUploadTokenGuard)
   @UseInterceptors(
     FileInterceptor('photo', {
       limits: {
         fileSize: 8 * 1024 * 1024,
         files: 1,
+        fields: 0,
+        parts: 1,
       },
     }),
   )
@@ -65,11 +68,8 @@ export class PurchaseRequestsController {
     @Headers('x-upload-token') uploadToken: string | undefined,
     @UploadedFile(
       new ParseFilePipeBuilder()
-        .addFileTypeValidator({
-          fileType: /^image\/(jpeg|png|webp)$/,
-        })
         .addMaxSizeValidator({
-          maxSize: 8 * 1024 * 1024,
+          maxSize: 8 * 1024 * 1024 + 1,
         })
         .build({
           errorHttpStatusCode: HttpStatus.BAD_REQUEST,
@@ -98,7 +98,8 @@ export class PurchaseRequestsController {
     const photo =
       await this.purchaseRequestsService.getPublicItemPhoto(user, itemId);
 
-    return response.sendFile(photo.absolutePath, {
+    return response.sendFile(photo.filename, {
+      root: photo.directory,
       headers: {
         'Content-Type': photo.mimeType,
         'Cache-Control': 'private, no-store',
