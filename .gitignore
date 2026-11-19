@@ -19,7 +19,57 @@ out/
 .vscode/
 
 # Prisma generated client
-apps/api/src/generated/prisma/apps/api/.env.test
+apps/api/src/generated/prisma/
+
+# Runtime uploads and business material (use synthetic fixtures under test/)
+uploads/
+backups/
+private-documents/
+commercial-documents/
+attachments/
+mailbox/
+*.eml
+*.msg
+
+# Database exports; Prisma migration SQL remains versioned
+*.dump
+*.backup
+*.backup-*
+*.sql.gz
+*.sqlite
+*.sqlite3
+*.db
+*.sql
+!apps/api/prisma/migrations/**/migration.sql
+
+# Archives and private key material
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.rar
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Local models, caches and temporary/build artifacts
+models/
+.ollama/
+.cache/
+.huggingface/
+*.gguf
+*.ggml
+*.safetensors
+coverage/
+.turbo/
+*.tsbuildinfo
+tmp/
+temp/
+*.tmp
+.audit-tools/
+.sm*-audit/
 
 # Windows metadata
 *:Zone.Identifier
