@@ -1,5 +1,6 @@
 'use client';
-
+import AuthGate from '../components/AuthGate';
+import { apiFetch } from '../../lib/api-client';
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import AppShell from '../components/AppShell';
@@ -47,7 +48,6 @@ type RegistryItem = {
   task: RegistryTask;
 };
 
-const API_URL = 'http://localhost:3000/api/v1';
 
 const statusLabels: Record<string, string> = {
   NEW: 'Новая',
@@ -116,7 +116,7 @@ function itemSupplier(item: RegistryItem) {
   );
 }
 
-export default function RegistryPage() {
+function RegistryContent() {
   const [registryItems, setRegistryItems] = useState<RegistryItem[]>([]);
   const [registrySearch, setRegistrySearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -127,7 +127,9 @@ export default function RegistryPage() {
     setLoadError('');
 
     try {
-      const response = await fetch(`${API_URL}/tasks/items/registry`);
+      const response = await apiFetch('/tasks/items/registry', {
+        cache: 'no-store',
+      });
 
       if (!response.ok) {
         throw new Error('API error');
@@ -355,5 +357,13 @@ export default function RegistryPage() {
         )}
       </section>
     </AppShell>
+  );
+}
+
+export default function RegistryPage() {
+  return (
+    <AuthGate>
+      <RegistryContent />
+    </AuthGate>
   );
 }

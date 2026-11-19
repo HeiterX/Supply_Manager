@@ -1,5 +1,7 @@
 'use client';
 
+import AuthGate from '../../components/AuthGate';
+import { apiFetch } from '../../../lib/api-client';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
@@ -20,7 +22,6 @@ type Task = {
 type Tab = 'overview' | 'items' | 'offers' | 'order' | 'history';
 type HistoryFilter = 'all' | 'events' | 'notes';
 
-const API_URL = 'http://localhost:3000/api/v1';
 const statusLabels: Record<string, string> = {
   NEW: 'Новая', SEARCHING: 'Поиск поставщика', NEGOTIATION: 'Переговоры / согласование', ORDERED: 'Заказано',
   WAITING_PAYMENT: 'Ожидает оплаты', WAITING_SHIPMENT: 'Ожидает отгрузки', IN_TRANSIT: 'В пути',
@@ -164,7 +165,7 @@ function getActivityMeta(text: string) {
   };
 }
 
-export default function TaskPage() {
+function TaskContent() {
   const params = useParams<{ id: string }>();
   const taskId = params.id;
   const [task, setTask] = useState<Task | null>(null);
@@ -224,7 +225,9 @@ export default function TaskPage() {
   async function loadTask() {
     try {
       setLoadError('');
-      const response = await fetch(`${API_URL}/tasks/${taskId}`);
+      const response = await apiFetch(`/tasks/${taskId}`, {
+        cache: 'no-store',
+      });
       if (!response.ok) throw new Error(await response.text());
       const data = (await response.json()) as Task;
       setTask(data); setPriority(data.priority); setNextAction(data.nextAction ?? ''); setReminderAt(toDateTimeLocal(data.reminderAt));
@@ -236,7 +239,10 @@ export default function TaskPage() {
   async function apiAction(path: string, init: RequestInit, success: string, onFailure?: (message: string) => void) {
     setBusy(true); setMessage(''); setActionError('');
     try {
-      const response = await fetch(`${API_URL}/tasks/${taskId}${path}`, init);
+      const response = await apiFetch(
+        `/tasks/${taskId}${path}`,
+        init,
+      );
       if (!response.ok) {
         const text = await response.text();
         throw new Error(text || 'Ошибка запроса');
@@ -1992,4 +1998,12 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
 }
 function ModalActions({ busy, onCancel, submitLabel, danger = false }: { busy: boolean; onCancel: () => void; submitLabel: string; danger?: boolean }) {
   return <div className="flex justify-end gap-2 border-t border-slate-100 pt-4"><button type="button" disabled={busy} onClick={onCancel} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 disabled:opacity-50">Отмена</button><button type="submit" disabled={busy} className={`rounded-xl px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50 ${danger ? 'bg-rose-600 hover:bg-rose-700' : 'bg-blue-600 hover:bg-blue-700'}`}>{busy ? 'Сохраняем...' : submitLabel}</button></div>;
+}
+
+export default function TaskPage() {
+  return (
+    <AuthGate>
+      <TaskContent />
+    </AuthGate>
+  );
 }
