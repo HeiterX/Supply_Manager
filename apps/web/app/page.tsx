@@ -1,5 +1,6 @@
 'use client';
-
+import AuthGate from './components/AuthGate';
+import { apiFetch } from '../lib/api-client';
 import Link from 'next/link';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import AppShell from './components/AppShell';
@@ -26,7 +27,6 @@ type AttentionReason = {
   score: number;
 };
 
-const API_URL = 'http://localhost:3000/api/v1';
 
 const terminalStatuses = new Set(['CLOSED', 'CANCELLED']);
 
@@ -309,7 +309,7 @@ function StatIcon({
   );
 }
 
-export default function Home() {
+function HomeContent() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -334,7 +334,9 @@ export default function Home() {
     setLoadError('');
 
     try {
-      const tasksResponse = await fetch(`${API_URL}/tasks`);
+      const tasksResponse = await apiFetch('/tasks', {
+        cache: 'no-store',
+      });
 
       if (!tasksResponse.ok) {
         throw new Error('API error');
@@ -545,7 +547,7 @@ export default function Home() {
     setCreateError('');
 
     try {
-      const response = await fetch(`${API_URL}/tasks`, {
+      const response = await apiFetch('/tasks', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1259,5 +1261,14 @@ export default function Home() {
         </div>
       )}
     </AppShell>
+  );
+}
+
+
+export default function Home() {
+  return (
+    <AuthGate>
+      <HomeContent />
+    </AuthGate>
   );
 }
