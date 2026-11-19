@@ -15,7 +15,10 @@ const rules = [
   },
   {
     name: 'database dumps and local databases',
-    match: (path) => /\.(?:sql|dump|sqlite|sqlite3|db|bak)$/i.test(path),
+    match: (path) =>
+      /\.(?:dump|sqlite|sqlite3|db|bak)$/i.test(path) ||
+      (path.endsWith('.sql') &&
+        !/^apps\/api\/prisma\/migrations\/[^/]+\/migration\.sql$/.test(path)),
   },
   {
     name: 'uploaded attachments',
