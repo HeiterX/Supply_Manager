@@ -1,0 +1,145 @@
+name: CI — Supply Manager
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  repository-hygiene:
+    name: Repository hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Check tracked filenames for accidental private data
+        run: node scripts/check-tracked-paths.mjs
+
+  api:
+    name: API — lint, build, E2E (PostgreSQL 17)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: supply_ci
+          POSTGRES_PASSWORD: ci_only_local_password
+          POSTGRES_DB: supply_manager_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U supply_ci -d supply_manager_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    defaults:
+      run:
+        working-directory: apps/api
+        shell: bash
+    env:
+      CI: "true"
+      # Ephemeral database created by the GitHub Actions postgres service.
+      # Never use a production connection string or a repository secret here.
+      DATABASE_URL: postgresql://supply_ci:ci_only_local_password@127.0.0.1:5432/supply_manager_ci?schema=e2e
+      JWT_SECRET: ci-only-dummy-jwt-secret-for-isolated-tests-2026-not-for-prod
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/api/package-lock.json
+      - name: Install API dependencies from lockfile
+        run: npm ci
+      - name: Generate Prisma client
+        run: npx prisma generate
+      - name: API lint
+        run: npm run lint
+      - name: API build
+        run: npm run build
+      - name: Write isolated E2E configurations (ignored by Git)
+        run: |
+          cat > .env <<'EOF'
+          DATABASE_URL=postgresql://supply_ci:ci_only_local_password@127.0.0.1:5432/supply_manager_ci?schema=public
+          JWT_SECRET=ci-only-dummy-jwt-secret-for-isolated-tests-2026-not-for-prod
+          EOF
+          cat > .env.test <<'EOF'
+          DATABASE_URL=postgresql://supply_ci:ci_only_local_password@127.0.0.1:5432/supply_manager_ci?schema=e2e
+          JWT_SECRET=ci-only-dummy-jwt-secret-for-isolated-tests-2026-not-for-prod
+          EOF
+      - name: API E2E (schema=e2e; migrations via existing test script)
+        run: npm run test:e2e
+
+  web:
+    name: Web — lint and Next.js build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/web
+        shell: bash
+    env:
+      CI: "true"
+      NEXT_TELEMETRY_DISABLED: "1"
+      NEXT_PUBLIC_API_URL: http://localhost:3000/api/v1
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Install Web dependencies from lockfile
+        id: web-install
+        run: npm ci
+      - name: Web lint
+        run: npm run lint
+      - name: Web build and TypeScript check
+        if: ${{ always() && steps.web-install.outcome == 'success' }}
+        run: npm run build
+
+  audit:
+    name: npm audit (${{ matrix.app }}, informational)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [api, web]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+      - name: Check production dependencies without force upgrades
+        working-directory: apps/${{ matrix.app }}
+        run: |
+          set +e
+          npm audit --omit=dev --audit-level=high
+          result=$?
+          set -e
+          if [ "$result" -ne 0 ]; then
+            echo "::warning::npm audit for ${{ matrix.app }} exited $result; inspect vulnerabilities in the job log"
+            echo "- **${{ matrix.app }}**: npm audit reported issues (exit $result). See job log for counts and advisories." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- **${{ matrix.app }}**: no findings at the requested audit threshold." >> "$GITHUB_STEP_SUMMARY"
+          fi
