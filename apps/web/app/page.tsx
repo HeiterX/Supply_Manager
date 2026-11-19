@@ -2,7 +2,8 @@
 import AuthGate from './components/AuthGate';
 import { apiFetch } from '../lib/api-client';
 import Link from 'next/link';
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useMemo, useState, type FormEvent } from 'react';
+import { useAbortableLoad } from '../lib/use-abortable-load';
 import AppShell from './components/AppShell';
 
 type Task = {
@@ -329,33 +330,39 @@ function HomeContent() {
   const [priority, setPriority] = useState('NORMAL');
   const [deadline, setDeadline] = useState('');
 
-  async function loadData() {
-    setLoading(true);
-    setLoadError('');
-
+  const fetchData = useCallback(async (signal: AbortSignal) => {
     try {
       const tasksResponse = await apiFetch('/tasks', {
         cache: 'no-store',
+        signal,
       });
 
       if (!tasksResponse.ok) {
         throw new Error('API error');
       }
 
-      setTasks((await tasksResponse.json()) as Task[]);
+      const data = (await tasksResponse.json()) as Task[];
+      if (signal.aborted) return;
+      setTasks(data);
+      setLoadError('');
     } catch (error) {
+      if (signal.aborted) return;
       console.error(error);
       setLoadError(
         'Не удалось загрузить данные. Проверьте, что API запущен на порту 3000.',
       );
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
-  }
-
-  useEffect(() => {
-    void loadData();
   }, []);
+
+  const reloadData = useAbortableLoad(fetchData);
+
+  function loadData() {
+    setLoading(true);
+    setLoadError('');
+    return reloadData();
+  }
 
   const counts = useMemo(() => {
     const active = tasks.filter(isActive);

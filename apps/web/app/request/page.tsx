@@ -676,6 +676,8 @@ function ItemCard({
           {item.photoPreview ? (
             <div className="overflow-hidden rounded-2xl border border-slate-200">
               <div className="relative bg-slate-100">
+                {/* Browser-owned blob preview: keep natural dimensions and bypass server optimization. */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={item.photoPreview}
                   alt={`Фото позиции ${index + 1}`}
