@@ -2,14 +2,18 @@ import 'dotenv/config';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
+import cookieParser from 'cookie-parser';
 import { App } from 'supertest/types';
 
 import { AppModule } from './../src/app.module.js';
 import { PrismaService } from './../src/prisma/prisma.service.js';
+import { createAuthenticatedAgent } from './authenticated-agent.helper.js';
 
 describe('Purchase flow (e2e)', () => {
   let app: INestApplication<App>;
   let prisma: PrismaService;
+  let client: ReturnType<typeof request.agent>;
+  let authUserId = '';
 
   let taskId: string | undefined;
   const supplierIds: string[] = [];
@@ -24,6 +28,7 @@ describe('Purchase flow (e2e)', () => {
 
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix('api/v1');
+    app.use(cookieParser());
     app.useGlobalPipes(
       new ValidationPipe({
         whitelist: true,
@@ -34,6 +39,9 @@ describe('Purchase flow (e2e)', () => {
 
     await app.init();
     prisma = app.get(PrismaService);
+    const auth = await createAuthenticatedAgent(app, prisma, 'PROCUREMENT');
+    client = auth.client;
+    authUserId = auth.userId;
   });
 
   afterAll(async () => {
@@ -57,13 +65,17 @@ describe('Purchase flow (e2e)', () => {
       });
     }
 
+    if (authUserId) {
+      await prisma.user.deleteMany({ where: { id: authUserId } });
+    }
+
     if (app) {
       await app.close();
     }
   });
 
   it('проходит полный сценарий смены поставщика и защищает оплаченный заказ', async () => {
-    const createTaskResponse = await request(app.getHttpServer())
+    const createTaskResponse = await client
       .post(`${api}/tasks`)
       .send({
         title: `E2E смена поставщика ${runId}`,
@@ -78,7 +90,7 @@ describe('Purchase flow (e2e)', () => {
     expect(createTaskResponse.body.selectedOfferId).toBeNull();
     expect(createTaskResponse.body.currentPurchaseOrderId).toBeNull();
 
-    const supplierAResponse = await request(app.getHttpServer())
+    const supplierAResponse = await client
       .post(`${api}/tasks/${taskId}/supplier-offers`)
       .send({
         supplierName: `ООО E2E Поставщик А ${runId}`,
@@ -99,7 +111,7 @@ describe('Purchase flow (e2e)', () => {
     expect(offerAId).toBeTruthy();
     expect(supplierAResponse.body.status).toBe('OFFER_RECEIVED');
 
-    const selectAResponse = await request(app.getHttpServer())
+    const selectAResponse = await client
       .patch(`${api}/tasks/${taskId}/supplier-offers/${offerAId}/select`)
       .expect(200);
 
@@ -107,7 +119,7 @@ describe('Purchase flow (e2e)', () => {
     expect(selectAResponse.body.selectedOfferId).toBe(offerAId);
     expect(selectAResponse.body.currentPurchaseOrderId).toBeNull();
 
-    const orderAResponse = await request(app.getHttpServer())
+    const orderAResponse = await client
       .post(`${api}/tasks/${taskId}/purchase-order`)
       .send({
         invoiceNumber: `E2E-A-${runId}`,
@@ -125,7 +137,7 @@ describe('Purchase flow (e2e)', () => {
     expect(orderAResponse.body.paidAt).toBeNull();
     expect(orderAResponse.body.cancelledAt).toBeNull();
 
-    const taskAfterOrderA = await request(app.getHttpServer())
+    const taskAfterOrderA = await client
       .get(`${api}/tasks/${taskId}`)
       .expect(200);
 
@@ -133,7 +145,7 @@ describe('Purchase flow (e2e)', () => {
     expect(taskAfterOrderA.body.currentPurchaseOrderId).toBe(orderAId);
     expect(taskAfterOrderA.body.purchaseOrder.id).toBe(orderAId);
 
-    const sendAResponse = await request(app.getHttpServer())
+    const sendAResponse = await client
       .patch(`${api}/tasks/${taskId}/purchase-order/send-to-payment`)
       .expect(200);
 
@@ -152,7 +164,7 @@ describe('Purchase flow (e2e)', () => {
 
     const cancelReason = 'Поставщик изменил срок поставки';
 
-    const cancelAResponse = await request(app.getHttpServer())
+    const cancelAResponse = await client
       .patch(`${api}/tasks/${taskId}/purchase-order/cancel`)
       .send({ reason: cancelReason })
       .expect(200);
@@ -177,7 +189,7 @@ describe('Purchase flow (e2e)', () => {
     expect(cancelledOrderA.cancelReason).toBe(cancelReason);
     expect(cancelledOrderA.paidAt).toBeNull();
 
-    const supplierBResponse = await request(app.getHttpServer())
+    const supplierBResponse = await client
       .post(`${api}/tasks/${taskId}/supplier-offers`)
       .send({
         supplierName: `ООО E2E Поставщик Б ${runId}`,
@@ -197,14 +209,14 @@ describe('Purchase flow (e2e)', () => {
 
     expect(offerBId).toBeTruthy();
 
-    const selectBResponse = await request(app.getHttpServer())
+    const selectBResponse = await client
       .patch(`${api}/tasks/${taskId}/supplier-offers/${offerBId}/select`)
       .expect(200);
 
     expect(selectBResponse.body.status).toBe('NEGOTIATION');
     expect(selectBResponse.body.selectedOfferId).toBe(offerBId);
 
-    const orderBResponse = await request(app.getHttpServer())
+    const orderBResponse = await client
       .post(`${api}/tasks/${taskId}/purchase-order`)
       .send({
         invoiceNumber: `E2E-B-${runId}`,
@@ -220,7 +232,7 @@ describe('Purchase flow (e2e)', () => {
     expect(orderBResponse.body.supplierOfferId).toBe(offerBId);
     expect(Number(orderBResponse.body.totalPrice)).toBe(101000);
 
-    const taskWithTwoOrders = await request(app.getHttpServer())
+    const taskWithTwoOrders = await client
       .get(`${api}/tasks/${taskId}`)
       .expect(200);
 
@@ -239,14 +251,14 @@ describe('Purchase flow (e2e)', () => {
     expect(historyOrderA?.cancelReason).toBe(cancelReason);
     expect(historyOrderB?.cancelledAt).toBeNull();
 
-    const sendBResponse = await request(app.getHttpServer())
+    const sendBResponse = await client
       .patch(`${api}/tasks/${taskId}/purchase-order/send-to-payment`)
       .expect(200);
 
     expect(sendBResponse.body.status).toBe('WAITING_PAYMENT');
     expect(sendBResponse.body.reminderAt).toBeTruthy();
 
-    const confirmPaymentResponse = await request(app.getHttpServer())
+    const confirmPaymentResponse = await client
       .patch(`${api}/tasks/${taskId}/purchase-order/confirm-payment`)
       .expect(200);
 
@@ -255,7 +267,7 @@ describe('Purchase flow (e2e)', () => {
     expect(confirmPaymentResponse.body.purchaseOrder.id).toBe(orderBId);
     expect(confirmPaymentResponse.body.purchaseOrder.paidAt).toBeTruthy();
 
-    const cancelPaidResponse = await request(app.getHttpServer())
+    const cancelPaidResponse = await client
       .patch(`${api}/tasks/${taskId}/purchase-order/cancel`)
       .send({ reason: 'Эта отмена должна быть запрещена' })
       .expect(409);
@@ -264,7 +276,7 @@ describe('Purchase flow (e2e)', () => {
       'Нельзя отменить выбор поставщика: оплата уже подтверждена',
     );
 
-    const finalTaskResponse = await request(app.getHttpServer())
+    const finalTaskResponse = await client
       .get(`${api}/tasks/${taskId}`)
       .expect(200);
 
