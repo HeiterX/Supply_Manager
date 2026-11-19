@@ -18,6 +18,13 @@ export class MultiOrdersService {
 
   // A row lock serializes all allocations for the same procurement task.
   private async lockTask(tx: Prisma.TransactionClient, taskId: string) {
+    const databaseUrl = process.env.DATABASE_URL;
+    if (!databaseUrl) throw new Error('DATABASE_URL is not defined');
+    const schema = new URL(databaseUrl).searchParams.get('schema') ?? 'public';
+    // PrismaPg uses a configured schema for model queries. Raw SQL needs the
+    // same transaction-local search_path (notably for isolated e2e schema).
+    const searchPath = '"' + schema.replaceAll('"', '""') + '", public';
+    await tx.$queryRaw`SELECT pg_catalog.set_config('search_path', ${searchPath}, true)`;
     await tx.$queryRaw`SELECT "id" FROM "Task" WHERE "id" = ${taskId} FOR UPDATE`;
     const task = await tx.task.findUnique({
       where: { id: taskId },
