@@ -1,6 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import Image from 'next/image';
+import { useCallback, useMemo, useState } from 'react';
+import { useAbortableLoad } from '../../lib/use-abortable-load';
 import AppShell from '../components/AppShell';
 import AuthGate from '../components/AuthGate';
 import { API_BASE_URL, apiFetch } from '../../lib/api-client';
@@ -97,14 +99,13 @@ function RequestsContent() {
   const [search, setSearch] = useState('');
   const [onlyNew, setOnlyNew] = useState(true);
 
-  const loadRequests = useCallback(async () => {
-    setLoading(true);
-    setError('');
-
+  const fetchRequests = useCallback(async (signal: AbortSignal) => {
     try {
       const response = await apiFetch('/purchase-requests', {
         cache: 'no-store',
+        signal,
       });
+      if (signal.aborted) return;
 
       // AuthGate получает событие от apiFetch и скрывает защищённую страницу.
       if (response.status === 401 || response.status === 403) {
@@ -113,6 +114,7 @@ function RequestsContent() {
       }
 
       const data = (await response.json().catch(() => null)) as unknown;
+      if (signal.aborted) return;
 
       if (!response.ok) {
         throw new Error(getErrorMessage(data, 'Не удалось загрузить заявки'));
@@ -123,20 +125,26 @@ function RequestsContent() {
       }
 
       setRequests(data as PurchaseRequest[]);
+      setError('');
     } catch (requestError) {
+      if (signal.aborted) return;
       setError(
         requestError instanceof Error
           ? requestError.message
           : 'Не удалось загрузить заявки',
       );
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
   }, []);
 
-  useEffect(() => {
-    void loadRequests();
-  }, [loadRequests]);
+  const reloadRequests = useAbortableLoad(fetchRequests);
+
+  function loadRequests() {
+    setLoading(true);
+    setError('');
+    return reloadRequests();
+  }
 
   const filteredRequests = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -427,7 +435,10 @@ function RequestCard({
                     rel="noreferrer"
                     className="mt-3 flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-2.5 transition hover:border-blue-200 hover:bg-blue-50/40"
                   >
-                    <img
+                    <Image
+                      unoptimized
+                      width={64}
+                      height={64}
                       crossOrigin="use-credentials"
                       src={`${API_BASE_URL}/purchase-requests/public/items/${item.id}/photo`}
                       alt={`Фото: ${item.name}`}

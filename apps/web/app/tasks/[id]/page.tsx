@@ -4,7 +4,8 @@ import AuthGate from '../../components/AuthGate';
 import { apiFetch } from '../../../lib/api-client';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useAbortableLoad } from '../../../lib/use-abortable-load';
 import AppShell from '../../components/AppShell';
 
 type Activity = { id: string; taskId: string; text: string; createdAt: string };
@@ -165,9 +166,7 @@ function getActivityMeta(text: string) {
   };
 }
 
-function TaskContent() {
-  const params = useParams<{ id: string }>();
-  const taskId = params.id;
+function TaskContent({ taskId }: { taskId: string }) {
   const [task, setTask] = useState<Task | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -222,19 +221,23 @@ function TaskContent() {
   const [historySearch, setHistorySearch] = useState('');
   const [historyFilter, setHistoryFilter] = useState<HistoryFilter>('all');
 
-  async function loadTask() {
+  const fetchTask = useCallback(async (signal: AbortSignal) => {
     try {
-      setLoadError('');
       const response = await apiFetch(`/tasks/${taskId}`, {
         cache: 'no-store',
+        signal,
       });
       if (!response.ok) throw new Error(await response.text());
       const data = (await response.json()) as Task;
+      if (signal.aborted) return;
+      setLoadError('');
       setTask(data); setPriority(data.priority); setNextAction(data.nextAction ?? ''); setReminderAt(toDateTimeLocal(data.reminderAt));
-    } catch (error) { console.error(error); setLoadError('Не удалось загрузить карточку закупки.'); }
-    finally { setLoading(false); }
-  }
-  useEffect(() => { void loadTask(); }, [taskId]);
+    } catch (error) {
+      if (signal.aborted) return;
+      console.error(error); setLoadError('Не удалось загрузить карточку закупки.');
+    } finally { if (!signal.aborted) setLoading(false); }
+  }, [taskId]);
+  const loadTask = useAbortableLoad(fetchTask);
 
   async function apiAction(path: string, init: RequestInit, success: string, onFailure?: (message: string) => void) {
     setBusy(true); setMessage(''); setActionError('');
@@ -579,7 +582,7 @@ function TaskContent() {
     return firstIncomplete === -1 ? orderFlow.length - 1 : firstIncomplete;
   }, [orderFlow]);
 
-  function CurrentAction() {
+  function renderCurrentAction() {
     if (!task) return null;
     if (!legacyMode) {
       if (task.status === 'CLOSED') return <div className="rounded-xl bg-emerald-50 px-4 py-3 text-center text-sm font-semibold text-emerald-700">Закупка завершена</div>;
@@ -642,7 +645,7 @@ function TaskContent() {
               <div className="text-xs font-semibold uppercase tracking-wide text-blue-500">Текущее действие</div>
               <div className="mt-1.5 text-lg font-semibold text-slate-950">{task.nextAction || (task.status === 'CLOSED' ? 'Закупка завершена' : 'Действие не задано')}</div>
               {task.reminderAt && <div className="mt-1.5 flex items-center gap-1.5 text-sm text-slate-500"><span aria-hidden="true">◷</span><span>Напоминание: {formatDateTime(task.reminderAt)}</span></div>}
-              <div className="mt-4"><CurrentAction /></div>
+              <div className="mt-4">{renderCurrentAction()}</div>
             </section>
 
             <section className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
@@ -1392,7 +1395,7 @@ function TaskContent() {
                       </div>
                     )}
                     <div className="mt-5">
-                      <CurrentAction />
+                      {renderCurrentAction()}
                     </div>
                   </section>
 
@@ -2001,9 +2004,10 @@ function ModalActions({ busy, onCancel, submitLabel, danger = false }: { busy: b
 }
 
 export default function TaskPage() {
+  const { id } = useParams<{ id: string }>();
   return (
     <AuthGate>
-      <TaskContent />
+      <TaskContent key={id} taskId={id} />
     </AuthGate>
   );
 }

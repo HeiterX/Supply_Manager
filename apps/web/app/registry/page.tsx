@@ -2,7 +2,8 @@
 import AuthGate from '../components/AuthGate';
 import { apiFetch } from '../../lib/api-client';
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
+import { useAbortableLoad } from '../../lib/use-abortable-load';
 import AppShell from '../components/AppShell';
 
 type RegistrySupplier = {
@@ -122,33 +123,39 @@ function RegistryContent() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
 
-  async function loadRegistry() {
-    setLoading(true);
-    setLoadError('');
-
+  const fetchRegistry = useCallback(async (signal: AbortSignal) => {
     try {
       const response = await apiFetch('/tasks/items/registry', {
         cache: 'no-store',
+        signal,
       });
 
       if (!response.ok) {
         throw new Error('API error');
       }
 
-      setRegistryItems((await response.json()) as RegistryItem[]);
+      const data = (await response.json()) as RegistryItem[];
+      if (signal.aborted) return;
+      setRegistryItems(data);
+      setLoadError('');
     } catch (error) {
+      if (signal.aborted) return;
       console.error(error);
       setLoadError(
         'Не удалось загрузить реестр. Проверьте, что API запущен на порту 3000.',
       );
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
-  }
-
-  useEffect(() => {
-    void loadRegistry();
   }, []);
+
+  const reloadRegistry = useAbortableLoad(fetchRegistry);
+
+  function loadRegistry() {
+    setLoading(true);
+    setLoadError('');
+    return reloadRegistry();
+  }
 
   const filteredRegistry = useMemo(() => {
     const query = registrySearch.trim().toLocaleLowerCase('ru-RU');

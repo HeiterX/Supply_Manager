@@ -8,8 +8,6 @@ import type { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto.js';
 import { CreateSupplierOfferDto } from './dto/create-supplier-offer.dto.js';
-import { ShipPurchaseOrderDto } from './dto/ship-purchase-order.dto.js';
-import { HandOverPurchaseOrderDto } from './dto/hand-over-purchase-order.dto.js';
 
 const milli = (value: number) => Math.round(value * 1000);
 const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
@@ -130,7 +128,7 @@ export class MultiOrdersService {
       throw new BadRequestException('Позиции заказа не должны повторяться');
     }
     return this.prisma.$transaction(async tx => {
-      const task = await this.lockTask(tx, taskId);
+      await this.lockTask(tx, taskId);
       const offer = await tx.supplierOffer.findFirst({
         where: { id: offerId, taskId },
         include: { supplier: true, items: { include: { taskItem: true } } },
@@ -163,7 +161,7 @@ export class MultiOrdersService {
         const required = milli(offerItem.taskItem.quantity.toNumber());
         const remaining = required - (allocated.get(offerItem.taskItemId) ?? 0);
         if (requested > milli(offerItem.quantity.toNumber()) || requested > remaining) {
-          throw new ConflictException(`«${offerItem.taskItem.name}»: доступно ${Math.max(0, remaining) / 1000} ${offerItem.taskItem.unit}, поставщик предложил ${offerItem.quantity} ${offerItem.taskItem.unit}`);
+          throw new ConflictException(`«${offerItem.taskItem.name}»: доступно ${Math.max(0, remaining) / 1000} ${offerItem.taskItem.unit}, поставщик предложил ${offerItem.quantity.toString()} ${offerItem.taskItem.unit}`);
         }
         allocated.set(offerItem.taskItemId, (allocated.get(offerItem.taskItemId) ?? 0) + requested);
         if (offerItem.currency !== 'RUB') {
