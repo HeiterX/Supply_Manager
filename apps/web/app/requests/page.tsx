@@ -1,10 +1,9 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import AppShell from '../components/AppShell';
-
-const API_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000/api/v1';
+import AuthGate from '../components/AuthGate';
+import { API_BASE_URL, apiFetch } from '../../lib/api-client';
 
 type RequestItem = {
   id: string;
@@ -83,52 +82,32 @@ function requesterLabel(request: PurchaseRequest) {
   );
 }
 
-function getErrorMessage(data: unknown, fallback: string) {
+function getErrorMessage(data: unknown, fallback: string): string {
   if (!data || typeof data !== 'object') return fallback;
-
   const message = (data as { message?: unknown }).message;
-
   if (Array.isArray(message)) return message.join('. ');
   if (typeof message === 'string') return message;
-
   return fallback;
 }
 
-export default function RequestsPage() {
+function RequestsContent() {
   const [requests, setRequests] = useState<PurchaseRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [authRequired, setAuthRequired] = useState(false);
-  const [forbidden, setForbidden] = useState(false);
-
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [loginLoading, setLoginLoading] = useState(false);
-  const [loginError, setLoginError] = useState('');
-
   const [search, setSearch] = useState('');
   const [onlyNew, setOnlyNew] = useState(true);
 
-  async function loadRequests() {
+  const loadRequests = useCallback(async () => {
     setLoading(true);
     setError('');
-    setForbidden(false);
 
     try {
-      const response = await fetch(`${API_URL}/purchase-requests`, {
-        credentials: 'include',
+      const response = await apiFetch('/purchase-requests', {
         cache: 'no-store',
       });
 
-      if (response.status === 401) {
-        setAuthRequired(true);
-        setRequests([]);
-        return;
-      }
-
-      if (response.status === 403) {
-        setAuthRequired(false);
-        setForbidden(true);
+      // AuthGate получает событие от apiFetch и скрывает защищённую страницу.
+      if (response.status === 401 || response.status === 403) {
         setRequests([]);
         return;
       }
@@ -136,9 +115,7 @@ export default function RequestsPage() {
       const data = (await response.json().catch(() => null)) as unknown;
 
       if (!response.ok) {
-        throw new Error(
-          getErrorMessage(data, 'Не удалось загрузить заявки'),
-        );
+        throw new Error(getErrorMessage(data, 'Не удалось загрузить заявки'));
       }
 
       if (!Array.isArray(data)) {
@@ -146,7 +123,6 @@ export default function RequestsPage() {
       }
 
       setRequests(data as PurchaseRequest[]);
-      setAuthRequired(false);
     } catch (requestError) {
       setError(
         requestError instanceof Error
@@ -156,59 +132,17 @@ export default function RequestsPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
     void loadRequests();
-  }, []);
-
-  async function handleLogin(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setLoginError('');
-    setLoginLoading(true);
-
-    try {
-      const response = await fetch(`${API_URL}/auth/login`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          username: username.trim(),
-          password,
-        }),
-      });
-
-      const data = (await response.json().catch(() => null)) as unknown;
-
-      if (!response.ok) {
-        throw new Error(
-          getErrorMessage(data, 'Не удалось выполнить вход'),
-        );
-      }
-
-      setPassword('');
-      setAuthRequired(false);
-
-      await loadRequests();
-    } catch (loginRequestError) {
-      setLoginError(
-        loginRequestError instanceof Error
-          ? loginRequestError.message
-          : 'Не удалось выполнить вход',
-      );
-    } finally {
-      setLoginLoading(false);
-    }
-  }
+  }, [loadRequests]);
 
   const filteredRequests = useMemo(() => {
     const query = search.trim().toLowerCase();
 
     return requests.filter((request) => {
       if (onlyNew && request.status !== 'NEW') return false;
-
       if (!query) return true;
 
       const haystack = [
@@ -224,114 +158,11 @@ export default function RequestsPage() {
     });
   }, [requests, search, onlyNew]);
 
-  const newCount = requests.filter(
-    (request) => request.status === 'NEW',
-  ).length;
-
+  const newCount = requests.filter((request) => request.status === 'NEW').length;
   const positionsCount = requests.reduce(
     (sum, request) => sum + request.items.length,
     0,
   );
-
-  if (authRequired) {
-    return (
-      <AppShell
-        title="Входящие заявки"
-        subtitle="Заявки сотрудников на закупку"
-      >
-        <div className="mx-auto max-w-md pt-6 sm:pt-12">
-          <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-7">
-            <div className="grid h-12 w-12 place-items-center rounded-2xl bg-blue-50 text-blue-600">
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                className="h-6 w-6"
-                stroke="currentColor"
-                strokeWidth="1.8"
-              >
-                <rect x="5" y="10" width="14" height="10" rx="2" />
-                <path d="M8 10V7a4 4 0 0 1 8 0v3" />
-              </svg>
-            </div>
-
-            <h2 className="mt-5 text-xl font-semibold tracking-tight">
-              Вход для сотрудника снабжения
-            </h2>
-
-            <p className="mt-2 text-sm leading-6 text-slate-500">
-              Входящие заявки доступны сотрудникам с ролью PROCUREMENT
-              или ADMIN.
-            </p>
-
-            <form onSubmit={handleLogin} className="mt-6 space-y-4">
-              <label className="block">
-                <span className="mb-2 block text-sm font-medium text-slate-700">
-                  Логин
-                </span>
-
-                <input
-                  value={username}
-                  onChange={(event) => setUsername(event.target.value)}
-                  autoComplete="username"
-                  required
-                  className="h-12 w-full rounded-xl border border-slate-200 px-4 text-base outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
-                />
-              </label>
-
-              <label className="block">
-                <span className="mb-2 block text-sm font-medium text-slate-700">
-                  Пароль
-                </span>
-
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  autoComplete="current-password"
-                  required
-                  className="h-12 w-full rounded-xl border border-slate-200 px-4 text-base outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
-                />
-              </label>
-
-              {loginError && (
-                <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                  {loginError}
-                </div>
-              )}
-
-              <button
-                type="submit"
-                disabled={loginLoading}
-                className="flex h-12 w-full items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {loginLoading ? 'Входим…' : 'Войти'}
-              </button>
-            </form>
-          </section>
-        </div>
-      </AppShell>
-    );
-  }
-
-  if (forbidden) {
-    return (
-      <AppShell
-        title="Входящие заявки"
-        subtitle="Заявки сотрудников на закупку"
-      >
-        <div className="rounded-3xl border border-amber-200 bg-amber-50 p-6">
-          <h2 className="text-lg font-semibold text-amber-950">
-            Недостаточно прав
-          </h2>
-
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-amber-800">
-            Аккаунт успешно авторизован, но для просмотра всех заявок
-            нужна роль PROCUREMENT или ADMIN.
-          </p>
-        </div>
-      </AppShell>
-    );
-  }
 
   return (
     <AppShell
@@ -367,7 +198,6 @@ export default function RequestsPage() {
               <circle cx="11" cy="11" r="7" />
               <path d="m16 16 4 4" />
             </svg>
-
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
@@ -419,11 +249,7 @@ export default function RequestsPage() {
               <path d="M8 9h8M8 13h5" />
             </svg>
           </div>
-
-          <h2 className="mt-4 font-semibold text-slate-800">
-            Заявок не найдено
-          </h2>
-
+          <h2 className="mt-4 font-semibold text-slate-800">Заявок не найдено</h2>
           <p className="mt-1 text-sm text-slate-400">
             Попробуйте изменить фильтр или строку поиска.
           </p>
@@ -440,9 +266,7 @@ export default function RequestsPage() {
                     item.id === updatedRequest.id ? updatedRequest : item,
                   ),
                 );
-
-                // После принятия статус станет CONVERTED.
-                // Показываем все заявки, чтобы карточка не исчезла.
+                // После принятия статус меняется; показываем и не-новые заявки.
                 setOnlyNew(false);
               }}
             />
@@ -471,10 +295,7 @@ function StatCard({
       >
         {value}
       </div>
-
-      <div className="mt-1 text-xs font-medium text-slate-400">
-        {label}
-      </div>
+      <div className="mt-1 text-xs font-medium text-slate-400">{label}</div>
     </div>
   );
 }
@@ -492,37 +313,25 @@ function RequestCard({
 
   async function handleAccept() {
     if (accepting) return;
-
     setAccepting(true);
     setAcceptError('');
 
     try {
-      const response = await fetch(
-        `${API_URL}/purchase-requests/${request.id}/accept`,
-        {
-          method: 'PATCH',
-          credentials: 'include',
-        },
+      const response = await apiFetch(
+        `/purchase-requests/${request.id}/accept`,
+        { method: 'PATCH' },
       );
 
-      const data = (await response.json().catch(() => null)) as unknown;
-
       if (response.status === 401) {
-        throw new Error(
-          'Сессия истекла. Обновите страницу и войдите снова.',
-        );
+        throw new Error('Сессия истекла. Войдите повторно.');
       }
-
       if (response.status === 403) {
-        throw new Error(
-          'Недостаточно прав для принятия заявки.',
-        );
+        throw new Error('Недостаточно прав для принятия заявки.');
       }
 
+      const data = (await response.json().catch(() => null)) as unknown;
       if (!response.ok) {
-        throw new Error(
-          getErrorMessage(data, 'Не удалось принять заявку в работу'),
-        );
+        throw new Error(getErrorMessage(data, 'Не удалось принять заявку в работу'));
       }
 
       onAccepted(data as PurchaseRequest);
@@ -553,18 +362,15 @@ function RequestCard({
             <span className="text-sm font-semibold text-slate-950">
               Заявка №{request.number}
             </span>
-
             <span
               className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ${statusClass}`}
             >
               {statusLabels[request.status] ?? request.status}
             </span>
           </div>
-
           <div className="mt-2 text-base font-semibold text-slate-900">
             {requesterLabel(request)}
           </div>
-
           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-400">
             <span>{formatDateTime(request.createdAt)}</span>
             <span>
@@ -573,7 +379,6 @@ function RequestCard({
             </span>
           </div>
         </div>
-
         <svg
           viewBox="0 0 24 24"
           fill="none"
@@ -600,12 +405,10 @@ function RequestCard({
                     <div className="text-xs font-medium text-slate-400">
                       Позиция {index + 1}
                     </div>
-
                     <div className="mt-1 font-semibold text-slate-900">
                       {item.name}
                     </div>
                   </div>
-
                   <div className="shrink-0 rounded-xl bg-white px-3 py-2 text-sm font-semibold text-slate-700 ring-1 ring-slate-200">
                     {String(item.quantity)} {item.unit}
                   </div>
@@ -619,22 +422,20 @@ function RequestCard({
 
                 {item.photoPath && (
                   <a
-                    href={`${API_URL}/purchase-requests/public/items/${item.id}/photo`}
+                    href={`${API_BASE_URL}/purchase-requests/public/items/${item.id}/photo`}
                     target="_blank"
                     rel="noreferrer"
                     className="mt-3 flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-2.5 transition hover:border-blue-200 hover:bg-blue-50/40"
                   >
                     <img
-                      src={`${API_URL}/purchase-requests/public/items/${item.id}/photo`}
+                      src={`${API_BASE_URL}/purchase-requests/public/items/${item.id}/photo`}
                       alt={`Фото: ${item.name}`}
                       className="h-16 w-16 rounded-lg bg-slate-100 object-cover"
                     />
-
                     <div className="min-w-0">
                       <div className="text-sm font-medium text-slate-700">
                         Открыть фотографию
                       </div>
-
                       <div className="mt-0.5 truncate text-xs text-slate-400">
                         {item.photoOriginalName ?? 'Фото позиции'}
                       </div>
@@ -657,7 +458,6 @@ function RequestCard({
               <p className="text-xs leading-5 text-slate-400">
                 Следующий этап — принятие заявки и создание закупки.
               </p>
-
               <div className="sm:text-right">
                 <button
                   type="button"
@@ -667,7 +467,6 @@ function RequestCard({
                 >
                   {accepting ? 'Принимаем...' : 'Принять в работу'}
                 </button>
-
                 {acceptError && (
                   <p className="mt-2 max-w-sm text-sm leading-5 text-red-600">
                     {acceptError}
@@ -679,5 +478,13 @@ function RequestCard({
         </div>
       )}
     </article>
+  );
+}
+
+export default function RequestsPage() {
+  return (
+    <AuthGate>
+      <RequestsContent />
+    </AuthGate>
   );
 }
