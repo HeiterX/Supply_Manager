@@ -10,6 +10,14 @@ async function bootstrap() {
 
   app.setGlobalPrefix('api/v1');
 
+  // Trust only explicitly configured proxy addresses/subnets, never every hop.
+  const trustedProxies = process.env.TRUSTED_PROXY_CIDRS?.split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (trustedProxies?.length) {
+    app.getHttpAdapter().getInstance().set('trust proxy', trustedProxies);
+  }
+
   const allowedOrigins = (process.env.FRONTEND_ORIGIN ?? 'http://localhost:3001')
     .split(',')
     .map((origin) => origin.trim())

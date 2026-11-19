@@ -2,6 +2,8 @@ import {
   Body,
   Controller,
   Get,
+  Header,
+  Headers,
   HttpStatus,
   Param,
   Patch,
@@ -25,6 +27,8 @@ import {
   CreatePurchaseRequestDto,
 } from './dto/create-purchase-request.dto.js';
 import { PurchaseRequestsService } from './purchase-requests.service.js';
+import { PublicRequestRateLimitGuard } from './public-request-rate-limit.guard.js';
+import { PublicUploadTokenGuard } from './public-upload-token.guard.js';
 
 @Controller('purchase-requests')
 export class PurchaseRequestsController {
@@ -37,6 +41,8 @@ export class PurchaseRequestsController {
    * Регистрация и авторизация работнику не нужны.
    */
   @Post('public')
+  @Header('Cache-Control', 'no-store')
+  @UseGuards(PublicRequestRateLimitGuard)
   createPublic(@Body() dto: CreatePublicPurchaseRequestDto) {
     return this.purchaseRequestsService.createPublic(dto);
   }
@@ -45,24 +51,25 @@ export class PurchaseRequestsController {
    * Загрузка фотографии конкретной позиции.
    */
   @Post('public/:requestId/items/:itemId/photo')
+  @UseGuards(PublicRequestRateLimitGuard, PublicUploadTokenGuard)
   @UseInterceptors(
     FileInterceptor('photo', {
       limits: {
         fileSize: 8 * 1024 * 1024,
         files: 1,
+        fields: 0,
+        parts: 1,
       },
     }),
   )
   uploadPublicItemPhoto(
     @Param('requestId') requestId: string,
     @Param('itemId') itemId: string,
+    @Headers('x-upload-token') uploadToken: string | undefined,
     @UploadedFile(
       new ParseFilePipeBuilder()
-        .addFileTypeValidator({
-          fileType: /^image\/(jpeg|png|webp)$/,
-        })
         .addMaxSizeValidator({
-          maxSize: 8 * 1024 * 1024,
+          maxSize: 8 * 1024 * 1024 + 1,
         })
         .build({
           errorHttpStatusCode: HttpStatus.BAD_REQUEST,
@@ -74,6 +81,7 @@ export class PurchaseRequestsController {
       requestId,
       itemId,
       photo,
+      uploadToken,
     );
   }
 
@@ -81,17 +89,21 @@ export class PurchaseRequestsController {
    * Получение фотографии позиции.
    */
   @Get('public/items/:itemId/photo')
+  @UseGuards(JwtAuthGuard)
   async getPublicItemPhoto(
+    @CurrentUser() user: AuthUser,
     @Param('itemId') itemId: string,
     @Res() response: Response,
   ) {
     const photo =
-      await this.purchaseRequestsService.getPublicItemPhoto(itemId);
+      await this.purchaseRequestsService.getPublicItemPhoto(user, itemId);
 
-    return response.sendFile(photo.absolutePath, {
+    return response.sendFile(photo.filename, {
+      root: photo.directory,
       headers: {
         'Content-Type': photo.mimeType,
-        'Cache-Control': 'private, max-age=3600',
+        'Cache-Control': 'private, no-store',
+        'X-Content-Type-Options': 'nosniff',
       },
     });
   }
