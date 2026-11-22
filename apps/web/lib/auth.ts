@@ -1,5 +1,6 @@
 
 import { apiFetch } from './api-client';
+import { apiError, ApiError } from './api-error';
 
 export type UserRole = 'EMPLOYEE' | 'PROCUREMENT' | 'ADMIN';
 
@@ -9,29 +10,6 @@ export type AuthUser = {
   fullName: string;
   role: UserRole;
 };
-
-type ApiErrorResponse = {
-  message?: string | string[];
-};
-
-async function getErrorMessage(
-  response: Response,
-  fallback: string,
-): Promise<string> {
-  const data = (await response.json().catch(() => null)) as
-    | ApiErrorResponse
-    | null;
-
-  if (Array.isArray(data?.message)) {
-    return data.message.join('; ');
-  }
-
-  if (typeof data?.message === 'string') {
-    return data.message;
-  }
-
-  return fallback;
-}
 
 /**
  * Проверяет существующую cookie-сессию.
@@ -51,12 +29,7 @@ export async function getCurrentUser(signal?: AbortSignal): Promise<AuthUser | n
   }
 
   if (!response.ok) {
-    throw new Error(
-      await getErrorMessage(
-        response,
-        'Не удалось проверить авторизацию',
-      ),
-    );
+    throw await apiError(response, 'Не удалось проверить авторизацию.');
   }
 
   return (await response.json()) as AuthUser;
@@ -82,9 +55,9 @@ export async function signIn(
   });
 
   if (!response.ok) {
-    throw new Error(
-      await getErrorMessage(response, 'Не удалось войти в систему'),
-    );
+    if (response.status === 401) throw new ApiError('Проверьте логин и пароль.', 401);
+    if (response.status === 403) throw new ApiError('Учётная запись недоступна. Обратитесь к администратору.', 403);
+    throw await apiError(response, 'Не удалось войти в систему.', { username: 'Логин', password: 'Пароль' });
   }
 
   const data = (await response.json()) as {
@@ -104,6 +77,6 @@ export async function signOut(): Promise<void> {
   });
 
   if (!response.ok) {
-    throw new Error('Не удалось завершить сеанс');
+    throw await apiError(response, 'Не удалось завершить сеанс.');
   }
 }

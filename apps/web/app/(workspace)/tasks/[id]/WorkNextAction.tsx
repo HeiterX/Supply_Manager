@@ -4,8 +4,8 @@ import { useCallback, useState, type ReactNode } from 'react';
 import LoadError from '@/app/components/LoadError';
 import { Badge, Button, Card } from '@/app/components/ui';
 import { apiFetch } from '@/lib/api-client';
+import { apiError, apiProblem, type ApiError } from '@/lib/api-error';
 import { useAbortableLoad } from '@/lib/use-abortable-load';
-import { workingError } from '@/lib/working-list';
 
 type Action = { title: string; assignee: { fullName: string } | null; dueAt: string | null; reminderAt: string | null; status: string; task: { id: string } };
 const statuses: Record<string, string> = {
@@ -19,17 +19,19 @@ const date = (value: string | null) => value ? dateFormat.format(new Date(value)
 export default function WorkNextAction({ id, history, fallback, children }: {
   id: string; history: () => void; fallback: ReactNode; children: ReactNode;
 }) {
-  const [result, setResult] = useState<{ action?: Action | null; error?: string }>();
+  const [result, setResult] = useState<{ action?: Action | null; error?: string | ApiError; unavailable?: boolean }>();
   const load = useCallback(async (signal: AbortSignal) => {
     try {
       const response = await apiFetch(`/next-actions/by-task/${encodeURIComponent(id)}`, { signal, cache: 'no-store' });
-      if (response.status === 404) return;
-      if (!response.ok) throw new Error(await workingError(response, 'Не удалось загрузить следующее действие.'));
+      if (response.status === 404) {
+        if (!signal.aborted) setResult({ unavailable: true });
+        return;
+      }
+      if (!response.ok) throw await apiError(response, 'Не удалось загрузить следующее действие.');
       const { action } = await response.json() as { action: Action | null };
       if (!signal.aborted) setResult({ action: action?.task.id === id ? action : null });
     } catch (error) {
-      if (!signal.aborted) setResult({ error: error instanceof TypeError ? 'Проверьте подключение.' :
-        error instanceof Error ? error.message : 'Не удалось загрузить следующее действие.' });
+      if (!signal.aborted) setResult({ error: apiProblem(error, 'Не удалось загрузить следующее действие.') });
     }
   }, [id]);
   const retry = useAbortableLoad(load);
@@ -40,6 +42,7 @@ export default function WorkNextAction({ id, history, fallback, children }: {
       {action && <Badge tone={action.status === 'OVERDUE' ? 'danger' : 'info'}>{statuses[action.status] ?? action.status}</Badge>}
     </div>
     {result?.error && <LoadError message={result.error} retry={() => void retry()} />}
+    {result?.unavailable && <p className="text-xs text-muted">Сервис структурированных действий пока недоступен. Показано действие из карточки закупки.</p>}
     {action ? <>
       <p className="text-lg font-semibold">{action.title}</p>
       <dl className="grid gap-2 text-sm sm:grid-cols-3">

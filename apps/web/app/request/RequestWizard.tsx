@@ -3,7 +3,9 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Alert, Badge, Button, Card, Field, Input, Textarea } from '@/app/components/ui';
 import { apiFetch } from '@/lib/api-client';
-import { workingError } from '@/lib/working-list';
+import { apiError, apiMessage, couldHaveSaved, type ApiError } from '@/lib/api-error';
+import { useFocusAfterRender } from '@/lib/use-focus-after-render';
+import { useRetryDelay } from '@/lib/use-retry-delay';
 
 type Item = { id: number; name: string; quantity: string; unit: string; description: string; photo: File | null };
 type Created = { id: string; number: number; items: { id: string; sortOrder: number }[]; uploadToken: string };
@@ -40,15 +42,22 @@ export default function RequestWizard() {
   const [validated, setValidated] = useState(false);
   const [photoErrors, setPhotoErrors] = useState<Record<number, string>>({});
   const [error, setError] = useState('');
+  const [validation, setValidation] = useState<ApiError>();
   const [uncertain, setUncertain] = useState(false);
   const [busy, setBusy] = useState(false);
   const [number, setNumber] = useState<number>();
   const [progress, setProgress] = useState('');
   const [failed, setFailed] = useState(0);
   const [canRetryPhotos, setCanRetryPhotos] = useState(false);
+  const [photoRetryAt, setPhotoRetryAt] = useState<number | null>(null);
+  const waiting = useRetryDelay(validation?.retryAt);
+  const waitingForPhotos = useRetryDelay(photoRetryAt);
   const sequence = useRef(1);
   const lock = useRef(false);
   const heading = useRef<HTMLHeadingElement>(null);
+  const success = useRef<HTMLHeadingElement>(null);
+  const form = useRef<HTMLFormElement>(null);
+  const focus = useFocusAfterRender();
   const uploads = useRef<{ token: string; pending: Upload[] } | null>(null);
   const dirty = Boolean(name || items.length > 1 || items.some((item) => item.name || item.description || item.photo || item.quantity !== '1' || item.unit !== 'шт.'));
 
@@ -59,14 +68,15 @@ export default function RequestWizard() {
     return () => window.removeEventListener('beforeunload', warn);
   }, [dirty, number]);
 
-  function navigate(next: number) {
+  function navigate(next: number, invalid = false) {
     setStep(next);
-    setValidated(false);
-    heading.current?.focus();
+    setValidated(invalid);
+    focus(() => (invalid ? form.current?.querySelector<HTMLElement>('[aria-invalid="true"]') : null) ?? heading.current);
   }
 
   function update(id: number, change: Partial<Item>) {
     setItems((current) => current.map((item) => item.id === id ? { ...item, ...change } : item));
+    if (validation && !validation.retryAt) { setValidation(undefined); setError(''); }
   }
 
   function photo(item: Item, file: File | null) {
@@ -80,6 +90,7 @@ export default function RequestWizard() {
     const current = uploads.current;
     if (!current) return;
     const remaining: Upload[] = [];
+    setPhotoRetryAt(null);
     for (const [index, entry] of current.pending.entries()) {
       setProgress(`Загружаем фото ${index + 1} из ${current.pending.length}`);
       const body = new FormData();
@@ -88,7 +99,14 @@ export default function RequestWizard() {
         const response = await apiFetch(`/purchase-requests/public/${entry.id}/items/${entry.itemId}/photo`, {
           method: 'POST', headers: { 'X-Upload-Token': current.token }, body,
         });
-        if (!response.ok) remaining.push(entry);
+        if (!response.ok) {
+          if (response.status === 429) {
+            setPhotoRetryAt((await apiError(response, '')).retryAt);
+            remaining.push(...current.pending.slice(index));
+            break;
+          }
+          remaining.push(entry);
+        }
       } catch { remaining.push(entry); }
     }
     uploads.current = remaining.length ? { token: current.token, pending: remaining } : null;
@@ -99,9 +117,13 @@ export default function RequestWizard() {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (lock.current || uncertain) return;
+    if (lock.current || uncertain || (step === 3 && waiting)) return;
     if (step === 0 && name.trim().length < 2 || step === 1 && items.some((item) => Object.values(itemErrors(item)).some(Boolean))) {
-      setValidated(true);
+      navigate(step, true);
+      return;
+    }
+    if (step === 2 && items.some((item) => photoErrors[item.id])) {
+      focus(() => form.current?.querySelector<HTMLElement>('[aria-invalid="true"]'));
       return;
     }
     if (step < 3) { navigate(step + 1); return; }
@@ -109,6 +131,7 @@ export default function RequestWizard() {
     lock.current = true;
     setBusy(true);
     setError('');
+    setValidation(undefined);
     try {
       const response = await apiFetch('/purchase-requests/public', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -117,14 +140,22 @@ export default function RequestWizard() {
           description: item.description.trim() || undefined,
         })) }),
       });
-      if (!response.ok && response.status < 500) {
-        setError(await workingError(response, 'Заявка не принята. Проверьте введённые данные.'));
-        return;
+      if (!response.ok) {
+        const failure = await apiError(response, 'Не удалось отправить заявку.', {
+          requesterName: 'Имя и фамилия заявителя',
+          ...Object.fromEntries(items.flatMap((_, index) => Object.entries({
+            name: 'Наименование', quantity: 'Количество', unit: 'Единица измерения', description: 'Характеристики и комментарий',
+          }).map(([field, label]) => [`items.${index}.${field}`, label]))),
+        });
+        setValidation(failure);
+        if (failure.fields.requesterName) navigate(0, true);
+        else if (Object.keys(failure.fields).length) navigate(1, true);
+        throw failure;
       }
-      if (!response.ok) throw new Error();
       const created = await response.json() as Created;
       if (!created.id || !Number.isInteger(created.number) || !Array.isArray(created.items)) throw new Error();
       setNumber(created.number);
+      focus(() => success.current);
       const lines = [...created.items].sort((a, b) => a.sortOrder - b.sortOrder);
       const pending = items.flatMap((item, index) => item.photo && lines[index]
         ? [{ id: created.id, itemId: lines[index].id, file: item.photo }] : []);
@@ -136,9 +167,11 @@ export default function RequestWizard() {
       }
       setName('');
       setItems([newItem(++sequence.current)]);
-    } catch {
-      setUncertain(true);
-      setError('Подтверждение не получено. Уточните в отделе снабжения, зарегистрирована ли заявка.');
+    } catch (failure) {
+      const unknown = couldHaveSaved(failure);
+      setUncertain(unknown);
+      setError(unknown ? 'Подтверждение не получено. Уточните в отделе снабжения, зарегистрирована ли заявка.'
+        : apiMessage(failure, 'Не удалось отправить заявку.'));
     } finally {
       lock.current = false;
       setBusy(false);
@@ -146,7 +179,7 @@ export default function RequestWizard() {
   }
 
   async function retryPhotos() {
-    if (lock.current || !uploads.current) return;
+    if (lock.current || waitingForPhotos || !uploads.current) return;
     lock.current = true;
     setBusy(true);
     try { await upload(); } finally { lock.current = false; setBusy(false); }
@@ -156,12 +189,14 @@ export default function RequestWizard() {
     <div className="mx-auto max-w-3xl space-y-5">
       <div className="flex items-center gap-3"><span className="brand-mark" aria-hidden="true">SM</span><span className="font-semibold">Supply Manager</span></div>
       {number !== undefined ? <Card className="space-y-4 p-5 sm:p-7">
-        <h1 className="text-2xl font-bold">Заявка №{number} отправлена</h1>
+        <h1 ref={success} tabIndex={-1} className="text-2xl font-bold">Заявка №{number} отправлена</h1>
         <p className="text-sm text-muted">Сохраните номер для обращений в отдел снабжения.</p>
         {progress && <Alert>{progress}</Alert>}
         {failed > 0 && <Alert tone="warning">Заявка сохранена. Фотографий с ошибкой загрузки: {failed}.</Alert>}
         <div className="flex flex-wrap gap-2">
-          {failed > 0 && canRetryPhotos && <Button loading={busy} onClick={() => void retryPhotos()}>Повторить загрузку фото</Button>}
+          {failed > 0 && canRetryPhotos && <Button loading={busy} disabled={waitingForPhotos} onClick={() => void retryPhotos()}>
+            {waitingForPhotos ? 'Повторная загрузка пока недоступна' : 'Повторить загрузку фото'}
+          </Button>}
           <Button variant="outline" disabled={busy} onClick={() => {
             uploads.current = null; setNumber(undefined); setFailed(0); setCanRetryPhotos(false); setPhotoErrors({}); setError(''); navigate(0);
           }}>Подать ещё заявку</Button>
@@ -173,14 +208,15 @@ export default function RequestWizard() {
             <Badge tone={index === step ? 'info' : 'neutral'}>{index + 1}. {label}</Badge>
           </li>)}
         </ol>
-        <h2 ref={heading} tabIndex={-1} className="text-lg font-semibold outline-none">{steps[step]}</h2>
-        <form noValidate onSubmit={submit} className="space-y-4">
+        <h2 ref={heading} tabIndex={-1} className="text-lg font-semibold">{steps[step]}</h2>
+        <form ref={form} noValidate onSubmit={submit} className="space-y-4">
           <fieldset disabled={busy || uncertain} className="min-w-0 space-y-4">
             {step === 0 && <Card className="p-4 sm:p-6">
-              <Field id="request-name" label="Имя и фамилия заявителя" error={validated && name.trim().length < 2 ? 'Введите имя заявителя.' : undefined}>
+              <Field id="request-name" label="Имя и фамилия заявителя"
+                error={validation?.fields.requesterName ?? (validated && name.trim().length < 2 ? 'Введите имя заявителя.' : undefined)}>
                 <Input id="request-name" autoComplete="name" required maxLength={120} value={name}
                   aria-invalid={validated && name.trim().length < 2} aria-describedby={validated && name.trim().length < 2 ? 'request-name-error' : undefined}
-                  onChange={(event) => setName(event.target.value)} />
+                  onChange={(event) => { setName(event.target.value); if (validation?.fields.requesterName) { setValidation(undefined); setError(''); } }} />
               </Field>
             </Card>}
             {step === 1 && <>
@@ -193,13 +229,14 @@ export default function RequestWizard() {
                     {items.length > 1 && <Button variant="ghost" onClick={() => setItems((current) => current.filter(({ id }) => id !== item.id))}>Удалить позицию {index + 1}</Button>}
                   </div>
                   {(['name', 'quantity', 'unit'] as const).map((field) => <Field key={field} id={id(field)}
-                    label={{ name: 'Наименование', quantity: 'Количество', unit: 'Единица измерения' }[field]} error={errors[field]}>
+                    label={{ name: 'Наименование', quantity: 'Количество', unit: 'Единица измерения' }[field]}
+                    error={validation?.fields[`items.${index}.${field}`] ?? errors[field]}>
                     <Input id={id(field)} required value={item[field]} maxLength={{ name: 250, quantity: 16, unit: 50 }[field]}
                       inputMode={field === 'quantity' ? 'decimal' : 'text'} aria-invalid={Boolean(errors[field])}
                       aria-describedby={errors[field] ? `${id(field)}-error` : undefined}
                       onChange={(event) => update(item.id, { [field]: event.target.value })} />
                   </Field>)}
-                  <Field id={id('description')} label="Характеристики и комментарий">
+                  <Field id={id('description')} label="Характеристики и комментарий" error={validation?.fields[`items.${index}.description`]}>
                     <Textarea id={id('description')} rows={3} maxLength={3000} value={item.description}
                       placeholder="Артикул, маркировка, параметры или допустимые аналоги"
                       onChange={(event) => update(item.id, { description: event.target.value })} />
@@ -224,6 +261,7 @@ export default function RequestWizard() {
                     <span>{item.photo.name}</span><Button variant="ghost" onClick={() => photo(item, null)}>Удалить фото</Button>
                   </div>
                 </>}
+                {!item.photo && photoErrors[item.id] && <Button variant="ghost" onClick={() => photo(item, null)}>Пропустить фото</Button>}
               </Card>)}
             </>}
             {step === 3 && <Card className="space-y-4 p-4 [overflow-wrap:anywhere] sm:p-6">
@@ -241,7 +279,9 @@ export default function RequestWizard() {
           {error && <Alert tone="danger">{error}</Alert>}
           <div className="flex flex-wrap justify-between gap-2">
             {step > 0 && <Button variant="outline" disabled={busy || uncertain} onClick={() => navigate(step - 1)}>Назад</Button>}
-            <Button type="submit" className="ml-auto" loading={busy} disabled={uncertain}>{step < 3 ? 'Продолжить' : 'Отправить заявку'}</Button>
+            <Button type="submit" className="ml-auto" loading={busy} disabled={uncertain || (step === 3 && waiting)}>
+              {step < 3 ? 'Продолжить' : 'Отправить заявку'}
+            </Button>
           </div>
         </form>
       </>}

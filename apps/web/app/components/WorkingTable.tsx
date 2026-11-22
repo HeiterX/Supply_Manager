@@ -16,10 +16,11 @@ const purchaseViews = [
 const sorts = [['createdAt', 'Дата создания'], ['number', 'Номер'], ['deadline', 'Срок'], ['priority', 'Приоритет'], ['status', 'Статус']] as const;
 const presetKey = 'supply-manager:procurement-view';
 
-export function WorkingTableControls({ list, statuses, purchases = false }: {
+export function WorkingTableControls({ list, statuses, purchases = false, registry = false }: {
   list: WorkingList;
   statuses: readonly Choice[];
   purchases?: boolean;
+  registry?: boolean;
 }) {
   const { query, change } = list;
   const [feedback, setFeedback] = useState('');
@@ -73,7 +74,7 @@ export function WorkingTableControls({ list, statuses, purchases = false }: {
         onSubmit={(event) => { event.preventDefault(); update({ q: String(new FormData(event.currentTarget).get('q') ?? '').trim() }); }}>
         <div className="min-w-0 flex-1">
           <Field id="working-search" label="Поиск"><Input id="working-search" name="q" type="search"
-            defaultValue={query.get('q') ?? ''} maxLength={120} placeholder="Номер или название" /></Field>
+            defaultValue={query.get('q') ?? ''} maxLength={120} placeholder={registry ? 'Позиция, артикул или закупка' : 'Номер или название'} /></Field>
         </div>
         <Button type="submit" variant="outline">Найти</Button>
       </form>
@@ -84,6 +85,7 @@ export function WorkingTableControls({ list, statuses, purchases = false }: {
       <Field id="working-sort" label="Сортировка"><Select id="working-sort" value={query.get('sort') ?? 'createdAt'}
         onChange={(event) => update({ sort: event.target.value })}>
         {sorts.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        {registry && <option value="name">Наименование</option>}
       </Select></Field>
       <Field id="working-direction" label="Порядок"><Select id="working-direction" value={query.get('direction') ?? 'desc'}
         onChange={(event) => update({ direction: event.target.value })}>
@@ -101,11 +103,12 @@ export function WorkingTableControls({ list, statuses, purchases = false }: {
   </Card>;
 }
 
-export function WorkingTable({ list, label, headers, empty, children }: {
+export function WorkingTable({ list, label, headers, empty, filtered = false, children }: {
   list: WorkingList;
   label: string;
   headers: string[];
   empty: string;
+  filtered?: boolean;
   children: ReactNode;
 }) {
   const { page, query, change, loading, legacy } = list;
@@ -116,11 +119,14 @@ export function WorkingTable({ list, label, headers, empty, children }: {
     change(next);
   }
 
+  const narrowed = filtered || [...query.keys()].some((key) => !['page', 'pageSize', 'sort', 'direction'].includes(key))
+    || Number(query.get('page')) > 1;
   return <div className="min-w-0 space-y-3" aria-busy={loading}>
     {loading && <p role="status" className="sr-only">Загрузка списка</p>}
     {list.error ? <LoadError message={list.error} retry={list.reload} /> : !page ? <Skeleton /> : <>
       {page.items.length === 0
-        ? <EmptyState title={empty} description={query.size ? 'Измените фильтры или вернитесь на первую страницу.' : undefined} />
+        ? <EmptyState title={narrowed ? 'По текущим параметрам ничего не найдено' : empty}
+          description={narrowed ? 'Измените поиск или фильтры либо вернитесь на первую страницу.' : undefined} />
         : <TableRegion label={label} className={`working-table md:border md:border-border md:bg-surface ${loading ? 'opacity-60' : ''}`}>
           <table role="table"><thead role="rowgroup"><tr role="row">{headers.map((header) => <th key={header} scope="col">{header}</th>)}</tr></thead>
             <tbody role="rowgroup">{children}</tbody>

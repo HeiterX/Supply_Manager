@@ -1,23 +1,17 @@
 'use client';
 
 import { usePathname, useSearchParams } from 'next/navigation';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { apiFetch } from './api-client';
+import { apiError, apiProblem, type ApiError } from './api-error';
 import { useAbortableLoad } from './use-abortable-load';
 
 type ListPage<T> = { items: T[]; total: number; page: number; pageSize: number; hasPrevious: boolean; hasNext: boolean };
-type Result<T> = { key: string; page?: ListPage<T>; legacy?: boolean; error?: string };
-type Entity = 'tasks' | 'requests';
+type Result<T> = { key: string; page?: ListPage<T>; legacy?: boolean; error?: string | ApiError };
+const legacyPaths = { tasks: '/tasks', requests: '/purchase-requests', items: '/tasks/items/registry' } as const;
+type Entity = keyof typeof legacyPaths;
 export const viewKeys = ['view', 'status', 'overdue', 'delivery', 'priority', 'sort', 'direction', 'pageSize'] as const;
 const queryKeys = ['q', ...viewKeys, 'page', 'supplier', 'payment', 'hasOrders', 'createdFrom', 'createdTo', 'deadlineFrom', 'deadlineTo'];
-
-export async function workingError(response: Response, fallback: string) {
-  const body = await response.json().catch(() => null) as { message?: unknown } | null;
-  if (response.status === 403) return 'Недостаточно прав для этой операции.';
-  if (response.status === 401) return 'Сессия истекла. Войдите повторно.';
-  const message = Array.isArray(body?.message) ? body.message.join('. ') : body?.message;
-  return typeof message === 'string' && message ? message : fallback;
-}
 
 export function useWorkingList<T>(entity: Entity) {
   const pathname = usePathname();
@@ -31,21 +25,27 @@ export function useWorkingList<T>(entity: Entity) {
   const [result, setResult] = useState<Result<T>>();
   const [retry, setRetry] = useState(0);
   const requestKey = `${retry}:${key}`;
-  const knownLegacy = result?.legacy === true;
+  const legacyEntity = useRef<Entity | null>(null);
   const load = useCallback(async (signal: AbortSignal) => {
     try {
-      let response = await apiFetch(`/discovery/lists/${entity}?${key}`, { signal, cache: 'no-store' });
-      const legacy = response.status === 404;
-      if (legacy) response = await apiFetch(entity === 'tasks' ? '/tasks' : '/purchase-requests', { signal, cache: 'no-store' });
-      if (!response.ok) throw new Error(await workingError(response, 'Не удалось загрузить список.'));
+      const legacyPath = legacyPaths[entity];
+      const options = { signal, cache: 'no-store' } as const;
+      const knownLegacy = legacyEntity.current === entity;
+      let response = await apiFetch(knownLegacy ? legacyPath : `/discovery/lists/${entity}?${key}`, options);
+      const legacy = knownLegacy || response.status === 404;
+      if (legacy && !knownLegacy) {
+        if (signal.aborted) return;
+        legacyEntity.current = entity;
+        response = await apiFetch(legacyPath, options);
+      }
+      if (!response.ok) throw await apiError(response, 'Не удалось загрузить список.');
       const data: T[] | ListPage<T> = await response.json();
       const page = Array.isArray(data)
         ? { items: data, total: data.length, page: 1, pageSize: data.length, hasPrevious: false, hasNext: false }
         : data;
       if (!signal.aborted) setResult({ key: requestKey, page, legacy });
     } catch (error) {
-      if (!signal.aborted) setResult({ key: requestKey, error: error instanceof TypeError
-        ? 'Сервер недоступен. Проверьте подключение.' : error instanceof Error ? error.message : 'Не удалось загрузить список.' });
+      if (!signal.aborted) setResult({ key: requestKey, error: apiProblem(error, 'Не удалось загрузить список.') });
     }
   }, [entity, key, requestKey]);
   useAbortableLoad(load);
@@ -59,7 +59,7 @@ export function useWorkingList<T>(entity: Entity) {
     page: result?.page,
     error: current ? result?.error : undefined,
     loading: !current,
-    legacy: knownLegacy,
+    legacy: result?.legacy === true,
     query,
     change,
     href: key ? `${pathname}?${key}` : pathname,
@@ -75,7 +75,8 @@ export const priorityLabels: Record<string, string> = {
 
 const dateFormat = new Intl.DateTimeFormat('ru-RU', { dateStyle: 'medium', timeZone: 'Europe/Moscow' });
 export function workingDate(value?: string | null) {
-  return value ? dateFormat.format(new Date(value)) : 'Не указано';
+  const timestamp = value ? Date.parse(value) : NaN;
+  return Number.isFinite(timestamp) ? dateFormat.format(timestamp) : 'Не указано';
 }
 
 export function workingBack(value: string | null) {
@@ -85,5 +86,7 @@ export function workingBack(value: string | null) {
 }
 
 export function workingLink(path: string, back: string) {
-  return `${path}?${new URLSearchParams({ back })}`;
+  const url = new URL(path, 'https://supply-manager.invalid');
+  url.searchParams.set('back', back);
+  return url.pathname + url.search + url.hash;
 }

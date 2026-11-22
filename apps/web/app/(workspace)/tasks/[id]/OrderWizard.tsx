@@ -2,7 +2,9 @@
 
 import { useRef, useState, type FormEvent } from 'react';
 import { Modal } from '@/app/components/Modal';
+import { useConfirmation } from '@/app/components/use-confirmation';
 import { Alert, Badge, Button, Card, Field, Input, Textarea } from '@/app/components/ui';
+import { useFocusAfterRender } from '@/lib/use-focus-after-render';
 import type { SupplierOffer } from './ProcurementWorkspace';
 
 type Draft = { selected: boolean; quantity: string };
@@ -41,6 +43,9 @@ export default function OrderWizard({ initialOffer, offer, available, unavailabl
   })));
   const lock = useRef(false);
   const heading = useRef<HTMLHeadingElement>(null);
+  const form = useRef<HTMLFormElement>(null);
+  const focus = useFocusAfterRender();
+  const { confirm, confirmation } = useConfirmation();
   const lines = offer?.items ?? [];
   const selected = lines.filter((item) => draft[item.id]?.selected);
   const byId = new Map(lines.map((item) => [item.id, item]));
@@ -62,17 +67,20 @@ export default function OrderWizard({ initialOffer, offer, available, unavailabl
   const fingerprint = JSON.stringify([offer?.deliveryPrice, offer?.deliveryDays, selected.map((item) =>
     [item.id, item.unitPrice, item.currency, item.quantity, item.inStock])]);
 
-  function navigate(next: number) {
-    setStep(next); setChecked(false); heading.current?.focus();
+  function navigate(next: number, invalid = false) {
+    setStep(next);
+    setChecked(invalid);
+    focus(() => (invalid ? form.current?.querySelector<HTMLElement>('[aria-invalid="true"]') : null) ?? heading.current);
   }
 
   function update(id: string, patch: Partial<Draft>) {
     setDraft((current) => ({ ...current, [id]: { ...(current[id] ?? { selected: false, quantity: '' }), ...patch } }));
   }
 
-  function cancel() {
-    if (busy) return;
-    if ((invoice || invoiceDate || notes || step > 0) && !window.confirm('Закрыть форму и удалить черновик заказа?')) return;
+  async function cancel() {
+    if (lock.current) return;
+    if ((invoice || invoiceDate || notes || step > 0)
+      && !await confirm('Черновик заказа будет удалён. Восстановить введённые данные нельзя.', 'Удалить черновик', true)) return;
     close();
   }
 
@@ -81,7 +89,7 @@ export default function OrderWizard({ initialOffer, offer, available, unavailabl
     if (lock.current || unavailable || !offer) return;
     setError('');
     if (invalidRows) {
-      navigate(0); setChecked(true);
+      navigate(0, true);
       if (removed) {
         setDraft((current) => Object.fromEntries(Object.entries(current).filter(([id]) => byId.has(id))));
         setError('Некоторые позиции исключены из КП. Проверьте оставшиеся строки.');
@@ -90,7 +98,7 @@ export default function OrderWizard({ initialOffer, offer, available, unavailabl
     }
     if (unsupportedCurrency) { navigate(0); setError('Оформление заказа доступно для позиций с ценами в рублях.'); return; }
     if (step === 0) { navigate(1); return; }
-    if (invoiceError || dateError) { navigate(1); setChecked(true); return; }
+    if (invoiceError || dateError) { navigate(1, true); return; }
     if (step === 1) { setReviewed(fingerprint); navigate(2); return; }
     if (reviewed !== fingerprint) {
       setReviewed(fingerprint);
@@ -112,8 +120,8 @@ export default function OrderWizard({ initialOffer, offer, available, unavailabl
     } finally { lock.current = false; setBusy(false); }
   }
 
-  return <Modal busy={busy} title={`Оформить заказ · ${initialOffer.supplier.name}`} onClose={cancel}>
-    <form onSubmit={submit} noValidate className="space-y-4 [overflow-wrap:anywhere]">
+  return <><Modal busy={busy} title={`Оформить заказ · ${initialOffer.supplier.name}`} onClose={() => void cancel()}>
+    <form ref={form} onSubmit={submit} noValidate className="space-y-4 [overflow-wrap:anywhere]">
       <ol className="flex flex-wrap gap-2" aria-label="Этапы заказа">{steps.map((label, index) =>
         <li key={label} aria-current={step === index ? 'step' : undefined}><Badge tone={step === index ? 'info' : 'neutral'}>{index + 1}. {label}</Badge></li>)}</ol>
       <h3 ref={heading} tabIndex={-1} className="font-semibold">{steps[step]}</h3>
@@ -171,5 +179,5 @@ export default function OrderWizard({ initialOffer, offer, available, unavailabl
         <Button className="ml-auto" type="submit" loading={busy} disabled={unavailable}>{step === 2 ? 'Подтвердить заказ' : 'Продолжить'}</Button>
       </div>
     </form>
-  </Modal>;
+  </Modal>{confirmation}</>;
 }

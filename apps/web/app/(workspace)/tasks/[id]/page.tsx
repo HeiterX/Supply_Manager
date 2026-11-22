@@ -4,17 +4,19 @@ import { useConfirmation } from '@/app/components/use-confirmation';
 
 import { Modal, ModalActions } from '@/app/components/Modal';
 
-import { Input, Textarea, Select } from '@/app/components/ui';
+import { Button, Field as FormField, Input, Textarea, Select } from '@/app/components/ui';
 
 import { apiFetch } from '@/lib/api-client';
+import { apiError, apiMessage, apiProblem, ApiError, couldHaveSaved, isRetryPending } from '@/lib/api-error';
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
-import { workingBack, workingError } from '@/lib/working-list';
+import { workingBack } from '@/lib/working-list';
 import { OrderTracking } from './OrderTracking';
 import WorkNextAction from './WorkNextAction';
 import { milli, orderAllocation } from './allocation';
 import { Suspense, useCallback, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useAbortableLoad } from '@/lib/use-abortable-load';
+import { useFocusAfterRender } from '@/lib/use-focus-after-render';
 import { Alert, Skeleton, TableRegion } from '@/app/components/ui';
 import LoadError from '@/app/components/LoadError';
 import PageLayout from '@/app/components/PageLayout';
@@ -34,6 +36,14 @@ type Task = {
 
 type Tab = 'overview' | 'items' | 'offers' | 'order' | 'payments' | 'delivery' | 'history';
 const tabs = new Set<Tab>(['overview', 'items', 'offers', 'order', 'payments', 'delivery', 'history']);
+const itemLabels = {
+  name: 'Наименование', partNumber: 'Артикул / каталожный номер', quantity: 'Количество',
+  unit: 'Единица измерения', unitPrice: 'Ориентировочная цена за единицу, ₽', notes: 'Примечание',
+};
+
+function overviewOf(task: Task) {
+  return { priority: task.priority, nextAction: task.nextAction ?? '', reminderAt: toDateTimeLocal(task.reminderAt) };
+}
 type HistoryFilter = 'all' | 'events' | 'notes';
 
 const priorityLabels: Record<string, string> = { LOW: 'Низкий', NORMAL: 'Обычный', HIGH: 'Высокий', URGENT: 'Срочный' };
@@ -172,12 +182,18 @@ function TaskContent({ taskId }: { taskId: string }) {
   const [task, setTask] = useState<Task | null>(null);
   const { confirm, confirmation } = useConfirmation();
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState('');
+  const [loadError, setLoadError] = useState<string | ApiError>('');
   const search = useSearchParams();
   const tab = search.get('tab') as Tab;
   const activeTab = tabs.has(tab) ? tab : 'overview';
   const back = workingBack(search.get('back'));
   const actionLock = useRef(false);
+  const initialized = useRef(false);
+  const refreshSucceeded = useRef(false);
+  const latestTask = useRef<Task | null>(null);
+  const overviewBaseline = useRef<ReturnType<typeof overviewOf> | null>(null);
+  const unconfirmed = useRef(new Set<string>());
+  const retryAfter = useRef(new Map<string, number>());
   function setActiveTab(next: Tab) {
     if (activeTab === next) return;
     const params = new URLSearchParams(search);
@@ -188,11 +204,14 @@ function TaskContent({ taskId }: { taskId: string }) {
   const [message, setMessage] = useState('');
   const [actionError, setActionError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [itemErrors, setItemErrors] = useState<Record<string, string>>({});
+  const focus = useFocusAfterRender();
 
   const [priority, setPriority] = useState('NORMAL');
   const [nextAction, setNextAction] = useState('');
   const [reminderAt, setReminderAt] = useState('');
   const [editNextAction, setEditNextAction] = useState(false);
+  const [overviewConflict, setOverviewConflict] = useState(false);
 
   const [itemFormOpen, setItemFormOpen] = useState(false);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
@@ -236,25 +255,53 @@ function TaskContent({ taskId }: { taskId: string }) {
   const [historyFilter, setHistoryFilter] = useState<HistoryFilter>('all');
 
   const fetchTask = useCallback(async (signal: AbortSignal) => {
+    refreshSucceeded.current = false;
     try {
       const response = await apiFetch(`/tasks/${taskId}`, {
         cache: 'no-store',
         signal,
       });
-      if (!response.ok) throw new Error(await response.text());
+      if (!response.ok) throw await apiError(response, 'Не удалось загрузить карточку закупки.');
       const data = (await response.json()) as Task;
       if (signal.aborted) return;
+      refreshSucceeded.current = true;
+      latestTask.current = data;
       setLoadError('');
-      setTask(data); setPriority(data.priority); setNextAction(data.nextAction ?? ''); setReminderAt(toDateTimeLocal(data.reminderAt));
+      setTask(data);
+      if (!initialized.current) {
+        initialized.current = true;
+        overviewBaseline.current = overviewOf(data);
+        setPriority(data.priority);
+        setNextAction(data.nextAction ?? '');
+        setReminderAt(toDateTimeLocal(data.reminderAt));
+      }
     } catch (error) {
       if (signal.aborted) return;
-      console.error(error); setLoadError('Не удалось загрузить карточку закупки.');
+      const unavailable = error instanceof ApiError && [401, 403, 404].includes(error.status);
+      if (!initialized.current || unavailable) {
+        initialized.current = false;
+        setTask(null);
+        setLoadError(apiProblem(error, 'Не удалось загрузить карточку закупки.'));
+      }
     } finally { if (!signal.aborted) setLoading(false); }
   }, [taskId]);
   const loadTask = useAbortableLoad(fetchTask);
 
-  async function apiAction(path: string, init: RequestInit, success: string, onFailure?: (message: string) => void) {
+  async function apiAction(path: string, init: RequestInit, success: string, onFailure?: (message: string) => void,
+    validation?: { labels: Record<string, string>; show: (fields: Record<string, string>) => void }) {
     if (actionLock.current) return false;
+    const operation = `${init.method}:${path}`;
+    function report(error: string) {
+      setActionError(error);
+      onFailure?.(error);
+      return false;
+    }
+    if (isRetryPending(retryAfter.current.get(operation))) {
+      return report('Слишком много запросов. Подождите перед повтором.');
+    }
+    if (unconfirmed.current.has(operation)) {
+      return report('Проверьте результат предыдущей операции. Чтобы выполнить новое действие, сначала заново откройте карточку.');
+    }
     actionLock.current = true;
     setBusy(true); setMessage(''); setActionError('');
     try {
@@ -262,55 +309,107 @@ function TaskContent({ taskId }: { taskId: string }) {
         `/tasks/${taskId}${path}`,
         init,
       );
-      if (!response.ok) {
-        const error = await workingError(response, 'Не удалось выполнить действие.');
-        if (response.status === 409) {
-          await loadTask();
-          throw new Error(error + ' Данные обновлены. Проверьте их перед повтором.');
-        }
-        throw new Error(error);
-      }
-      await loadTask(); setMessage(success); return true;
+      if (!response.ok) throw await apiError(response, 'Не удалось выполнить действие.', validation?.labels);
+      await loadTask();
+      setMessage(refreshSucceeded.current ? success : success + '. Обновите карточку, чтобы увидеть новые данные.');
+      return true;
     } catch (error) {
-      const message = error instanceof TypeError ? 'Подтверждение не получено. Проверьте состояние закупки перед повтором.'
-        : error instanceof Error ? error.message : 'Не удалось выполнить действие.';
-      if (error instanceof TypeError) await loadTask();
-      setActionError(message);
-      onFailure?.(message);
-      return false;
+      if (error instanceof ApiError && Object.keys(error.fields).length) validation?.show(error.fields);
+      if (error instanceof ApiError && error.retryAt) retryAfter.current.set(operation, error.retryAt);
+      if (error instanceof ApiError && error.status === 409) {
+        await loadTask();
+        if (!refreshSucceeded.current) unconfirmed.current.add(operation);
+        return report(refreshSucceeded.current
+          ? 'Данные изменились. Карточка обновлена. Проверьте её перед повтором.'
+          : 'Данные изменились. Заново откройте карточку перед повтором.');
+      }
+      if (couldHaveSaved(error)) {
+        unconfirmed.current.add(operation);
+        await loadTask();
+        return report('Подтверждение не получено. Проверьте состояние закупки перед повтором.');
+      }
+      return report(apiMessage(error, 'Не удалось выполнить действие.'));
     }
     finally { actionLock.current = false; setBusy(false); }
   }
 
   async function saveOverview(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await apiAction('', {
+    if (!task || !overviewBaseline.current || actionLock.current || overviewConflict) return;
+    const baseline = overviewBaseline.current;
+    const draft = { priority, nextAction, reminderAt };
+    const current = overviewOf(task);
+    const edited = (Object.keys(draft) as Array<keyof typeof draft>).filter((key) => draft[key] !== baseline[key]);
+    if (edited.some((key) => current[key] !== baseline[key] && current[key] !== draft[key])) {
+      setOverviewConflict(true);
+      setActionError('Эти поля уже изменены в закупке. Сверьте черновик с актуальными значениями.');
+      return;
+    }
+    if (edited.includes('reminderAt') && !reminderAt) {
+      setActionError('Укажите новую дату напоминания. Удаление напоминания пока недоступно.');
+      return;
+    }
+    if (edited.length === 0) return;
+    const body = Object.fromEntries(edited.map((key) => [key, key === 'reminderAt' ? new Date(reminderAt).toISOString() : draft[key]]));
+    const ok = await apiAction('', {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ priority, nextAction, reminderAt: reminderAt ? new Date(reminderAt).toISOString() : undefined }),
+      body: JSON.stringify(body),
     }, 'Основная информация сохранена');
+    if (ok && refreshSucceeded.current && latestTask.current) setOverview(latestTask.current);
+  }
+
+  function setOverview(value: Task) {
+    const current = overviewOf(value);
+    overviewBaseline.current = current;
+    setPriority(current.priority);
+    setNextAction(current.nextAction);
+    setReminderAt(current.reminderAt);
+    setOverviewConflict(false);
   }
 
   function openNewItem() {
+    setActionError('');
+    setItemErrors({});
     setEditingItemId(null); setItemName(''); setItemPartNumber(''); setItemQuantity('1'); setItemUnit('шт.'); setItemUnitPrice(''); setItemNotes(''); setItemFormOpen(true);
   }
   function openEditItem(item: TaskItem) {
+    setActionError('');
+    setItemErrors({});
     setEditingItemId(item.id); setItemName(item.name); setItemPartNumber(item.partNumber ?? ''); setItemQuantity(String(item.quantity)); setItemUnit(item.unit); setItemUnitPrice(item.unitPrice === null ? '' : String(item.unitPrice)); setItemNotes(item.notes ?? ''); setItemFormOpen(true);
   }
   async function saveItem(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const quantity = Number(itemQuantity); const price = itemUnitPrice.trim() === '' ? undefined : Number(itemUnitPrice);
-    if (!itemName.trim() || !itemUnit.trim() || !Number.isFinite(quantity) || quantity <= 0 || (price !== undefined && (!Number.isFinite(price) || price < 0))) {
-      setActionError('Проверьте наименование, количество, единицу измерения и цену.'); return;
+    if (actionLock.current) return;
+    const form = event.currentTarget;
+    const quantityText = itemQuantity.trim().replace(',', '.');
+    const priceText = itemUnitPrice.trim().replace(',', '.');
+    const quantity = Number(quantityText);
+    const price = priceText ? Number(priceText) : undefined;
+    const errors: Record<string, string> = {};
+    if (!itemName.trim()) errors.name = 'Укажите наименование.';
+    if (!itemUnit.trim()) errors.unit = 'Укажите единицу измерения.';
+    if (!/^\d+(?:\.\d{1,3})?$/.test(quantityText) || !Number.isFinite(quantity) || quantity <= 0) {
+      errors.quantity = 'Введите положительное число с точностью до тысячных.';
     }
+    if (price !== undefined && (!/^\d+(?:\.\d{1,2})?$/.test(priceText) || !Number.isFinite(price))) {
+      errors.unitPrice = 'Введите неотрицательную цену с точностью до копеек.';
+    }
+    function show(fields: Record<string, string>) {
+      setItemErrors(fields);
+      focus(() => form.querySelector<HTMLElement>('[aria-invalid="true"]'));
+    }
+    setActionError('');
+    if (Object.keys(errors).length) { show(errors); return; }
+    setItemErrors({});
     const path = editingItemId ? `/items/${editingItemId}` : '/items';
     const ok = await apiAction(path, {
       method: editingItemId ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: itemName.trim(), partNumber: itemPartNumber.trim(), quantity, unit: itemUnit.trim(), unitPrice: price, currency: 'RUB', notes: itemNotes.trim() }),
-    }, editingItemId ? 'Позиция обновлена' : 'Позиция добавлена');
+    }, editingItemId ? 'Позиция обновлена' : 'Позиция добавлена', undefined, { labels: itemLabels, show });
     if (ok) setItemFormOpen(false);
   }
   async function deleteItem(item: TaskItem) {
-    if (!await confirm(`Удалить позицию «${item.name}»?`)) return;
+    if (!await confirm(`Позиция «${item.name}» будет удалена из закупки. Восстановить её нельзя.`, 'Удалить позицию', true)) return;
     await apiAction(`/items/${item.id}`, { method: 'DELETE' }, 'Позиция удалена');
   }
 
@@ -358,7 +457,7 @@ function TaskContent({ taskId }: { taskId: string }) {
     await apiAction('/purchase-order/ready-for-pickup', { method: 'PATCH' }, 'Груз отмечен как готовый к получению');
   }
   async function receiveOrder() {
-    if (!await confirm('Подтвердить фактическое получение товара?')) return;
+    if (!await confirm(`Получение по счёту № ${task?.purchaseOrder?.invoiceNumber ?? 'без номера'} будет отмечено в закупке.`, 'Подтвердить получение')) return;
     await apiAction('/purchase-order/receive', { method: 'PATCH' }, 'Получение подтверждено');
   }
   async function submitHandOver(event: FormEvent<HTMLFormElement>) {
@@ -367,7 +466,7 @@ function TaskContent({ taskId }: { taskId: string }) {
     if (ok) { setHandOverModalOpen(false); setHandedOverTo(''); }
   }
   async function closeOrder() {
-    if (!await confirm('Закрыть закупку? После закрытия она перейдёт в завершённые.')) return;
+    if (!await confirm(`Закупка №${task?.number} перейдёт в завершённые. Повторно открыть её нельзя.`, 'Закрыть закупку')) return;
     await apiAction('/purchase-order/close', { method: 'PATCH' }, 'Закупка закрыта');
   }
   async function cancelOrder(event: FormEvent<HTMLFormElement>) {
@@ -624,7 +723,9 @@ function TaskContent({ taskId }: { taskId: string }) {
   }
 
   if (loading) return <PageLayout title="Закупка"><Skeleton label="Загружаем карточку" /></PageLayout>;
-  if (loadError || !task) return <PageLayout title="Закупка"><LoadError message={loadError || "Закупка не найдена"} retry={() => void loadTask()} /></PageLayout>;
+  if (loadError || !task) return <PageLayout title="Закупка">
+    <LoadError message={loadError || 'Закупка не найдена.'} retry={() => void loadTask()} back={back} />
+  </PageLayout>;
 
   const lockedItemIds = new Set((task.purchaseOrders ?? [])
     .filter(order => !order.cancelledAt)
@@ -662,9 +763,9 @@ function TaskContent({ taskId }: { taskId: string }) {
         {task.deadline && <span className="rounded-full bg-white px-3 py-1.5 text-xs font-medium text-slate-500 ring-1 ring-slate-200">Срок {formatDateTime(task.deadline)}</span>}
       </div>
 
-      {(message || actionError) && <div className="mb-5"><Alert tone={actionError ? "danger" : "success"}>{actionError || message}</Alert></div>}
+      {(message || (actionError && !itemFormOpen)) && <div className="mb-5"><Alert tone={actionError ? "danger" : "success"}>{actionError || message}</Alert></div>}
 
-      <div className="ui-tabs ui-card mb-6" role="group" aria-label="Разделы закупки">{tabDefs.map(([value, label, count]) => <button key={value} type="button" aria-pressed={activeTab === value} onClick={() => setActiveTab(value)} className="ui-button ui-button--ghost">{label}{count !== null && <span className="ml-1.5 rounded-full bg-white/80 px-2 py-0.5 text-[11px] text-slate-400">{count}</span>}</button>)}</div>
+      <div className="ui-tabs ui-card mb-6" role="group" aria-label="Разделы закупки">{tabDefs.map(([value, label, count]) => <button key={value} type="button" aria-pressed={activeTab === value} onClick={() => setActiveTab(value)} className="ui-button ui-button--ghost">{label}{count !== null && <span className="ml-1.5 rounded-full bg-white/80 px-2 py-0.5 text-[11px] text-muted">{count}</span>}</button>)}</div>
 
       {(activeTab === 'payments' || activeTab === 'delivery') && <OrderTracking
         orders={task.purchaseOrders?.length ? task.purchaseOrders : task.purchaseOrder ? [task.purchaseOrder] : []}
@@ -685,10 +786,14 @@ function TaskContent({ taskId }: { taskId: string }) {
               <form onSubmit={saveOverview} className="grid gap-4 md:grid-cols-2">
                 <label><span className="mb-1.5 block text-sm font-medium">Приоритет</span><Select value={priority} onChange={(e) => setPriority(e.target.value)}><option value="LOW">Низкий</option><option value="NORMAL">Обычный</option><option value="HIGH">Высокий</option><option value="URGENT">Срочный</option></Select></label>
                 <label><span className="mb-1.5 block text-sm font-medium">Напоминание</span><Input type="datetime-local" value={reminderAt} onChange={(e) => setReminderAt(e.target.value)} /></label>
-                {editNextAction && <label className="md:col-span-2"><span className="mb-1.5 block text-sm font-medium">Следующее действие</span><Textarea rows={2} value={nextAction} onChange={(e) => setNextAction(e.target.value)} /><p className="mt-1.5 text-xs text-slate-400">Обычно действие меняется автоматически при переходе между этапами. Редактируйте его вручную только при необходимости.</p></label>}
+                {editNextAction && <label className="md:col-span-2"><span className="mb-1.5 block text-sm font-medium">Следующее действие</span><Textarea rows={2} maxLength={1000} value={nextAction} onChange={(e) => setNextAction(e.target.value)} /><p className="mt-1.5 text-xs text-muted">Обычно действие меняется автоматически при переходе между этапами. Редактируйте его вручную только при необходимости.</p></label>}
+                {overviewConflict && <div className="md:col-span-2">
+                  <Alert tone="warning">Сейчас в закупке: {priorityLabels[task.priority] ?? task.priority} · {task.nextAction || 'Действие не задано'} · {task.reminderAt ? formatDateTime(task.reminderAt) : 'Без напоминания'}.</Alert>
+                  <Button className="mt-2" variant="outline" onClick={() => { setOverview(task); setActionError(''); }}>Заменить черновик актуальными данными</Button>
+                </div>}
                 <div className="md:col-span-2 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
                   <button type="button" onClick={() => setEditNextAction((value) => !value)} className="text-sm font-medium text-slate-500 transition hover:text-blue-700">{editNextAction ? 'Скрыть ручное редактирование' : 'Изменить следующее действие'}</button>
-                  <button disabled={busy} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50">Сохранить изменения</button>
+                  <Button type="submit" variant="outline" loading={busy} disabled={overviewConflict}>Сохранить изменения</Button>
                 </div>
               </form>
             </section>
@@ -696,7 +801,7 @@ function TaskContent({ taskId }: { taskId: string }) {
 
           <aside className="space-y-5 xl:sticky xl:top-5">
             <section className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
-              <div className="mb-5 flex items-start justify-between gap-4"><div><h2 className="font-semibold">Ход закупки</h2><p className="mt-1 text-sm text-slate-500">Главные этапы от заявки до закрытия</p></div><span className="shrink-0 text-xs text-slate-400">{progress.filter((x) => x[2]).length}/{progress.length}</span></div>
+              <div className="mb-5 flex items-start justify-between gap-4"><div><h2 className="font-semibold">Ход закупки</h2><p className="mt-1 text-sm text-slate-500">Главные этапы от заявки до закрытия</p></div><span className="shrink-0 text-xs text-muted">{progress.filter((x) => x[2]).length}/{progress.length}</span></div>
               <div>
                 {progress.map(([label, date, done], index) => {
                   const isCurrent = !done && index === currentProgressIndex && task.status !== 'CANCELLED';
@@ -707,9 +812,9 @@ function TaskContent({ taskId }: { taskId: string }) {
                       {index < progress.length - 1 && <div className={`absolute top-6 h-[calc(100%_-_2px)] w-px ${done ? 'bg-emerald-200' : isCurrent ? 'bg-blue-100' : 'bg-slate-200'}`} />}
                     </div>
                     <div className="min-w-0 pt-0.5">
-                      <div className={`text-sm font-medium ${done ? 'text-slate-900' : isCurrent ? 'font-semibold text-blue-700' : 'text-slate-400'}`}>{displayLabel}</div>
+                      <div className={`text-sm font-medium ${done ? 'text-slate-900' : isCurrent ? 'font-semibold text-blue-700' : 'text-muted'}`}>{displayLabel}</div>
                       {isCurrent && <div className="mt-0.5 text-[11px] font-semibold uppercase tracking-wide text-blue-500">Текущий этап</div>}
-                      {date && <div className="mt-0.5 text-xs text-slate-400">{formatDateTime(date)}</div>}
+                      {date && <div className="mt-0.5 text-xs text-muted">{formatDateTime(date)}</div>}
                     </div>
                   </div>;
                 })}
@@ -720,7 +825,7 @@ function TaskContent({ taskId }: { taskId: string }) {
               <p className="mt-2 text-sm text-slate-500">Действующих: {(task.purchaseOrders ?? []).filter(o => !o.cancelledAt).length} · Всего с отменёнными: {task.purchaseOrders?.length ?? 0}</p>
               <button onClick={() => setActiveTab('order')} className="mt-4 w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold hover:bg-slate-50">Открыть все заказы</button>
             </section>}
-            {legacyMode && task.purchaseOrder && <section className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm"><div className="text-sm font-semibold">Заказ и логистика</div><dl className="mt-4 space-y-3 text-sm"><div className="flex justify-between gap-4"><dt className="text-slate-400">Поставщик</dt><dd className="text-right font-medium">{task.purchaseOrder.supplier.name}</dd></div><div className="flex justify-between gap-4"><dt className="text-slate-400">Счёт</dt><dd className="text-right font-medium">{task.purchaseOrder.invoiceNumber || '—'}</dd></div><div className="flex justify-between gap-4"><dt className="text-slate-400">Сумма</dt><dd className="text-right font-medium">{formatMoney(task.purchaseOrder.totalPrice)}</dd></div>{task.purchaseOrder.carrier && <div className="flex justify-between gap-4"><dt className="text-slate-400">Перевозчик</dt><dd className="text-right font-medium">{task.purchaseOrder.carrier}</dd></div>}{task.purchaseOrder.trackingNumber && <div className="flex justify-between gap-4"><dt className="text-slate-400">Трек / ТТН</dt><dd className="text-right font-medium text-blue-700">{task.purchaseOrder.trackingNumber}</dd></div>}</dl><button onClick={() => setActiveTab('order')} className="mt-5 w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold hover:bg-slate-50">Открыть заказ</button></section>}
+            {legacyMode && task.purchaseOrder && <section className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm"><div className="text-sm font-semibold">Заказ и логистика</div><dl className="mt-4 space-y-3 text-sm"><div className="flex justify-between gap-4"><dt className="text-muted">Поставщик</dt><dd className="text-right font-medium">{task.purchaseOrder.supplier.name}</dd></div><div className="flex justify-between gap-4"><dt className="text-muted">Счёт</dt><dd className="text-right font-medium">{task.purchaseOrder.invoiceNumber || '—'}</dd></div><div className="flex justify-between gap-4"><dt className="text-muted">Сумма</dt><dd className="text-right font-medium">{formatMoney(task.purchaseOrder.totalPrice)}</dd></div>{task.purchaseOrder.carrier && <div className="flex justify-between gap-4"><dt className="text-muted">Перевозчик</dt><dd className="text-right font-medium">{task.purchaseOrder.carrier}</dd></div>}{task.purchaseOrder.trackingNumber && <div className="flex justify-between gap-4"><dt className="text-muted">Трек / ТТН</dt><dd className="text-right font-medium text-blue-700">{task.purchaseOrder.trackingNumber}</dd></div>}</dl><button onClick={() => setActiveTab('order')} className="mt-5 w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold hover:bg-slate-50">Открыть заказ</button></section>}
           </aside>
         </div>
       )}
@@ -744,24 +849,24 @@ function TaskContent({ taskId }: { taskId: string }) {
 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm">
-              <div className="text-xs font-medium text-slate-400">Всего позиций</div>
+              <div className="text-xs font-medium text-muted">Всего позиций</div>
               <div className="mt-1 text-2xl font-semibold text-slate-950">{itemsSummary.total}</div>
             </div>
             <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm">
-              <div className="text-xs font-medium text-slate-400">Ориентировочная сумма</div>
+              <div className="text-xs font-medium text-muted">Ориентировочная сумма</div>
               <div className="mt-1 text-2xl font-semibold text-slate-950">
                 {itemsSummary.priced > 0 ? formatMoney(itemsSummary.amount) : '—'}
               </div>
             </div>
             <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm">
-              <div className="text-xs font-medium text-slate-400">С указанной ценой</div>
+              <div className="text-xs font-medium text-muted">С указанной ценой</div>
               <div className="mt-1 flex items-baseline gap-2">
-                <span className="text-2xl font-semibold text-emerald-600">{itemsSummary.priced}</span>
-                <span className="text-xs text-slate-400">из {itemsSummary.total}</span>
+                <span className="text-2xl font-semibold text-emerald-700">{itemsSummary.priced}</span>
+                <span className="text-xs text-muted">из {itemsSummary.total}</span>
               </div>
             </div>
             <div className={`rounded-2xl border p-4 shadow-sm ${itemsSummary.withoutPrice > 0 ? 'border-amber-100 bg-amber-50/60' : 'border-slate-200/80 bg-white'}`}>
-              <div className={`text-xs font-medium ${itemsSummary.withoutPrice > 0 ? 'text-amber-600' : 'text-slate-400'}`}>
+              <div className={`text-xs font-medium ${itemsSummary.withoutPrice > 0 ? 'text-amber-800' : 'text-muted'}`}>
                 Без ориентировочной цены
               </div>
               <div className={`mt-1 text-2xl font-semibold ${itemsSummary.withoutPrice > 0 ? 'text-amber-700' : 'text-slate-950'}`}>
@@ -773,7 +878,7 @@ function TaskContent({ taskId }: { taskId: string }) {
           <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm">
             <div className="flex flex-col gap-3 border-b border-slate-100 p-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="relative w-full sm:max-w-sm">
-                <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true">⌕</span>
+                <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" aria-hidden="true">⌕</span>
                 <Input
                   value={itemSearch}
                   onChange={(event) => setItemSearch(event.target.value)}
@@ -781,7 +886,7 @@ function TaskContent({ taskId }: { taskId: string }) {
                 />
               </div>
               {task.items.length > 0 && (
-                <div className="text-xs text-slate-400">
+                <div className="text-xs text-muted">
                   {itemSearch.trim()
                     ? `Найдено: ${filteredItems.length} из ${task.items.length}`
                     : `${task.items.length} ${task.items.length === 1 ? 'позиция' : task.items.length < 5 ? 'позиции' : 'позиций'}`}
@@ -812,7 +917,7 @@ function TaskContent({ taskId }: { taskId: string }) {
               <>
                 <TableRegion label="Позиции закупки" className="hidden md:block">
                   <table className="w-full min-w-[900px] text-left text-sm">
-                    <thead className="bg-slate-50/80 text-xs font-medium text-slate-400">
+                    <thead className="bg-slate-50/80 text-xs font-medium text-muted">
                       <tr>
                         <th className="px-5 py-3">Позиция</th>
                         <th className="px-5 py-3">Количество</th>
@@ -834,14 +939,14 @@ function TaskContent({ taskId }: { taskId: string }) {
                                   {item.partNumber ? (
                                     <span className="rounded-md bg-slate-100 px-2 py-1 font-medium text-slate-600">{item.partNumber}</span>
                                   ) : (
-                                    <span className="text-slate-400">Без артикула</span>
+                                    <span className="text-muted">Без артикула</span>
                                   )}
-                                  {item.notes && <span className="text-slate-400">· {item.notes}</span>}
+                                  {item.notes && <span className="text-muted">· {item.notes}</span>}
                                 </div>
                               </div>
                             </td>
                             <td className="whitespace-nowrap px-5 py-4 font-medium text-slate-700">
-                              {formatQuantity(item.quantity)} <span className="font-normal text-slate-400">{item.unit}</span>
+                              {formatQuantity(item.quantity)} <span className="font-normal text-muted">{item.unit}</span>
                             </td>
                             <td className="min-w-40">{positionProgress(item)}</td>
                             <td className="whitespace-nowrap px-5 py-4">
@@ -858,7 +963,7 @@ function TaskContent({ taskId }: { taskId: string }) {
                               <button disabled={itemLocked(item.id)} title={itemLocked(item.id) ? 'Позиция уже в действующем заказе или закупка закрыта' : undefined} onClick={() => openEditItem(item)} className="rounded-lg px-2.5 py-1.5 text-sm font-semibold text-blue-600 transition hover:bg-blue-50">
                                 Изменить
                               </button>
-                              <button disabled={itemLocked(item.id)} title={itemLocked(item.id) ? 'Позиция уже в действующем заказе или закупка закрыта' : undefined} onClick={() => void deleteItem(item)} className="ml-1 rounded-lg px-2.5 py-1.5 text-sm font-medium text-slate-400 transition hover:bg-rose-50 hover:text-rose-600">
+                              <button disabled={itemLocked(item.id)} title={itemLocked(item.id) ? 'Позиция уже в действующем заказе или закупка закрыта' : undefined} onClick={() => void deleteItem(item)} className="ml-1 rounded-lg px-2.5 py-1.5 text-sm font-medium text-muted transition hover:bg-rose-50 hover:text-rose-600">
                                 Удалить
                               </button>
                             </td>
@@ -888,11 +993,11 @@ function TaskContent({ taskId }: { taskId: string }) {
                         <div className="flex items-start justify-between gap-4">
                           <div className="min-w-0">
                             <div className="font-semibold text-slate-900">{item.name}</div>
-                            <div className="mt-1 text-xs text-slate-400">{item.partNumber || 'Без артикула'}</div>
+                            <div className="mt-1 text-xs text-muted">{item.partNumber || 'Без артикула'}</div>
                           </div>
                           <div className="shrink-0 text-right">
                             <div className="font-semibold text-slate-950">{total === null ? '—' : formatMoney(total, item.currency || 'RUB')}</div>
-                            <div className="mt-1 text-xs text-slate-400">{formatQuantity(item.quantity)} {item.unit}</div>
+                            <div className="mt-1 text-xs text-muted">{formatQuantity(item.quantity)} {item.unit}</div>
                           </div>
                         </div>
 
@@ -911,7 +1016,7 @@ function TaskContent({ taskId }: { taskId: string }) {
                           <button disabled={itemLocked(item.id)} title={itemLocked(item.id) ? 'Позиция уже в действующем заказе или закупка закрыта' : undefined} onClick={() => openEditItem(item)} className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700">
                             Изменить
                           </button>
-                          <button disabled={itemLocked(item.id)} title={itemLocked(item.id) ? 'Позиция уже в действующем заказе или закупка закрыта' : undefined} onClick={() => void deleteItem(item)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-400" aria-label={`Удалить ${item.name}`}>
+                          <button disabled={itemLocked(item.id)} title={itemLocked(item.id) ? 'Позиция уже в действующем заказе или закупка закрыта' : undefined} onClick={() => void deleteItem(item)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-muted" aria-label={`Удалить ${item.name}`}>
                             Удалить
                           </button>
                         </div>
@@ -945,12 +1050,12 @@ function TaskContent({ taskId }: { taskId: string }) {
           {task.supplierOffers.length > 0 && (
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm">
-                <div className="text-xs font-medium text-slate-400">Получено предложений</div>
+                <div className="text-xs font-medium text-muted">Получено предложений</div>
                 <div className="mt-1 text-2xl font-semibold text-slate-950">{task.supplierOffers.length}</div>
               </div>
 
               <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm">
-                <div className="text-xs font-medium text-slate-400">Лучшая стоимость</div>
+                <div className="text-xs font-medium text-muted">Лучшая стоимость</div>
                 <div className="mt-1 text-xl font-semibold text-slate-950">
                   {offerComparison.bestTotalId
                     ? formatMoney(
@@ -963,7 +1068,7 @@ function TaskContent({ taskId }: { taskId: string }) {
               </div>
 
               <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm">
-                <div className="text-xs font-medium text-slate-400">Минимальный срок</div>
+                <div className="text-xs font-medium text-muted">Минимальный срок</div>
                 <div className="mt-1 text-xl font-semibold text-slate-950">
                   {offerComparison.fastestId
                     ? `${task.supplierOffers.find((offer) => offer.id === offerComparison.fastestId)?.deliveryDays} дн.`
@@ -972,7 +1077,7 @@ function TaskContent({ taskId }: { taskId: string }) {
               </div>
 
               <div className={`rounded-2xl border p-4 shadow-sm ${offerComparison.inStockCount > 0 ? 'border-emerald-100 bg-emerald-50/50' : 'border-slate-200/80 bg-white'}`}>
-                <div className={`text-xs font-medium ${offerComparison.inStockCount > 0 ? 'text-emerald-600' : 'text-slate-400'}`}>
+                <div className={`text-xs font-medium ${offerComparison.inStockCount > 0 ? 'text-emerald-700' : 'text-muted'}`}>
                   В наличии
                 </div>
                 <div className={`mt-1 text-2xl font-semibold ${offerComparison.inStockCount > 0 ? 'text-emerald-700' : 'text-slate-950'}`}>
@@ -1001,7 +1106,7 @@ function TaskContent({ taskId }: { taskId: string }) {
               <div className="flex flex-col gap-3 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <div className="text-sm font-semibold text-slate-900">Сравнение предложений</div>
-                  <div className="mt-0.5 text-xs text-slate-400">
+                  <div className="mt-0.5 text-xs text-muted">
                     Лучшие условия отмечаются автоматически, решение остаётся за снабжением
                   </div>
                 </div>
@@ -1013,7 +1118,7 @@ function TaskContent({ taskId }: { taskId: string }) {
                     onChange={(event) =>
                       setOfferSort(event.target.value as 'total' | 'delivery' | 'recent')
                     }
-                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 outline-none focus:border-blue-400"
+                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 focus:border-blue-400"
                   >
                     <option value="total">По итоговой стоимости</option>
                     <option value="delivery">По сроку поставки</option>
@@ -1054,7 +1159,7 @@ function TaskContent({ taskId }: { taskId: string }) {
                               )}
                             </div>
 
-                            <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-400">
+                            <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
                               {offer.supplier.contact && <span>{offer.supplier.contact}</span>}
                               {offer.supplier.phone && <span>{offer.supplier.phone}</span>}
                               {offer.supplier.email && <span>{offer.supplier.email}</span>}
@@ -1080,21 +1185,21 @@ function TaskContent({ taskId }: { taskId: string }) {
 
                         <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
                           <div className="rounded-xl bg-slate-50 p-3">
-                            <div className="text-[11px] font-medium text-slate-400">Товар</div>
+                            <div className="text-[11px] font-medium text-muted">Товар</div>
                             <div className="mt-1 text-sm font-semibold text-slate-900">{formatMoney(offer.price)}</div>
                           </div>
                           <div className="rounded-xl bg-slate-50 p-3">
-                            <div className="text-[11px] font-medium text-slate-400">Доставка</div>
+                            <div className="text-[11px] font-medium text-muted">Доставка</div>
                             <div className="mt-1 text-sm font-semibold text-slate-900">{formatMoney(offer.deliveryPrice)}</div>
                           </div>
                           <div className="rounded-xl bg-slate-50 p-3">
-                            <div className="text-[11px] font-medium text-slate-400">Срок</div>
+                            <div className="text-[11px] font-medium text-muted">Срок</div>
                             <div className="mt-1 text-sm font-semibold text-slate-900">
                               {offer.deliveryDays !== null ? `${offer.deliveryDays} дн.` : '—'}
                             </div>
                           </div>
                           <div className={`rounded-xl p-3 ${offer.inStock === true ? 'bg-emerald-50' : offer.inStock === false ? 'bg-amber-50' : 'bg-slate-50'}`}>
-                            <div className={`text-[11px] font-medium ${offer.inStock === true ? 'text-emerald-600' : offer.inStock === false ? 'text-amber-600' : 'text-slate-400'}`}>
+                            <div className={`text-[11px] font-medium ${offer.inStock === true ? 'text-emerald-700' : offer.inStock === false ? 'text-amber-800' : 'text-muted'}`}>
                               Наличие
                             </div>
                             <div className={`mt-1 text-sm font-semibold ${offer.inStock === true ? 'text-emerald-700' : offer.inStock === false ? 'text-amber-700' : 'text-slate-900'}`}>
@@ -1105,12 +1210,12 @@ function TaskContent({ taskId }: { taskId: string }) {
 
                         <div className="mt-4 flex flex-col gap-4 border-t border-slate-100 pt-4 sm:flex-row sm:items-end sm:justify-between">
                           <div>
-                            <div className="text-xs text-slate-400">Итоговая стоимость</div>
+                            <div className="text-xs text-muted">Итоговая стоимость</div>
                             <div className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">
                               {totalKnown ? formatMoney(offerTotal(offer)) : 'Цена не указана'}
                             </div>
                             {totalKnown && offer.deliveryPrice === null && (
-                              <div className="mt-1 text-[11px] text-slate-400">Без учёта неуказанной доставки</div>
+                              <div className="mt-1 text-[11px] text-muted">Без учёта неуказанной доставки</div>
                             )}
                           </div>
 
@@ -1136,7 +1241,7 @@ function TaskContent({ taskId }: { taskId: string }) {
                           </div>
                         )}
 
-                        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400">
+                        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-muted">
                           <span>
                             Получено: {formatDateTime(offer.receivedAt ?? offer.requestedAt)}
                           </span>
@@ -1224,38 +1329,38 @@ function TaskContent({ taskId }: { taskId: string }) {
 
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm">
-                  <div className="text-xs font-medium text-slate-400">Сумма заказа</div>
+                  <div className="text-xs font-medium text-muted">Сумма заказа</div>
                   <div className="mt-1 text-xl font-semibold text-slate-950">
                     {formatMoney(task.purchaseOrder.totalPrice)}
                   </div>
                 </div>
 
                 <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm">
-                  <div className="text-xs font-medium text-slate-400">Счёт</div>
+                  <div className="text-xs font-medium text-muted">Счёт</div>
                   <div className="mt-1 truncate text-xl font-semibold text-slate-950">
                     {task.purchaseOrder.invoiceNumber || '—'}
                   </div>
                   {task.purchaseOrder.invoiceDate && (
-                    <div className="mt-1 text-xs text-slate-400">{formatDateTime(task.purchaseOrder.invoiceDate)}</div>
+                    <div className="mt-1 text-xs text-muted">{formatDateTime(task.purchaseOrder.invoiceDate)}</div>
                   )}
                 </div>
 
                 <div className={`rounded-2xl border p-4 shadow-sm ${task.purchaseOrder.paidAt ? 'border-emerald-100 bg-emerald-50/50' : 'border-slate-200/80 bg-white'}`}>
-                  <div className={`text-xs font-medium ${task.purchaseOrder.paidAt ? 'text-emerald-600' : 'text-slate-400'}`}>
+                  <div className={`text-xs font-medium ${task.purchaseOrder.paidAt ? 'text-emerald-700' : 'text-muted'}`}>
                     Оплата
                   </div>
                   <div className={`mt-1 text-xl font-semibold ${task.purchaseOrder.paidAt ? 'text-emerald-700' : 'text-slate-950'}`}>
                     {task.purchaseOrder.paidAt ? 'Оплачено' : task.purchaseOrder.sentToPaymentAt ? 'Ожидается' : 'Не передан'}
                   </div>
                   {(task.purchaseOrder.paidAt || task.purchaseOrder.sentToPaymentAt) && (
-                    <div className="mt-1 text-xs text-slate-400">
+                    <div className="mt-1 text-xs text-muted">
                       {formatDateTime(task.purchaseOrder.paidAt || task.purchaseOrder.sentToPaymentAt)}
                     </div>
                   )}
                 </div>
 
                 <div className={`rounded-2xl border p-4 shadow-sm ${task.purchaseOrder.shippedAt ? 'border-blue-100 bg-blue-50/50' : 'border-slate-200/80 bg-white'}`}>
-                  <div className={`text-xs font-medium ${task.purchaseOrder.shippedAt ? 'text-blue-600' : 'text-slate-400'}`}>
+                  <div className={`text-xs font-medium ${task.purchaseOrder.shippedAt ? 'text-blue-600' : 'text-muted'}`}>
                     Доставка
                   </div>
                   <div className={`mt-1 text-xl font-semibold ${task.purchaseOrder.shippedAt ? 'text-blue-700' : 'text-slate-950'}`}>
@@ -1268,7 +1373,7 @@ function TaskContent({ taskId }: { taskId: string }) {
                           : 'Не отгружено'}
                   </div>
                   {task.purchaseOrder.expectedDeliveryAt && !task.purchaseOrder.receivedAt && (
-                    <div className="mt-1 text-xs text-slate-400">
+                    <div className="mt-1 text-xs text-muted">
                       Ожидается {formatDateTime(task.purchaseOrder.expectedDeliveryAt)}
                     </div>
                   )}
@@ -1285,9 +1390,9 @@ function TaskContent({ taskId }: { taskId: string }) {
 
                     <div className="grid gap-px bg-slate-100 sm:grid-cols-2">
                       <div className="bg-white p-5">
-                        <div className="text-xs font-medium text-slate-400">Поставщик</div>
+                        <div className="text-xs font-medium text-muted">Поставщик</div>
                         <div className="mt-1.5 font-semibold text-slate-900">{task.purchaseOrder.supplier.name}</div>
-                        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-400">
+                        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
                           {task.purchaseOrder.supplier.contact && <span>{task.purchaseOrder.supplier.contact}</span>}
                           {task.purchaseOrder.supplier.phone && <span>{task.purchaseOrder.supplier.phone}</span>}
                           {task.purchaseOrder.supplier.email && <span>{task.purchaseOrder.supplier.email}</span>}
@@ -1295,27 +1400,27 @@ function TaskContent({ taskId }: { taskId: string }) {
                       </div>
 
                       <div className="bg-white p-5">
-                        <div className="text-xs font-medium text-slate-400">Стоимость</div>
+                        <div className="text-xs font-medium text-muted">Стоимость</div>
                         <div className="mt-1.5 text-xl font-semibold text-slate-950">
                           {formatMoney(task.purchaseOrder.totalPrice)}
                         </div>
-                        <div className="mt-2 text-xs text-slate-400">
+                        <div className="mt-2 text-xs text-muted">
                           Товар {formatMoney(task.purchaseOrder.price)} · доставка {formatMoney(task.purchaseOrder.deliveryPrice)}
                         </div>
                       </div>
 
                       <div className="bg-white p-5">
-                        <div className="text-xs font-medium text-slate-400">Счёт</div>
+                        <div className="text-xs font-medium text-muted">Счёт</div>
                         <div className="mt-1.5 font-semibold text-slate-900">
                           {task.purchaseOrder.invoiceNumber ? `№ ${task.purchaseOrder.invoiceNumber}` : 'Номер не указан'}
                         </div>
-                        <div className="mt-2 text-xs text-slate-400">
+                        <div className="mt-2 text-xs text-muted">
                           {task.purchaseOrder.invoiceDate ? `от ${formatDateTime(task.purchaseOrder.invoiceDate)}` : 'Дата не указана'}
                         </div>
                       </div>
 
                       <div className="bg-white p-5">
-                        <div className="text-xs font-medium text-slate-400">Оплата</div>
+                        <div className="text-xs font-medium text-muted">Оплата</div>
                         <div className="mt-1.5 font-semibold text-slate-900">
                           {task.purchaseOrder.paidAt
                             ? 'Оплата подтверждена'
@@ -1323,7 +1428,7 @@ function TaskContent({ taskId }: { taskId: string }) {
                               ? 'Счёт передан на оплату'
                               : 'Счёт ещё не передан на оплату'}
                         </div>
-                        <div className="mt-2 text-xs text-slate-400">
+                        <div className="mt-2 text-xs text-muted">
                           {task.purchaseOrder.paidAt
                             ? formatDateTime(task.purchaseOrder.paidAt)
                             : task.purchaseOrder.sentToPaymentAt
@@ -1379,7 +1484,7 @@ function TaskContent({ taskId }: { taskId: string }) {
 
                   {task.purchaseOrder.notes && (
                     <section className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Примечание к заказу</div>
+                      <div className="text-xs font-semibold uppercase tracking-wide text-muted">Примечание к заказу</div>
                       <div className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600">
                         {task.purchaseOrder.notes}
                       </div>
@@ -1398,7 +1503,7 @@ function TaskContent({ taskId }: { taskId: string }) {
                             <div key={order.id} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between">
                               <div>
                                 <div className="text-sm font-medium text-slate-800">{order.supplier.name}</div>
-                                <div className="mt-0.5 text-xs text-slate-400">
+                                <div className="mt-0.5 text-xs text-muted">
                                   {order.invoiceNumber ? `Счёт № ${order.invoiceNumber}` : 'Без номера счёта'} · {formatDateTime(order.orderedAt)}
                                 </div>
                               </div>
@@ -1434,7 +1539,7 @@ function TaskContent({ taskId }: { taskId: string }) {
                   <section className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
                     <div className="mb-4 flex items-center justify-between">
                       <h3 className="font-semibold text-slate-950">Этапы заказа</h3>
-                      <span className="text-xs text-slate-400">
+                      <span className="text-xs text-muted">
                         {orderFlow.filter((step) => step.done).length}/{orderFlow.length}
                       </span>
                     </div>
@@ -1463,7 +1568,7 @@ function TaskContent({ taskId }: { taskId: string }) {
 
                             <div className="min-w-0 pt-0.5">
                               <div className={`text-sm font-medium ${
-                                step.done ? 'text-slate-900' : current ? 'font-semibold text-blue-700' : 'text-slate-400'
+                                step.done ? 'text-slate-900' : current ? 'font-semibold text-blue-700' : 'text-muted'
                               }`}>
                                 {step.label}
                               </div>
@@ -1473,7 +1578,7 @@ function TaskContent({ taskId }: { taskId: string }) {
                                 </div>
                               )}
                               {step.date && (
-                                <div className="mt-0.5 text-xs text-slate-400">{formatDateTime(step.date)}</div>
+                                <div className="mt-0.5 text-xs text-muted">{formatDateTime(step.date)}</div>
                               )}
                             </div>
                           </div>
@@ -1548,7 +1653,7 @@ function TaskContent({ taskId }: { taskId: string }) {
 
               <div className="relative mt-4">
                 <span
-                  className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"
+                  className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted"
                   aria-hidden="true"
                 >
                   ⌕
@@ -1593,7 +1698,7 @@ function TaskContent({ taskId }: { taskId: string }) {
                 {historyData.grouped.map((group, groupIndex) => (
                   <div key={group.date} className={groupIndex > 0 ? 'mt-7' : ''}>
                     <div className="mb-3 flex items-center gap-3">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-muted">
                         {group.date}
                       </div>
                       <div className="h-px flex-1 bg-slate-100" />
@@ -1617,7 +1722,7 @@ function TaskContent({ taskId }: { taskId: string }) {
                                 <span className={`rounded-md px-2 py-1 text-[11px] font-semibold ${meta.badgeClass}`}>
                                   {meta.label}
                                 </span>
-                                <time className="text-xs font-medium text-slate-400">
+                                <time className="text-xs font-medium text-muted">
                                   {formatHistoryTime(activity.createdAt)}
                                 </time>
                               </div>
@@ -1644,7 +1749,7 @@ function TaskContent({ taskId }: { taskId: string }) {
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <h3 className="font-semibold text-slate-950">Добавить заметку</h3>
-                  <p className="mt-1 text-xs leading-5 text-slate-400">
+                  <p className="mt-1 text-xs leading-5 text-muted">
                     Для договорённостей, звонков и промежуточных решений
                   </p>
                 </div>
@@ -1658,7 +1763,7 @@ function TaskContent({ taskId }: { taskId: string }) {
                 onChange={(event) => setActivityText(event.target.value)}
                 rows={5}
                 placeholder="Например: поставщик подтвердил наличие, ждём уточнение по сроку доставки..."
-                className="mt-4 w-full resize-none rounded-xl border border-slate-200 bg-slate-50/50 px-3.5 py-3 text-sm leading-6 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-50"
+                className="mt-4 w-full resize-none rounded-xl border border-slate-200 bg-slate-50/50 px-3.5 py-3 text-sm leading-6 transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-50"
               />
 
               <div className="mt-3 flex flex-wrap gap-1.5">
@@ -1695,32 +1800,32 @@ function TaskContent({ taskId }: { taskId: string }) {
 
               <dl className="mt-4 space-y-3">
                 <div className="flex items-start justify-between gap-4">
-                  <dt className="text-sm text-slate-400">Создана</dt>
+                  <dt className="text-sm text-muted">Создана</dt>
                   <dd className="text-right text-sm font-medium text-slate-700">
                     {formatDateTime(task.createdAt)}
                   </dd>
                 </div>
                 <div className="flex items-start justify-between gap-4">
-                  <dt className="text-sm text-slate-400">Последнее изменение</dt>
+                  <dt className="text-sm text-muted">Последнее изменение</dt>
                   <dd className="text-right text-sm font-medium text-slate-700">
                     {formatDateTime(task.updatedAt)}
                   </dd>
                 </div>
                 <div className="flex items-start justify-between gap-4">
-                  <dt className="text-sm text-slate-400">Событий</dt>
+                  <dt className="text-sm text-muted">Событий</dt>
                   <dd className="text-right text-sm font-semibold text-slate-800">
                     {historyData.eventCount}
                   </dd>
                 </div>
                 <div className="flex items-start justify-between gap-4">
-                  <dt className="text-sm text-slate-400">Заметок</dt>
+                  <dt className="text-sm text-muted">Заметок</dt>
                   <dd className="text-right text-sm font-semibold text-slate-800">
                     {historyData.noteCount}
                   </dd>
                 </div>
                 <div className="border-t border-slate-100 pt-3">
                   <div className="flex items-center justify-between gap-3">
-                    <dt className="text-sm text-slate-400">Текущий этап</dt>
+                    <dt className="text-sm text-muted">Текущий этап</dt>
                     <dd>
                       <StatusBadge status={task.status} />
                     </dd>
@@ -1730,7 +1835,7 @@ function TaskContent({ taskId }: { taskId: string }) {
             </section>
 
             <section className="rounded-2xl border border-slate-200/80 bg-slate-50/70 p-4">
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              <div className="text-xs font-semibold uppercase tracking-wide text-muted">
                 Принцип истории
               </div>
               <p className="mt-2 text-xs leading-5 text-slate-500">
@@ -1743,35 +1848,30 @@ function TaskContent({ taskId }: { taskId: string }) {
 
       {itemFormOpen && (
         <Modal busy={busy} title={editingItemId ? 'Изменить позицию' : 'Новая позиция'} onClose={() => setItemFormOpen(false)}>
-          <form onSubmit={saveItem} className="space-y-4">
-            <Field label="Наименование *">
-              <Input data-initial-focus value={itemName} onChange={(e) => setItemName(e.target.value)} placeholder="Например: Подшипник 6205-2RS" className="input" />
-            </Field>
+          <form noValidate onSubmit={saveItem} className="space-y-4">
+            <FormField id="task-item-name" label={itemLabels.name} error={itemErrors.name}>
+              <Input data-initial-focus required maxLength={500} value={itemName} onChange={(e) => setItemName(e.target.value)} placeholder="Например: Подшипник 6205-2RS" />
+            </FormField>
 
-            <Field label="Артикул / каталожный номер">
-              <Input value={itemPartNumber} onChange={(e) => setItemPartNumber(e.target.value)} placeholder="6205-2RS, DN40 PN25..." className="input" />
-            </Field>
+            <FormField id="task-item-part" label={itemLabels.partNumber} error={itemErrors.partNumber}>
+              <Input maxLength={200} value={itemPartNumber} onChange={(e) => setItemPartNumber(e.target.value)} />
+            </FormField>
 
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Количество *">
-                <Input type="number" min="0.001" step="0.001" value={itemQuantity} onChange={(e) => setItemQuantity(e.target.value)} className="input" />
-              </Field>
-              <Field label="Ед. измерения *">
-                <Input value={itemUnit} onChange={(e) => setItemUnit(e.target.value)} placeholder="шт., кг, м..." list="task-item-units" className="input" />
-                <datalist id="task-item-units">
-                  <option value="шт." />
-                  <option value="компл." />
-                  <option value="кг" />
-                  <option value="м" />
-                  <option value="л" />
-                  <option value="упак." />
-                </datalist>
-              </Field>
+              <FormField id="task-item-quantity" label={itemLabels.quantity} error={itemErrors.quantity}>
+                <Input required inputMode="decimal" value={itemQuantity} onChange={(e) => setItemQuantity(e.target.value)} />
+              </FormField>
+              <FormField id="task-item-unit" label={itemLabels.unit} error={itemErrors.unit}>
+                <Input required maxLength={50} value={itemUnit} onChange={(e) => setItemUnit(e.target.value)} list="task-item-units" />
+              </FormField>
+              <datalist id="task-item-units">
+                {['шт.', 'компл.', 'кг', 'м', 'л', 'упак.'].map((unit) => <option key={unit} value={unit} />)}
+              </datalist>
             </div>
 
-            <Field label="Ориентировочная цена за единицу, ₽">
-              <Input type="number" min="0" step="0.01" value={itemUnitPrice} onChange={(e) => setItemUnitPrice(e.target.value)} placeholder="Можно оставить пустым" className="input" />
-            </Field>
+            <FormField id="task-item-price" label={itemLabels.unitPrice} error={itemErrors.unitPrice}>
+              <Input inputMode="decimal" value={itemUnitPrice} onChange={(e) => setItemUnitPrice(e.target.value)} />
+            </FormField>
 
             {itemUnitPrice.trim() !== '' && Number(itemUnitPrice) >= 0 && Number(itemQuantity) > 0 && (
               <div className="flex items-center justify-between rounded-xl bg-blue-50 px-4 py-3 text-sm">
@@ -1780,10 +1880,11 @@ function TaskContent({ taskId }: { taskId: string }) {
               </div>
             )}
 
-            <Field label="Примечание">
-              <Textarea rows={3} value={itemNotes} onChange={(e) => setItemNotes(e.target.value)} placeholder="Характеристики, требования, производитель, аналог..." className="input resize-none" />
-            </Field>
+            <FormField id="task-item-notes" label={itemLabels.notes} error={itemErrors.notes}>
+              <Textarea rows={3} maxLength={2000} value={itemNotes} onChange={(e) => setItemNotes(e.target.value)} />
+            </FormField>
 
+            {actionError && <Alert tone="danger">{actionError}</Alert>}
             <ModalActions busy={busy} onCancel={() => setItemFormOpen(false)} submitLabel={editingItemId ? 'Сохранить изменения' : 'Добавить позицию'} />
           </form>
         </Modal>
@@ -1793,7 +1894,7 @@ function TaskContent({ taskId }: { taskId: string }) {
         <Modal busy={busy} title="Новое предложение поставщика" onClose={() => setSupplierFormOpen(false)}>
           <form onSubmit={addSupplier} className="space-y-5">
             <div>
-              <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
+              <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">
                 Поставщик
               </div>
               <div className="space-y-3">
@@ -1825,7 +1926,7 @@ function TaskContent({ taskId }: { taskId: string }) {
             </div>
 
             <div className="border-t border-slate-100 pt-5">
-              <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
+              <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">
                 Условия предложения
               </div>
 
@@ -1853,7 +1954,7 @@ function TaskContent({ taskId }: { taskId: string }) {
               <label className="mt-4 flex cursor-pointer items-center justify-between rounded-xl border border-slate-200 px-4 py-3">
                 <div>
                   <div className="text-sm font-medium text-slate-800">Товар в наличии</div>
-                  <div className="mt-0.5 text-xs text-slate-400">Можно отгрузить без ожидания производства или поставки</div>
+                  <div className="mt-0.5 text-xs text-muted">Можно отгрузить без ожидания производства или поставки</div>
                 </div>
                 <Input
                   type="checkbox"
@@ -1994,7 +2095,7 @@ function TaskContent({ taskId }: { taskId: string }) {
 
             {carrier.trim() && (
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">После подтверждения</div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-muted">После подтверждения</div>
                 <div className="mt-2 text-sm font-medium text-slate-800">
                   Отслеживать доставку {carrier.trim()}
                   {trackingNumber.trim() ? `, трек / ТТН ${trackingNumber.trim()}` : ''}
@@ -2017,7 +2118,7 @@ function TaskContent({ taskId }: { taskId: string }) {
 }
 
 function Info({ label, value }: { label: string; value: string }) {
-  return <div className="rounded-xl bg-slate-50 p-3.5"><div className="text-xs text-slate-400">{label}</div><div className="mt-1.5 break-words text-sm font-semibold text-slate-800">{value}</div></div>;
+  return <div className="rounded-xl bg-slate-50 p-3.5"><div className="text-xs text-muted">{label}</div><div className="mt-1.5 break-words text-sm font-semibold text-slate-800">{value}</div></div>;
 }
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return <label className="block"><span className="mb-1.5 block text-sm font-medium text-slate-700">{label}</span>{children}</label>;
