@@ -673,13 +673,12 @@ function TaskContent({ taskId }: { taskId: string }) {
       {activeTab === 'overview' && (
         <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
           <div className="min-w-0 space-y-5">
-            <WorkNextAction id={task.id} history={() => setActiveTab('history')} />
-            <section className="rounded-2xl border border-blue-100 bg-gradient-to-b from-blue-50 to-white p-5 shadow-sm">
-              <div className="text-xs font-semibold uppercase tracking-wide text-blue-500">Текущее действие</div>
-              <div className="mt-1.5 text-lg font-semibold text-slate-950">{task.nextAction || (task.status === 'CLOSED' ? 'Закупка завершена' : 'Действие не задано')}</div>
-              {task.reminderAt && <div className="mt-1.5 flex items-center gap-1.5 text-sm text-slate-500"><span aria-hidden="true">◷</span><span>Напоминание: {formatDateTime(task.reminderAt)}</span></div>}
-              <div className="mt-4">{renderCurrentAction()}</div>
-            </section>
+            <WorkNextAction id={task.id} history={() => setActiveTab('history')} fallback={<>
+              <p className="text-lg font-semibold">{task.nextAction || (task.status === 'CLOSED' ? 'Закупка завершена' : 'Действие не задано')}</p>
+              {task.reminderAt && <p className="text-sm text-muted">Напоминание · {formatDateTime(task.reminderAt)}</p>}
+            </>}>
+              {renderCurrentAction()}
+            </WorkNextAction>
 
             <section className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
               <div className="mb-5"><h2 className="font-semibold">Основная информация</h2><p className="mt-1 text-sm text-slate-500">Приоритет и напоминание по текущей закупке</p></div>
