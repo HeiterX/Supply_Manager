@@ -12,6 +12,7 @@ export const AUTH_EVENTS = {
 
 function isProtectedResource(path: string): boolean {
   return (
+    path.startsWith('/discovery/') ||
     path === '/tasks' ||
     path.startsWith('/tasks/') ||
     path === '/purchase-requests' ||
@@ -29,7 +30,7 @@ export async function apiFetch(
     credentials: 'include',
   });
 
-  if (typeof window !== 'undefined' && isProtectedResource(path)) {
+  if (typeof window !== 'undefined' && !options.signal?.aborted && isProtectedResource(path)) {
     if (response.status === 401) {
       window.dispatchEvent(new Event(AUTH_EVENTS.unauthorized));
     }

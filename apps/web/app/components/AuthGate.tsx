@@ -2,6 +2,8 @@
 
 import { AUTH_EVENTS } from '../../lib/api-client';
 import {
+  createContext,
+  useContext,
   useEffect,
   useState,
   type FormEvent,
@@ -24,13 +26,20 @@ type AuthStatus =
 
 type AuthGateProps = {
   children: ReactNode;
+  allowEmployees?: boolean;
 };
+
+const CurrentUserContext = createContext<AuthUser | null>(null);
+
+export function useCurrentUser() {
+  return useContext(CurrentUserContext);
+}
 
 function hasProcurementAccess(user: AuthUser): boolean {
   return user.role === 'PROCUREMENT' || user.role === 'ADMIN';
 }
 
-export default function AuthGate({ children }: AuthGateProps) {
+export default function AuthGate({ children, allowEmployees = false }: AuthGateProps) {
   const [status, setStatus] = useState<AuthStatus>('checking');
   const [user, setUser] = useState<AuthUser | null>(null);
 
@@ -51,7 +60,7 @@ export default function AuthGate({ children }: AuthGateProps) {
 
         if (!currentUser) {
           setStatus('guest');
-        } else if (hasProcurementAccess(currentUser)) {
+        } else if (allowEmployees || hasProcurementAccess(currentUser)) {
           setStatus('authorized');
         } else {
           setStatus('forbidden');
@@ -72,7 +81,7 @@ export default function AuthGate({ children }: AuthGateProps) {
     return () => {
       active = false;
     };
-  }, []);
+  }, [allowEmployees]);
 
   
   useEffect(() => {
@@ -125,7 +134,7 @@ export default function AuthGate({ children }: AuthGateProps) {
       setPassword('');
 
       setStatus(
-        hasProcurementAccess(currentUser)
+        allowEmployees || hasProcurementAccess(currentUser)
           ? 'authorized'
           : 'forbidden',
       );
@@ -194,7 +203,7 @@ export default function AuthGate({ children }: AuthGateProps) {
         </h1>
 
         <p className="mt-2 text-sm text-slate-500">
-          Войдите под учётной записью сотрудника снабжения.
+          Войдите в свою учётную запись Supply Manager.
         </p>
 
         <form onSubmit={handleLogin} className="mt-6 space-y-4">
@@ -282,7 +291,7 @@ export default function AuthGate({ children }: AuthGateProps) {
         )}
       </div>
 
-      {children}
+      <CurrentUserContext.Provider value={user}>{children}</CurrentUserContext.Provider>
     </>
   );
 }
