@@ -12,6 +12,7 @@ export const AUTH_EVENTS = {
 
 function isProtectedResource(path: string): boolean {
   return (
+    path.startsWith('/telegram/') ||
     path === '/tasks' ||
     path.startsWith('/tasks/') ||
     path === '/purchase-requests' ||
