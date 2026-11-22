@@ -3,7 +3,7 @@
 import Image from 'next/image';
 import { useState } from 'react';
 import { API_BASE_URL, apiFetch } from '../../lib/api-client';
-import { statusLabels, useCoreResource } from '../../lib/discovery';
+import { reportTimeZone, statusLabels, useCoreResource } from '../../lib/discovery';
 import { useCurrentUser } from '../components/AuthGate';
 
 type RequestItem = {
@@ -59,6 +59,7 @@ const statusStyles: Record<string, string> = {
 
 function formatDateTime(value: string) {
   return new Intl.DateTimeFormat('ru-RU', {
+    timeZone: reportTimeZone,
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',

@@ -3,7 +3,7 @@ import AuthGate from './components/AuthGate';
 import { apiFetch } from '../lib/api-client';
 import Link from 'next/link';
 import { Suspense, useState, type FormEvent } from 'react';
-import { taskLink, useCoreResource, useDiscoveryList } from '../lib/discovery';
+import { reportTimeZone, taskLink, useCoreResource, useDiscoveryList } from '../lib/discovery';
 import { DiscoveryControls, Pagination } from './components/DiscoveryControls';
 import AppShell from './components/AppShell';
 
@@ -80,6 +80,7 @@ function formatDate(value: string | null) {
   if (!value) return '—';
 
   return new Intl.DateTimeFormat('ru-RU', {
+    timeZone: reportTimeZone,
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
@@ -90,24 +91,13 @@ function formatDateTime(value: string | null) {
   if (!value) return '—';
 
   return new Intl.DateTimeFormat('ru-RU', {
+    timeZone: reportTimeZone,
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(value));
-}
-
-function startOfToday() {
-  const value = new Date();
-  value.setHours(0, 0, 0, 0);
-  return value;
-}
-
-function endOfToday() {
-  const value = new Date();
-  value.setHours(23, 59, 59, 999);
-  return value;
 }
 
 function isActive(task: Task) {
@@ -207,12 +197,7 @@ function deadlineLabel(task: Task) {
     };
   }
 
-  const deadline = new Date(task.deadline);
-
-  if (
-    deadline.getTime() >= startOfToday().getTime() &&
-    deadline.getTime() <= endOfToday().getTime()
-  ) {
+  if (formatDate(task.deadline) === formatDate(new Date().toISOString())) {
     return {
       text: `Сегодня · ${formatDate(task.deadline)}`,
       className: 'font-semibold text-amber-600',

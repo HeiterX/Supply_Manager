@@ -69,6 +69,8 @@ jobs:
         run: npm run lint
       - name: API build
         run: npm run build
+      - name: API unit tests
+        run: npm test
       - name: Write isolated E2E configurations (ignored by Git)
         run: |
           cat > .env <<'EOF'
