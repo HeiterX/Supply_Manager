@@ -1,0 +1,36 @@
+@startuml
+skinparam componentStyle rectangle
+actor "Снабженец / администратор" as Staff
+actor "Заявитель" as Requester
+
+package "Next.js" {
+  component "AuthGate / AppShell" as Shell
+  component "Списки и карточка заявки" as Lists
+  component "Карточка закупки" as Details
+  component "Мастер заказа" as Order
+  component "Публичный мастер заявки" as Intake
+  component "API-клиент" as Client
+  database "Настройки вида в браузере" as Preferences
+}
+
+package "NestJS" {
+  component "Tasks / PurchaseRequests" as BaseApi
+  component "Discovery CORE-11" as Discovery
+  component "Next Action CORE-09" as Action
+}
+
+Staff --> Shell
+Requester --> Intake
+Shell --> Lists
+Shell --> Details
+Lists --> Details : ссылка с контекстом возврата
+Lists --> Preferences : фильтры, сортировка, размер страницы
+Details --> Order
+Lists --> Client
+Details --> Client
+Order --> Client
+Intake --> Client
+Client --> BaseApi : cookie, токен загрузки фото
+Client ..> Discovery : серверные списки
+Client ..> Action : чтение следующего действия
+@enduml
