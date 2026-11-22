@@ -58,6 +58,12 @@ export const ModelName = {
   SupplierOffer: 'SupplierOffer',
   PurchaseOrder: 'PurchaseOrder',
   User: 'User',
+  TelegramLink: 'TelegramLink',
+  TelegramSubscription: 'TelegramSubscription',
+  TelegramUpdateReceipt: 'TelegramUpdateReceipt',
+  TelegramRate: 'TelegramRate',
+  TelegramButton: 'TelegramButton',
+  TelegramDelivery: 'TelegramDelivery',
   PurchaseRequest: 'PurchaseRequest',
   PurchaseRequestItem: 'PurchaseRequestItem',
   SupplierOfferItem: 'SupplierOfferItem',
@@ -207,11 +213,86 @@ export const UserScalarFieldEnum = {
   role: 'role',
   status: 'status',
   telegramChatId: 'telegramChatId',
+  telegramUsername: 'telegramUsername',
+  telegramMuted: 'telegramMuted',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
 } as const
 
 export type UserScalarFieldEnum = (typeof UserScalarFieldEnum)[keyof typeof UserScalarFieldEnum]
+
+
+export const TelegramLinkScalarFieldEnum = {
+  id: 'id',
+  userId: 'userId',
+  tokenHash: 'tokenHash',
+  expiresAt: 'expiresAt',
+  claimedAt: 'claimedAt',
+  chatId: 'chatId',
+  username: 'username'
+} as const
+
+export type TelegramLinkScalarFieldEnum = (typeof TelegramLinkScalarFieldEnum)[keyof typeof TelegramLinkScalarFieldEnum]
+
+
+export const TelegramSubscriptionScalarFieldEnum = {
+  userId: 'userId',
+  category: 'category',
+  enabled: 'enabled'
+} as const
+
+export type TelegramSubscriptionScalarFieldEnum = (typeof TelegramSubscriptionScalarFieldEnum)[keyof typeof TelegramSubscriptionScalarFieldEnum]
+
+
+export const TelegramUpdateReceiptScalarFieldEnum = {
+  updateId: 'updateId',
+  callbackId: 'callbackId',
+  createdAt: 'createdAt'
+} as const
+
+export type TelegramUpdateReceiptScalarFieldEnum = (typeof TelegramUpdateReceiptScalarFieldEnum)[keyof typeof TelegramUpdateReceiptScalarFieldEnum]
+
+
+export const TelegramRateScalarFieldEnum = {
+  chatId: 'chatId',
+  window: 'window',
+  count: 'count'
+} as const
+
+export type TelegramRateScalarFieldEnum = (typeof TelegramRateScalarFieldEnum)[keyof typeof TelegramRateScalarFieldEnum]
+
+
+export const TelegramButtonScalarFieldEnum = {
+  id: 'id',
+  userId: 'userId',
+  command: 'command',
+  expiresAt: 'expiresAt',
+  usedAt: 'usedAt'
+} as const
+
+export type TelegramButtonScalarFieldEnum = (typeof TelegramButtonScalarFieldEnum)[keyof typeof TelegramButtonScalarFieldEnum]
+
+
+export const TelegramDeliveryScalarFieldEnum = {
+  id: 'id',
+  eventKey: 'eventKey',
+  recipientKey: 'recipientKey',
+  userId: 'userId',
+  chatId: 'chatId',
+  category: 'category',
+  procurementOnly: 'procurementOnly',
+  text: 'text',
+  keyboard: 'keyboard',
+  status: 'status',
+  attempts: 'attempts',
+  availableAt: 'availableAt',
+  leaseUntil: 'leaseUntil',
+  messageId: 'messageId',
+  errorCode: 'errorCode',
+  createdAt: 'createdAt'
+} as const
+
+export type TelegramDeliveryScalarFieldEnum = (typeof TelegramDeliveryScalarFieldEnum)[keyof typeof TelegramDeliveryScalarFieldEnum]
 
 
 export const PurchaseRequestScalarFieldEnum = {
@@ -297,6 +378,14 @@ export const SortOrder = {
 export type SortOrder = (typeof SortOrder)[keyof typeof SortOrder]
 
 
+export const NullableJsonNullValueInput = {
+  DbNull: DbNull,
+  JsonNull: JsonNull
+} as const
+
+export type NullableJsonNullValueInput = (typeof NullableJsonNullValueInput)[keyof typeof NullableJsonNullValueInput]
+
+
 export const QueryMode = {
   default: 'default',
   insensitive: 'insensitive'
@@ -311,4 +400,13 @@ export const NullsOrder = {
 } as const
 
 export type NullsOrder = (typeof NullsOrder)[keyof typeof NullsOrder]
+
+
+export const JsonNullValueFilter = {
+  DbNull: DbNull,
+  JsonNull: JsonNull,
+  AnyNull: AnyNull
+} as const
+
+export type JsonNullValueFilter = (typeof JsonNullValueFilter)[keyof typeof JsonNullValueFilter]
 

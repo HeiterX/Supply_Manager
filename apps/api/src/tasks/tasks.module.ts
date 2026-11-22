@@ -5,10 +5,12 @@ import { PrismaModule } from '../prisma/prisma.module.js';
 import { TasksController } from './tasks.controller.js';
 import { TasksService } from './tasks.service.js';
 import { MultiOrdersService } from './multi-orders.service.js';
+import { TelegramModule } from '../telegram/telegram.module.js';
 
 @Module({
-  imports: [PrismaModule, AuthModule],
+  imports: [PrismaModule, AuthModule, TelegramModule],
   controllers: [TasksController],
   providers: [TasksService, MultiOrdersService],
+  exports: [TasksService],
 })
 export class TasksModule {}
