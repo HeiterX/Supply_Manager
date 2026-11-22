@@ -8,8 +8,12 @@ import { Input, Textarea, Select } from '@/app/components/ui';
 
 import { apiFetch } from '@/lib/api-client';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
-import { useCallback, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useParams, useSearchParams } from 'next/navigation';
+import { workingBack, workingError } from '@/lib/working-list';
+import { OrderTracking } from './OrderTracking';
+import WorkNextAction from './WorkNextAction';
+import { milli, orderAllocation } from './allocation';
+import { Suspense, useCallback, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useAbortableLoad } from '@/lib/use-abortable-load';
 import { Alert, Skeleton, TableRegion } from '@/app/components/ui';
 import LoadError from '@/app/components/LoadError';
@@ -28,7 +32,8 @@ type Task = {
   purchaseOrder: PurchaseOrder | null; purchaseOrders?: PurchaseOrder[];
 };
 
-type Tab = 'overview' | 'items' | 'offers' | 'order' | 'history';
+type Tab = 'overview' | 'items' | 'offers' | 'order' | 'payments' | 'delivery' | 'history';
+const tabs = new Set<Tab>(['overview', 'items', 'offers', 'order', 'payments', 'delivery', 'history']);
 type HistoryFilter = 'all' | 'events' | 'notes';
 
 const priorityLabels: Record<string, string> = { LOW: 'Низкий', NORMAL: 'Обычный', HIGH: 'Высокий', URGENT: 'Срочный' };
@@ -168,7 +173,18 @@ function TaskContent({ taskId }: { taskId: string }) {
   const { confirm, confirmation } = useConfirmation();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
-  const [activeTab, setActiveTab] = useState<Tab>('overview');
+  const search = useSearchParams();
+  const tab = search.get('tab') as Tab;
+  const activeTab = tabs.has(tab) ? tab : 'overview';
+  const back = workingBack(search.get('back'));
+  const actionLock = useRef(false);
+  function setActiveTab(next: Tab) {
+    if (activeTab === next) return;
+    const params = new URLSearchParams(search);
+    if (next === 'overview') params.delete('tab');
+    else params.set('tab', next);
+    window.history.pushState(null, '', params.size ? '?' + params : window.location.pathname);
+  }
   const [message, setMessage] = useState('');
   const [actionError, setActionError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -238,6 +254,8 @@ function TaskContent({ taskId }: { taskId: string }) {
   const loadTask = useAbortableLoad(fetchTask);
 
   async function apiAction(path: string, init: RequestInit, success: string, onFailure?: (message: string) => void) {
+    if (actionLock.current) return false;
+    actionLock.current = true;
     setBusy(true); setMessage(''); setActionError('');
     try {
       const response = await apiFetch(
@@ -245,26 +263,23 @@ function TaskContent({ taskId }: { taskId: string }) {
         init,
       );
       if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || 'Ошибка запроса');
+        const error = await workingError(response, 'Не удалось выполнить действие.');
+        if (response.status === 409) {
+          await loadTask();
+          throw new Error(error + ' Данные обновлены. Проверьте их перед повтором.');
+        }
+        throw new Error(error);
       }
       await loadTask(); setMessage(success); return true;
     } catch (error) {
-      console.error(error);
-      let message = 'Не удалось выполнить действие. Проверьте данные и повторите.';
-      if (error instanceof Error) {
-        try {
-          const parsed = JSON.parse(error.message);
-          const details = parsed.message;
-          if (Array.isArray(details)) message = details.join('; ');
-          else if (typeof details === 'string') message = details;
-        } catch { /* network error */ }
-      }
+      const message = error instanceof TypeError ? 'Подтверждение не получено. Проверьте состояние закупки перед повтором.'
+        : error instanceof Error ? error.message : 'Не удалось выполнить действие.';
+      if (error instanceof TypeError) await loadTask();
       setActionError(message);
       onFailure?.(message);
       return false;
     }
-    finally { setBusy(false); }
+    finally { actionLock.current = false; setBusy(false); }
   }
 
   async function saveOverview(event: FormEvent<HTMLFormElement>) {
@@ -513,6 +528,8 @@ function TaskContent({ taskId }: { taskId: string }) {
     };
   }, [task, offerSort]);
 
+  const allocation = useMemo(() => orderAllocation(task?.purchaseOrders ?? []), [task?.purchaseOrders]);
+
   const historyData = useMemo(() => {
     if (!task) {
       return {
@@ -614,15 +631,30 @@ function TaskContent({ taskId }: { taskId: string }) {
     .flatMap(order => (order.items ?? []).map(line => line.taskItemId)));
   const itemLocked = (id: string) => lockedItemIds.has(id) || task.status === 'CLOSED' || task.status === 'CANCELLED';
 
+  function positionProgress(item: TaskItem) {
+    if (legacyMode) return <span className="text-muted">Не указано</span>;
+    const totals = allocation.get(item.id);
+    const ordered = totals?.ordered ?? 0;
+    const received = Math.min(totals?.received ?? 0, ordered);
+    return <dl className="grid grid-cols-[1fr_auto] gap-x-2 text-xs tabular-nums">
+      <dt>Заказано</dt><dd>{formatQuantity(ordered / 1000)}</dd>
+      <dt>Получено</dt><dd>{formatQuantity(received / 1000)}</dd>
+      <dt>Осталось получить</dt><dd>{formatQuantity((ordered - received) / 1000)}</dd>
+      <dt>Осталось заказать</dt><dd>{formatQuantity(Math.max(0, milli(item.quantity) - ordered) / 1000)}</dd>
+    </dl>;
+  }
+
   const tabDefs: Array<[Tab, string, number | null]> = [
-    ['overview', 'Обзор', null], ['items', 'Позиции', task.items.length], ['offers', 'Предложения', task.supplierOffers.length], ['order', 'Заказы', task.purchaseOrders?.length ?? 0], ['history', 'История', task.activities.length],
+    ['overview', 'Обзор', null], ['items', 'Позиции', task.items.length], ['offers', 'Предложения', task.supplierOffers.length], ['order', 'Заказы', task.purchaseOrders?.length ?? 0],     ['payments', 'Оплаты', null],
+    ['delivery', 'Доставка', null],
+['history', 'История', task.activities.length],
   ];
 
   return (
     <PageLayout
       title={`№${task.number} · ${task.title}`}
       subtitle={task.description || 'Карточка закупки'}
-      action={<Link href="/" className="rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50">← К списку</Link>}
+      action={<Link href={back} className="rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50">← К списку</Link>}
     >
       <div className="mb-5 flex flex-wrap items-center gap-2">
         <StatusBadge status={task.status} />
@@ -634,9 +666,14 @@ function TaskContent({ taskId }: { taskId: string }) {
 
       <div className="ui-tabs ui-card mb-6" role="group" aria-label="Разделы закупки">{tabDefs.map(([value, label, count]) => <button key={value} type="button" aria-pressed={activeTab === value} onClick={() => setActiveTab(value)} className="ui-button ui-button--ghost">{label}{count !== null && <span className="ml-1.5 rounded-full bg-white/80 px-2 py-0.5 text-[11px] text-slate-400">{count}</span>}</button>)}</div>
 
+      {(activeTab === 'payments' || activeTab === 'delivery') && <OrderTracking
+        orders={task.purchaseOrders?.length ? task.purchaseOrders : task.purchaseOrder ? [task.purchaseOrder] : []}
+        mode={activeTab} openOrders={() => setActiveTab('order')} />}
+
       {activeTab === 'overview' && (
         <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
-          <div className="space-y-5">
+          <div className="min-w-0 space-y-5">
+            <WorkNextAction id={task.id} history={() => setActiveTab('history')} />
             <section className="rounded-2xl border border-blue-100 bg-gradient-to-b from-blue-50 to-white p-5 shadow-sm">
               <div className="text-xs font-semibold uppercase tracking-wide text-blue-500">Текущее действие</div>
               <div className="mt-1.5 text-lg font-semibold text-slate-950">{task.nextAction || (task.status === 'CLOSED' ? 'Закупка завершена' : 'Действие не задано')}</div>
@@ -780,6 +817,7 @@ function TaskContent({ taskId }: { taskId: string }) {
                       <tr>
                         <th className="px-5 py-3">Позиция</th>
                         <th className="px-5 py-3">Количество</th>
+                        <th className="px-5 py-3">Исполнение</th>
                         <th className="px-5 py-3">Цена за ед.</th>
                         <th className="px-5 py-3">Сумма</th>
                         <th className="px-5 py-3 text-right">Действия</th>
@@ -806,6 +844,7 @@ function TaskContent({ taskId }: { taskId: string }) {
                             <td className="whitespace-nowrap px-5 py-4 font-medium text-slate-700">
                               {formatQuantity(item.quantity)} <span className="font-normal text-slate-400">{item.unit}</span>
                             </td>
+                            <td className="min-w-40">{positionProgress(item)}</td>
                             <td className="whitespace-nowrap px-5 py-4">
                               {item.unitPrice === null ? (
                                 <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700">Не указана</span>
@@ -831,7 +870,7 @@ function TaskContent({ taskId }: { taskId: string }) {
                     {itemsSummary.priced > 0 && !itemSearch.trim() && (
                       <tfoot className="border-t border-slate-200 bg-slate-50/60">
                         <tr>
-                          <td colSpan={3} className="px-5 py-4 text-sm font-medium text-slate-500">
+                          <td colSpan={4} className="px-5 py-4 text-sm font-medium text-slate-500">
                             Ориентировочная стоимость позиций с указанной ценой
                           </td>
                           <td className="px-5 py-4 text-base font-semibold text-slate-950">{formatMoney(itemsSummary.amount)}</td>
@@ -846,7 +885,7 @@ function TaskContent({ taskId }: { taskId: string }) {
                   {filteredItems.map((item) => {
                     const total = itemTotal(item);
                     return (
-                      <article key={item.id} className="p-4">
+                      <article key={item.id} className="p-4 [overflow-wrap:anywhere]">
                         <div className="flex items-start justify-between gap-4">
                           <div className="min-w-0">
                             <div className="font-semibold text-slate-900">{item.name}</div>
@@ -866,6 +905,7 @@ function TaskContent({ taskId }: { taskId: string }) {
                           )}
                         </div>
 
+                        <div className="mt-3 rounded-lg bg-surface-subtle p-3">{positionProgress(item)}</div>
                         {item.notes && <div className="mt-3 rounded-xl bg-slate-50 px-3 py-2.5 text-sm text-slate-500">{item.notes}</div>}
 
                         <div className="mt-4 flex gap-2">
@@ -1983,9 +2023,13 @@ function Info({ label, value }: { label: string; value: string }) {
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return <label className="block"><span className="mb-1.5 block text-sm font-medium text-slate-700">{label}</span>{children}</label>;
 }
-export default function TaskPage() {
+function TaskRoute() {
   const { id } = useParams<{ id: string }>();
   return (
     <TaskContent key={id} taskId={id} />
   );
+}
+
+export default function TaskPage() {
+  return <Suspense fallback={<Skeleton />}><TaskRoute /></Suspense>;
 }
