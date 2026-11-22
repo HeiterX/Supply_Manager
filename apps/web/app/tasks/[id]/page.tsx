@@ -7,6 +7,7 @@ import { useParams } from 'next/navigation';
 import { useCallback, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { useAbortableLoad } from '../../../lib/use-abortable-load';
 import AppShell from '../../components/AppShell';
+import TaskNextAction from '../../components/core09/TaskNextAction';
 
 type Activity = { id: string; taskId: string; text: string; createdAt: string };
 import ProcurementWorkspace, {
@@ -634,6 +635,8 @@ function TaskContent({ taskId }: { taskId: string }) {
 
       {(message || actionError) && <div className={`mb-5 rounded-xl border px-4 py-3 text-sm ${actionError ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>{actionError || message}</div>}
 
+      <TaskNextAction task={task} openLegacyHistory={() => setActiveTab('history')} />
+
       <div className="mb-6 overflow-x-auto rounded-2xl border border-slate-200/80 bg-white p-1 shadow-sm">
         <div className="flex min-w-max gap-1">{tabDefs.map(([value, label, count]) => <button key={value} onClick={() => setActiveTab(value)} className={`rounded-xl px-4 py-2.5 text-sm font-semibold transition ${activeTab === value ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`}>{label}{count !== null && <span className="ml-1.5 rounded-full bg-white/80 px-2 py-0.5 text-[11px] text-slate-400">{count}</span>}</button>)}</div>
       </div>
@@ -642,9 +645,7 @@ function TaskContent({ taskId }: { taskId: string }) {
         <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
           <div className="space-y-5">
             <section className="rounded-2xl border border-blue-100 bg-gradient-to-b from-blue-50 to-white p-5 shadow-sm">
-              <div className="text-xs font-semibold uppercase tracking-wide text-blue-500">Текущее действие</div>
-              <div className="mt-1.5 text-lg font-semibold text-slate-950">{task.nextAction || (task.status === 'CLOSED' ? 'Закупка завершена' : 'Действие не задано')}</div>
-              {task.reminderAt && <div className="mt-1.5 flex items-center gap-1.5 text-sm text-slate-500"><span aria-hidden="true">◷</span><span>Напоминание: {formatDateTime(task.reminderAt)}</span></div>}
+              <div className="text-xs font-semibold uppercase tracking-wide text-blue-500">Доступное действие по закупке</div>
               <div className="mt-4">{renderCurrentAction()}</div>
             </section>
 

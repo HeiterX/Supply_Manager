@@ -12,6 +12,8 @@ export const AUTH_EVENTS = {
 
 function isProtectedResource(path: string): boolean {
   return (
+    path === '/next-actions' || path.startsWith('/next-actions?') || path.startsWith('/next-actions/') ||
+    path.startsWith('/notifications') ||
     path === '/tasks' ||
     path.startsWith('/tasks/') ||
     path === '/purchase-requests' ||
