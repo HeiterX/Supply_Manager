@@ -2,12 +2,14 @@ import 'dotenv/config';
 
 import { ValidationPipe, type INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { JwtService } from '@nestjs/jwt';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { AppModule } from '../src/app.module.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
+import { AUTH_COOKIE_NAME } from '../src/auth/auth.constants.js';
 
 describe('Auth (e2e)', () => {
   let app: INestApplication;
@@ -106,5 +108,15 @@ describe('Auth (e2e)', () => {
       .post('/api/v1/auth/login')
       .send({ username, password: 'Wrong-Password' })
       .expect(401);
+  });
+
+  it('rejects an expired signed session on session and protected endpoints', async () => {
+    const token = app.get(JwtService).sign({ sub: userId }, { expiresIn: -1 });
+    for (const path of ['/auth/me', '/tasks', '/tasks/items/registry']) {
+      await request(app.getHttpServer())
+        .get('/api/v1' + path)
+        .set('Cookie', `${AUTH_COOKIE_NAME}=${token}`)
+        .expect(401);
+    }
   });
 });

@@ -1,0 +1,23 @@
+@startuml
+title CORE-02: проверки PR в main / push main / ручного запуска
+start
+fork
+  :Проверка отслеживаемых путей;
+  :Gitleaks новых коммитов\nзначения маскируются;
+fork again
+  :Node 24 / npm ci API;
+  :Prisma generate / lint / build;
+  :Unit / E2E safety tests;
+  :Явные .env + .env.test\nпроверка изоляции до миграций;
+  :PostgreSQL 17\nвременная CI БД / schema=e2e;
+  :migrate deploy / E2E;
+fork again
+  :Node 24 / npm ci Web;
+  :ESLint / Next.js production build;
+fork again
+  :Production npm audit API и Web;
+  :Информационный результат\nостаточный риск Issue 38;
+end fork
+:Ревью и приёмка человеком\nIssue 23 остаётся открытым;
+stop
+@enduml
