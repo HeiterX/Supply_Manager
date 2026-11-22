@@ -22,7 +22,7 @@ SM-002–SM-007 уже интегрированы. Исправления Hooks,
 | API | npm test | PASS, 2/2 | PASS, 2/2 |
 | API | npm run test:e2e | BLOCKED до подключения к БД | Вызов Bash попадает в WSL без установленного дистрибутива; после переносимого runner PASS, 31/31, 7 файлов |
 | API | npm run test:e2e:safety | Не было | PASS, 5/5, без БД |
-| Web | npm ci | PASS | Итоговый lockfile дополнительно проверяется CI |
+| Web | npm ci | PASS на Windows | После первого CI восстановлены отсутствовавшие optional/peer записи; PASS в чистом Linux Node 24/npm 11.19.1 |
 | Web | npm run lint | PASS, 0 errors/warnings | PASS, 0 errors/warnings |
 | Web | npm run build | PASS, Next 16.3.6 | PASS, Next 16.4.6, включая TypeScript |
 | API | production npm audit | FAIL: 16 записей, 10 high / 6 moderate | FAIL: 3 high одной цепочки Prisma/Effect, #38 |
@@ -39,6 +39,7 @@ API E2E запускались штатной командой `npm run test:e2e
 - `.env` используется только для сравнения адресов. Дочерние `dotenv/config` направлены на `.env.test`, чтобы настройки интеграций из рабочего файла не подгружались. Окружение вызывающего процесса сохраняется: не запускайте тесты с реальными корпоративными переменными. Проверка схемы сама по себе не подтверждает назначение сервера.
 - Добавлены 5 тестов защиты конфигурации и E2E реально подписанного истёкшего JWT: `/auth/me`, `/tasks`, `/tasks/items/registry` возвращают 401.
 - CI запускает unit и E2E safety tests; PostgreSQL 17 и изолированная CI БД сохранены. PR ограничен main, push в main и ручной запуск сохранены. Установка по lockfile, Prisma generate, lint/build и E2E обязательны.
+- Первый CI выявил неполный Web lockfile после обновления на Windows/npm 11.6: Linux/npm 11.19 отклонял npm ci из-за отсутствия @emnapi/core и runtime 1.11.3. Lockfile восстановлен через npm install --package-lock-only --ignore-scripts в чистом Linux-контейнере Node 24; затем там же прошли npm ci, lint и production build. Исходники монтировались только для чтения. Пакеты вручную в JSON не добавлялись.
 - Filename guard дополнен приватными каталогами, backups, архивами, почтой и ключами. Пять старых source backups удалены только из индекса Git. Gitleaks 8.30.1 сканирует новые коммиты PR/push, вывод маскируется; historical audit не подменяется сканированием нового диапазона.
 - Обновлены README, changelog и отдельная PlantUML-схема CI. Бизнес-логика и существующие схемы/миграции не менялись. Автогенерируемый Prisma Client не редактировался вручную.
 
@@ -70,7 +71,7 @@ API E2E подтверждают PROCUREMENT/ADMIN, EMPLOYEE 403, гость 401
 
 ## CI и воспроизведение
 
-Статус нового PR/CI фиксируется после публикации коммитов. Локальные результаты не объявляются результатами GitHub Actions. #23 остаётся открытым до ревью и приёмки; merge не выполняется.
+[PR #39](https://github.com/HeiterX/Supply_Manager/pull/39). Первый [CI run #9](https://github.com/HeiterX/Supply_Manager/actions/runs/45018642390): API npm ci/generate/lint/build, unit 2/2, safety 5/5, E2E 31/31 и Repository hygiene/Gitleaks PASS; Web npm ci FAIL из-за неполного lockfile. Audit подтвердил Web 0 и API 3 high. Исправленный lockfile проверен в чистом Linux; окончательный прогон смотрите во вкладке [PR Checks](https://github.com/HeiterX/Supply_Manager/pull/39/checks). Локальные результаты не подменяют GitHub Actions. #23 остаётся открытым до ревью и приёмки; merge не выполняется.
 
 ```bash
 node scripts/check-tracked-paths.mjs
