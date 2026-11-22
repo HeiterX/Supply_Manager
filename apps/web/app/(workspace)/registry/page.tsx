@@ -1,10 +1,13 @@
 'use client';
-import AuthGate from '../components/AuthGate';
-import { apiFetch } from '../../lib/api-client';
+
+import { Input } from '@/app/components/ui';
+import { apiFetch } from '@/lib/api-client';
 import Link from 'next/link';
 import { useCallback, useMemo, useState } from 'react';
-import { useAbortableLoad } from '../../lib/use-abortable-load';
-import AppShell from '../components/AppShell';
+import { useAbortableLoad } from '@/lib/use-abortable-load';
+import { StatusBadge } from '@/app/components/StatusBadge';
+import { EmptyState, Skeleton, TableRegion } from '@/app/components/ui';
+import PageLayout from '@/app/components/PageLayout';
 
 type RegistrySupplier = {
   id: string;
@@ -50,35 +53,7 @@ type RegistryItem = {
 };
 
 
-const statusLabels: Record<string, string> = {
-  NEW: 'Новая',
-  SEARCHING: 'Поиск поставщика',
-  NEGOTIATION: 'Переговоры',
-  ORDERED: 'Заказано',
-  WAITING_PAYMENT: 'Ожидает оплаты',
-  WAITING_SHIPMENT: 'Ожидает отгрузки',
-  IN_TRANSIT: 'В пути',
-  READY_FOR_PICKUP: 'Готово к получению',
-  RECEIVED: 'Получено',
-  HANDED_OVER: 'Передано',
-  CLOSED: 'Закрыто',
-  CANCELLED: 'Отменено',
-};
 
-const statusTone: Record<string, string> = {
-  NEW: 'bg-slate-100 text-slate-700',
-  SEARCHING: 'bg-violet-50 text-violet-700',
-  NEGOTIATION: 'bg-fuchsia-50 text-fuchsia-700',
-  ORDERED: 'bg-indigo-50 text-indigo-700',
-  WAITING_PAYMENT: 'bg-amber-50 text-amber-700',
-  WAITING_SHIPMENT: 'bg-orange-50 text-orange-700',
-  IN_TRANSIT: 'bg-blue-50 text-blue-700',
-  READY_FOR_PICKUP: 'bg-cyan-50 text-cyan-700',
-  RECEIVED: 'bg-emerald-50 text-emerald-700',
-  HANDED_OVER: 'bg-teal-50 text-teal-700',
-  CLOSED: 'bg-slate-100 text-slate-500',
-  CANCELLED: 'bg-rose-50 text-rose-700',
-};
 
 function formatQuantity(value: string | number) {
   const number = Number(value);
@@ -117,7 +92,7 @@ function itemSupplier(item: RegistryItem) {
   );
 }
 
-function RegistryContent() {
+export default function RegistryPage() {
   const [registryItems, setRegistryItems] = useState<RegistryItem[]>([]);
   const [registrySearch, setRegistrySearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -174,7 +149,7 @@ function RegistryContent() {
   }, [registryItems, registrySearch]);
 
   return (
-    <AppShell
+    <PageLayout
       title="Реестр позиций"
       subtitle="Все закупаемые позиции по всем закупкам"
       action={
@@ -219,26 +194,24 @@ function RegistryContent() {
             <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
               ⌕
             </span>
-            <input
+            <Input
+              type="search"
+              aria-label="Поиск по реестру"
               value={registrySearch}
               onChange={(event) => setRegistrySearch(event.target.value)}
               placeholder="Позиция, артикул, поставщик..."
-              className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-blue-300 focus:bg-white focus:ring-4 focus:ring-blue-50"
+              className="pl-9"
             />
           </div>
         </div>
 
         {loading ? (
-          <div className="p-8 text-center text-sm text-slate-500">
-            Загружаем реестр...
-          </div>
+          <Skeleton label="Загружаем реестр" />
         ) : filteredRegistry.length === 0 ? (
-          <div className="p-8 text-center text-sm text-slate-500">
-            Позиции не найдены.
-          </div>
+          <EmptyState title="Позиции не найдены" />
         ) : (
           <>
-            <div className="hidden overflow-x-auto md:block">
+            <TableRegion label="Реестр позиций" className="hidden md:block">
               <table className="w-full min-w-[960px] text-left text-sm">
                 <thead className="bg-slate-50/80 text-xs font-semibold uppercase tracking-wide text-slate-400">
                   <tr>
@@ -296,22 +269,14 @@ function RegistryContent() {
                         </td>
 
                         <td className="px-5 py-4">
-                          <span
-                            className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
-                              statusTone[item.task.status] ??
-                              'bg-slate-100'
-                            }`}
-                          >
-                            {statusLabels[item.task.status] ??
-                              item.task.status}
-                          </span>
+                          <StatusBadge status={item.task.status} />
                         </td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
-            </div>
+            </TableRegion>
 
             <div className="divide-y divide-slate-100 md:hidden">
               {filteredRegistry.map((item) => {
@@ -363,14 +328,6 @@ function RegistryContent() {
           </>
         )}
       </section>
-    </AppShell>
-  );
-}
-
-export default function RegistryPage() {
-  return (
-    <AuthGate>
-      <RegistryContent />
-    </AuthGate>
+    </PageLayout>
   );
 }

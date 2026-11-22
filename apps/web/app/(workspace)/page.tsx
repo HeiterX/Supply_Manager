@@ -1,10 +1,15 @@
 'use client';
-import AuthGate from './components/AuthGate';
-import { apiFetch } from '../lib/api-client';
+
+import { Modal } from '@/app/components/Modal';
+
+import { Input, Textarea, Select } from '@/app/components/ui';
+import { apiFetch } from '@/lib/api-client';
 import Link from 'next/link';
 import { useCallback, useMemo, useState, type FormEvent } from 'react';
-import { useAbortableLoad } from '../lib/use-abortable-load';
-import AppShell from './components/AppShell';
+import { useAbortableLoad } from '@/lib/use-abortable-load';
+import { StatusBadge, taskStatusLabels as statusLabels } from '@/app/components/StatusBadge';
+import { Alert, Button, EmptyState, Skeleton, TableRegion, Toast } from '@/app/components/ui';
+import PageLayout from '@/app/components/PageLayout';
 
 type Task = {
   id: string;
@@ -31,20 +36,6 @@ type AttentionReason = {
 
 const terminalStatuses = new Set(['CLOSED', 'CANCELLED']);
 
-const statusLabels: Record<string, string> = {
-  NEW: 'Новая',
-  SEARCHING: 'Поиск поставщика',
-  NEGOTIATION: 'Переговоры',
-  ORDERED: 'Заказано',
-  WAITING_PAYMENT: 'Ожидает оплаты',
-  WAITING_SHIPMENT: 'Ожидает отгрузки',
-  IN_TRANSIT: 'В пути',
-  READY_FOR_PICKUP: 'Готово к получению',
-  RECEIVED: 'Получено',
-  HANDED_OVER: 'Передано',
-  CLOSED: 'Закрыто',
-  CANCELLED: 'Отменено',
-};
 
 const priorityLabels: Record<string, string> = {
   LOW: 'Низкий',
@@ -53,20 +44,6 @@ const priorityLabels: Record<string, string> = {
   URGENT: 'Срочный',
 };
 
-const statusTone: Record<string, string> = {
-  NEW: 'bg-slate-100 text-slate-700',
-  SEARCHING: 'bg-violet-50 text-violet-700',
-  NEGOTIATION: 'bg-fuchsia-50 text-fuchsia-700',
-  ORDERED: 'bg-indigo-50 text-indigo-700',
-  WAITING_PAYMENT: 'bg-amber-50 text-amber-700',
-  WAITING_SHIPMENT: 'bg-orange-50 text-orange-700',
-  IN_TRANSIT: 'bg-blue-50 text-blue-700',
-  READY_FOR_PICKUP: 'bg-cyan-50 text-cyan-700',
-  RECEIVED: 'bg-emerald-50 text-emerald-700',
-  HANDED_OVER: 'bg-teal-50 text-teal-700',
-  CLOSED: 'bg-slate-100 text-slate-500',
-  CANCELLED: 'bg-rose-50 text-rose-700',
-};
 
 const attentionTone: Record<AttentionReason['tone'], string> = {
   rose: 'bg-rose-50 text-rose-700 ring-rose-100',
@@ -310,7 +287,7 @@ function StatIcon({
   );
 }
 
-function HomeContent() {
+export default function PurchasesPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -325,6 +302,7 @@ function HomeContent() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState('');
+  const [createdNotice, setCreatedNotice] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState('NORMAL');
@@ -575,6 +553,7 @@ function HomeContent() {
 
       resetCreateForm();
       setIsCreateOpen(false);
+      setCreatedNotice(true);
       await loadData();
     } catch (error) {
       console.error(error);
@@ -590,7 +569,7 @@ function HomeContent() {
         resetCreateForm();
         setIsCreateOpen(true);
       }}
-      className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-blue-200 transition hover:bg-blue-700"
+      className="ui-button ui-button--primary inline-flex items-center gap-2 px-4 py-2.5 text-sm font-semibold transition"
     >
       <span className="text-lg leading-none">＋</span>
       <span className="hidden sm:inline">Новая закупка</span>
@@ -599,7 +578,7 @@ function HomeContent() {
   );
 
   return (
-    <AppShell
+    <PageLayout
       title="Закупки"
       subtitle="Контроль сроков, следующих действий и движения закупок"
       action={newButton}
@@ -824,11 +803,13 @@ function HomeContent() {
                 <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
                   ⌕
                 </span>
-                <input
+                <Input
+                  type="search"
+                  aria-label="Поиск закупок"
                   value={taskSearch}
                   onChange={(event) => setTaskSearch(event.target.value)}
                   placeholder="Номер, закупка или следующее действие..."
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-blue-300 focus:bg-white focus:ring-4 focus:ring-blue-50"
+                  className="pl-9"
                 />
               </div>
             </div>
@@ -859,7 +840,7 @@ function HomeContent() {
               </div>
 
               <div className="flex flex-wrap gap-2">
-                <select
+                <Select
                   value={stageFilter}
                   onChange={(event) => setStageFilter(event.target.value)}
                   className="min-w-[150px] flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-600 outline-none focus:border-blue-300 sm:flex-none"
@@ -871,9 +852,9 @@ function HomeContent() {
                       {statusLabels[status]}
                     </option>
                   ))}
-                </select>
+                </Select>
 
-                <select
+                <Select
                   value={priorityFilter}
                   onChange={(event) =>
                     setPriorityFilter(event.target.value)
@@ -885,9 +866,9 @@ function HomeContent() {
                   <option value="HIGH">Высокий</option>
                   <option value="NORMAL">Обычный</option>
                   <option value="LOW">Низкий</option>
-                </select>
+                </Select>
 
-                <select
+                <Select
                   value={deadlineFilter}
                   onChange={(event) =>
                     setDeadlineFilter(event.target.value)
@@ -899,9 +880,9 @@ function HomeContent() {
                   <option value="TODAY">На сегодня</option>
                   <option value="WEEK">На 7 дней</option>
                   <option value="NONE">Без срока</option>
-                </select>
+                </Select>
 
-                <select
+                <Select
                   value={sortMode}
                   onChange={(event) => setSortMode(event.target.value)}
                   className="min-w-[150px] flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-600 outline-none focus:border-blue-300 sm:flex-none"
@@ -910,7 +891,7 @@ function HomeContent() {
                   <option value="DEADLINE">По сроку</option>
                   <option value="UPDATED">По обновлению</option>
                   <option value="NUMBER">Сначала новые</option>
-                </select>
+                </Select>
 
                 {activeFilterCount > 0 && (
                   <button
@@ -927,35 +908,17 @@ function HomeContent() {
         </div>
 
         {loading ? (
-          <div className="p-10 text-center text-sm text-slate-500">
-            Загружаем закупки...
-          </div>
+          <Skeleton label="Загружаем закупки" />
         ) : filteredTasks.length === 0 ? (
-          <div className="px-6 py-14 text-center">
-            <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-slate-100 text-xl text-slate-400">
-              ⌕
-            </div>
-            <div className="mt-4 font-semibold text-slate-900">
-              Закупки не найдены
-            </div>
-            <div className="mt-1 text-sm text-slate-500">
-              Измените поиск или параметры фильтрации.
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                setTaskSearch('');
-                setStatusFilter('ACTIVE');
-                clearAdvancedFilters();
-              }}
-              className="mt-4 text-sm font-semibold text-blue-600 hover:text-blue-700"
-            >
-              Сбросить фильтры
-            </button>
-          </div>
+          <EmptyState title="Закупки не найдены" description="Измените поиск или параметры фильтрации."
+            action={<Button variant="outline" onClick={() => {
+              setTaskSearch('');
+              setStatusFilter('ACTIVE');
+              clearAdvancedFilters();
+            }}>Сбросить фильтры</Button>} />
         ) : (
           <>
-            <div className="hidden overflow-x-auto md:block">
+            <TableRegion label="Закупки" className="hidden md:block">
               <table className="w-full min-w-[1120px] text-left text-sm">
                 <thead className="bg-slate-50/80 text-xs font-semibold uppercase tracking-wide text-slate-400">
                   <tr>
@@ -1009,14 +972,7 @@ function HomeContent() {
                         </td>
 
                         <td className="px-5 py-4">
-                          <span
-                            className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
-                              statusTone[task.status] ??
-                              'bg-slate-100 text-slate-700'
-                            }`}
-                          >
-                            {statusLabels[task.status] ?? task.status}
-                          </span>
+                          <StatusBadge status={task.status} />
                         </td>
 
                         <td className="px-5 py-4">
@@ -1080,7 +1036,7 @@ function HomeContent() {
                   })}
                 </tbody>
               </table>
-            </div>
+            </TableRegion>
 
             <div className="divide-y divide-slate-100 md:hidden">
               {filteredTasks.map((task) => {
@@ -1112,13 +1068,7 @@ function HomeContent() {
                         </div>
                       </div>
 
-                      <span
-                        className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                          statusTone[task.status] ?? 'bg-slate-100'
-                        }`}
-                      >
-                        {statusLabels[task.status] ?? task.status}
-                      </span>
+                      <StatusBadge status={task.status} />
                     </div>
 
                     <div className="mt-3 rounded-xl bg-slate-50 px-3 py-2.5 text-sm text-slate-600">
@@ -1152,41 +1102,20 @@ function HomeContent() {
         )}
       </section>
 
+      {createdNotice && <Toast onDismiss={() => setCreatedNotice(false)}>Закупка создана</Toast>}
       {isCreateOpen && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/30 p-0 backdrop-blur-[2px] sm:items-center sm:p-4">
-          <div className="w-full max-w-xl rounded-t-3xl bg-white p-5 shadow-2xl sm:rounded-3xl sm:p-6">
-            <div className="mb-5 flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-xl font-semibold text-slate-950">
-                  Новая закупка
-                </h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  Создайте карточку, затем добавьте закупаемые позиции.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={() =>
-                  !isCreating && setIsCreateOpen(false)
-                }
-                className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-slate-400 transition hover:bg-slate-100"
-              >
-                ×
-              </button>
-            </div>
-
-            <form onSubmit={createTask} className="space-y-4">
+        <Modal title="Новая закупка" onClose={() => setIsCreateOpen(false)} busy={isCreating}>
+          <p className="mb-4 text-sm text-muted">Создайте карточку, затем добавьте закупаемые позиции.</p>
+          <form onSubmit={createTask} className="space-y-4">
               <label className="block">
                 <span className="mb-1.5 block text-sm font-medium text-slate-700">
                   Название *
                 </span>
-                <input
-                  autoFocus
+                <Input
+                  data-initial-focus
                   value={title}
                   onChange={(event) => setTitle(event.target.value)}
                   placeholder="Например: фильтры для планового ТО"
-                  className="w-full rounded-xl border border-slate-200 px-3.5 py-3 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-50"
                 />
               </label>
 
@@ -1194,14 +1123,13 @@ function HomeContent() {
                 <span className="mb-1.5 block text-sm font-medium text-slate-700">
                   Описание
                 </span>
-                <textarea
+                <Textarea
                   value={description}
                   onChange={(event) =>
                     setDescription(event.target.value)
                   }
                   rows={3}
                   placeholder="Что требуется закупить, для какого узла или работы..."
-                  className="w-full resize-none rounded-xl border border-slate-200 px-3.5 py-3 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-50"
                 />
               </label>
 
@@ -1210,72 +1138,46 @@ function HomeContent() {
                   <span className="mb-1.5 block text-sm font-medium text-slate-700">
                     Приоритет
                   </span>
-                  <select
+                  <Select
                     value={priority}
                     onChange={(event) =>
                       setPriority(event.target.value)
                     }
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm outline-none focus:border-blue-400"
                   >
                     <option value="LOW">Низкий</option>
                     <option value="NORMAL">Обычный</option>
                     <option value="HIGH">Высокий</option>
                     <option value="URGENT">Срочный</option>
-                  </select>
+                  </Select>
                 </label>
 
                 <label>
                   <span className="mb-1.5 block text-sm font-medium text-slate-700">
                     Срок
                   </span>
-                  <input
+                  <Input
                     type="datetime-local"
                     value={deadline}
                     onChange={(event) =>
                       setDeadline(event.target.value)
                     }
-                    className="w-full rounded-xl border border-slate-200 px-3.5 py-3 text-sm outline-none focus:border-blue-400"
                   />
                 </label>
               </div>
 
               {createError && (
-                <div className="rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-3 text-sm text-rose-700">
-                  {createError}
-                </div>
+                <Alert tone="danger">{createError}</Alert>
               )}
 
-              <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setIsCreateOpen(false)}
-                  disabled={isCreating}
-                  className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
-                >
-                  Отмена
-                </button>
-
-                <button
-                  type="submit"
-                  disabled={isCreating || !title.trim()}
-                  className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {isCreating ? 'Создаём...' : 'Создать закупку'}
-                </button>
+              <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-4">
+                <Button variant="outline" disabled={isCreating} onClick={() => setIsCreateOpen(false)}>Отмена</Button>
+                <Button type="submit" loading={isCreating} disabled={!title.trim()}>
+                  {isCreating ? 'Создаём…' : 'Создать закупку'}
+                </Button>
               </div>
             </form>
-          </div>
-        </div>
+        </Modal>
       )}
-    </AppShell>
-  );
-}
-
-
-export default function Home() {
-  return (
-    <AuthGate>
-      <HomeContent />
-    </AuthGate>
+    </PageLayout>
   );
 }

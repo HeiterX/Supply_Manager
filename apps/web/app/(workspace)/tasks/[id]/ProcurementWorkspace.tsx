@@ -1,5 +1,9 @@
 'use client';
 
+import OfferComparison from './OfferComparison';
+import { useConfirmation } from '@/app/components/use-confirmation';
+import { Modal as Dialog } from '@/app/components/Modal';
+
 import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
 
 export type Supplier = {
@@ -58,9 +62,9 @@ const qty = (v: string | number) => new Intl.NumberFormat('ru-RU', { maximumFrac
 const date = (v: string | null) => v ? new Date(v).toLocaleString('ru-RU') : '—';
 const localDate = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
 const milli = (v: string | number) => Math.round(Number(v) * 1000);
-const inputClass = 'w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none focus:border-blue-500';
-const primaryClass = 'rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40';
-const secondaryClass = 'rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40';
+const inputClass = 'ui-input';
+const primaryClass = 'ui-button ui-button--primary';
+const secondaryClass = 'ui-button ui-button--outline';
 const orderLabels: Record<string, string> = {
   ORDERED: 'Заказ оформлен', WAITING_PAYMENT: 'Ожидает оплаты', WAITING_SHIPMENT: 'Ожидает отгрузки',
   IN_TRANSIT: 'В пути', READY_FOR_PICKUP: 'Готово к получению', RECEIVED: 'Получено',
@@ -73,15 +77,8 @@ const orderColors: Record<string, string> = {
   HANDED_OVER: 'bg-teal-50 text-teal-700', CANCELLED: 'bg-rose-50 text-rose-700',
 };
 
-function Dialog({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-3 sm:p-6" role="dialog" aria-modal="true" aria-label={title}>
-    <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl sm:p-7">
-      <div className="mb-5 flex items-start justify-between gap-4"><h2 className="text-lg font-semibold text-slate-950">{title}</h2>
-        <button type="button" onClick={onClose} aria-label="Закрыть" className="rounded-lg px-3 py-1 text-2xl text-slate-400 hover:bg-slate-100">×</button></div>
-      {children}
-    </div>
-  </div>;
-}
+const offerAnchor = (offerId: string) => `offer-${offerId}`;
+
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return <label className="block"><span className="mb-1.5 block text-xs font-semibold text-slate-600">{label}</span>{children}</label>;
 }
@@ -93,6 +90,7 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
   onAction: (path: string, init: RequestInit, success: string, onFailure?: (message: string) => void) => Promise<boolean>;
   onNavigate: (mode: 'offers' | 'orders') => void;
 }) {
+  const { confirm, confirmation } = useConfirmation();
   const [offerOpen, setOfferOpen] = useState(false);
   const [editingOffer, setEditingOffer] = useState<SupplierOffer | null>(null);
   const [supplier, setSupplier] = useState({ name: '', contact: '', phone: '', email: '', website: '' });
@@ -242,7 +240,7 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
     if (ok) setActionForm(null);
   }
   async function closeTask() {
-    if (!window.confirm('Все позиции переданы получателям. Закрыть закупку?')) return;
+    if (!await confirm('Все позиции переданы получателям. Закрыть закупку?')) return;
     await onAction('/orders/close', { method: 'PATCH' }, 'Закупка закрыта');
   }
 
@@ -276,10 +274,12 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
         <button disabled={busy || isClosed || !task.items.length} onClick={openOffer} className={primaryClass}>＋ Добавить КП</button>
       </div>
       {!task.supplierOffers.length ? <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500">Пока нет предложений поставщиков. Добавьте первое КП.</div> :
+        <>
+        <OfferComparison offers={task.supplierOffers} offerAnchor={offerAnchor} />
         <div className="grid gap-4 xl:grid-cols-2">{task.supplierOffers.map(offer => {
           const ordered = orderByOffer(offer.id);
           const known = offer.price !== null;
-          return <article key={offer.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          return <article key={offer.id} id={offerAnchor(offer.id)} tabIndex={-1} className="ui-card scroll-mt-24 p-5">
             <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-semibold text-slate-950">{offer.supplier.name}</h3>
               <p className="mt-1 text-xs text-slate-500">{[offer.supplier.contact, offer.supplier.phone, offer.supplier.email].filter(Boolean).join(' · ') || 'Контакты не указаны'}</p></div>
               {ordered && <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">Заказ оформлен</span>}</div>
@@ -297,7 +297,7 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
             {!isClosed && !orders.some(order => order.supplierOfferId === offer.id) && <button disabled={busy} onClick={() => openEditOffer(offer)} className={`mt-4 ${secondaryClass}`}>Изменить КП</button>}
             {!ordered && offer.items?.length > 0 && !isClosed && <button disabled={busy || offer.items.every(i => available(i.taskItemId) <= 0)} onClick={() => openOrder(offer)} className={`mt-4 w-full ${primaryClass}`}>Оформить заказ у поставщика →</button>}
           </article>;
-        })}</div>}
+        })}</div></>}
     </> : <>
       <div className="flex flex-wrap items-end justify-between gap-3"><div><h2 className="text-lg font-semibold text-slate-950">Заказы поставщикам</h2>
         <p className="mt-1 text-sm text-slate-500">У каждого заказа свой счёт, оплата, доставка и передача. Отменённые заказы остаются в истории.</p></div>
@@ -332,7 +332,7 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
         <p className="mt-1 text-sm text-emerald-700">Теперь закупку можно закрыть.</p><button disabled={busy} onClick={closeTask} className="mt-3 rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40">Закрыть закупку</button></div>}
     </>}
 
-    {offerOpen && <Dialog title={editingOffer ? "Редактировать КП" : "Новое коммерческое предложение"} onClose={() => setOfferOpen(false)}>
+    {offerOpen && <Dialog busy={busy} title={editingOffer ? "Редактировать КП" : "Новое коммерческое предложение"} onClose={() => setOfferOpen(false)}>
       <form onSubmit={saveOffer} className="space-y-5"><div className="grid gap-3 sm:grid-cols-2">
         <Field label="Поставщик *"><input autoFocus required className={inputClass} value={supplier.name} onChange={e => setSupplier(s => ({ ...s, name: e.target.value }))} placeholder="ООО «ПромСнаб»" /></Field>
         <Field label="Контактное лицо"><input className={inputClass} value={supplier.contact} onChange={e => setSupplier(s => ({ ...s, contact: e.target.value }))} /></Field>
@@ -344,10 +344,10 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
         <div className="mt-3 space-y-3">{task.items.map(item => {
           const row = draft[item.id]; if (!row) return null;
           return <div key={item.id} className="rounded-xl border border-slate-200 p-3">
-            <label className="flex items-center gap-3 text-sm font-semibold"><input type="checkbox" checked={row.selected} onChange={e => updateDraft(item.id, { selected: e.target.checked })} />{item.name} <span className="font-normal text-slate-400">нужно {qty(item.quantity)} {item.unit}</span></label>
+            <label className="flex items-center gap-3 text-sm font-semibold"><input type="checkbox" className="ui-choice" checked={row.selected} onChange={e => updateDraft(item.id, { selected: e.target.checked })} />{item.name} <span className="font-normal text-slate-400">нужно {qty(item.quantity)} {item.unit}</span></label>
             {row.selected && <div className="mt-3 grid gap-3 sm:grid-cols-2"><Field label={`Количество, ${item.unit} *`}><input required type="number" min="0.001" max={Number(item.quantity)} step="0.001" className={inputClass} value={row.quantity} onChange={e => updateDraft(item.id, { quantity: e.target.value })} /></Field>
               <Field label="Цена за единицу, ₽"><input type="number" min="0" step="0.01" className={inputClass} value={row.price} onChange={e => updateDraft(item.id, { price: e.target.value })} placeholder="Можно оставить пустым" /></Field>
-              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={row.inStock} onChange={e => updateDraft(item.id, { inStock: e.target.checked })} />В наличии</label>
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="ui-choice" checked={row.inStock} onChange={e => updateDraft(item.id, { inStock: e.target.checked })} />В наличии</label>
               <div className="text-right text-sm font-semibold">Сумма: {row.price === '' ? '—' : money(Number(row.price) * Number(row.quantity))}</div>
               <div className="sm:col-span-2"><input className={inputClass} value={row.notes} onChange={e => updateDraft(item.id, { notes: e.target.value })} placeholder="Комментарий по позиции" /></div>
             </div>}
@@ -363,13 +363,13 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
       </form>
     </Dialog>}
 
-    {orderOffer && <Dialog title={`Оформить заказ у «${orderOffer.supplier.name}»`} onClose={() => setOrderOffer(null)}>
+    {orderOffer && <Dialog busy={busy} title={`Оформить заказ у «${orderOffer.supplier.name}»`} onClose={() => setOrderOffer(null)}>
       <form onSubmit={saveOrder} className="space-y-5"><p className="text-sm text-slate-500">Укажите, сколько из предложенного количества заказываем сейчас. Система не позволит превысить остаток закупки.</p>
         <div className="space-y-3">{orderOffer.items.map(item => {
           const row = orderDraft[item.id]; if (!row) return null;
           const remaining = available(item.taskItemId);
           return <div key={item.id} className="rounded-xl border border-slate-200 p-3">
-            <label className="flex items-center gap-2 text-sm font-semibold"><input type="checkbox" disabled={remaining <= 0} checked={row.selected} onChange={e => updateOrderDraft(item.id, { selected: e.target.checked })} />{item.taskItem.name}</label>
+            <label className="flex items-center gap-2 text-sm font-semibold"><input type="checkbox" className="ui-choice" disabled={remaining <= 0} checked={row.selected} onChange={e => updateOrderDraft(item.id, { selected: e.target.checked })} />{item.taskItem.name}</label>
             <p className="mt-1 text-xs text-slate-500">Предложено {qty(item.quantity)} · осталось заказать {qty(remaining)} {item.taskItem.unit} · цена {money(item.unitPrice)} / {item.taskItem.unit}</p>
             {row.selected && <div className="mt-3 grid items-end gap-3 sm:grid-cols-2"><Field label="Заказать, количество *"><input type="number" min="0.001" step="0.001" max={Math.min(Number(item.quantity), remaining)} required className={inputClass} value={row.quantity} onChange={e => updateOrderDraft(item.id, { quantity: e.target.value })} /></Field>
               <div className="text-sm font-semibold">Сумма: {item.unitPrice === null ? '—' : money(Number(row.quantity) * Number(item.unitPrice))}</div></div>}
@@ -386,7 +386,7 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
       </form>
     </Dialog>}
 
-    {actionForm && <Dialog title={`${orderLabels[actionForm.order.status] ?? 'Заказ'} · ${actionForm.order.supplier.name}`} onClose={() => setActionForm(null)}>
+    {actionForm && <Dialog busy={busy} title={`${orderLabels[actionForm.order.status] ?? 'Заказ'} · ${actionForm.order.supplier.name}`} onClose={() => setActionForm(null)}>
       <form onSubmit={submitAction} className="space-y-4"><p className="text-sm text-slate-600">Счёт № {actionForm.order.invoiceNumber ?? '—'} · {money(actionForm.order.totalPrice)}</p>
         {actionForm.action === 'ship' && <><div className="grid gap-3 sm:grid-cols-2"><Field label="Дата отгрузки *"><input required type="datetime-local" className={inputClass} value={shippedAt} onChange={e => setShippedAt(e.target.value)} /></Field>
           <Field label="Ожидаемая дата прибытия"><input type="datetime-local" className={inputClass} value={expectedAt} onChange={e => setExpectedAt(e.target.value)} /></Field></div>
@@ -402,5 +402,6 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
             {actionForm.action === 'cancel' ? 'Отменить заказ' : 'Подтвердить'}</button></div>
       </form>
     </Dialog>}
+    {confirmation}
   </section>;
 }

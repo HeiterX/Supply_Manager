@@ -1,11 +1,15 @@
 'use client';
 
+import { Input } from '@/app/components/ui';
+
+import Link from 'next/link';
+import { StatusBadge } from '@/app/components/StatusBadge';
 import Image from 'next/image';
 import { useCallback, useMemo, useState } from 'react';
-import { useAbortableLoad } from '../../lib/use-abortable-load';
-import AppShell from '../components/AppShell';
-import AuthGate from '../components/AuthGate';
-import { API_BASE_URL, apiFetch } from '../../lib/api-client';
+import { useAbortableLoad } from '@/lib/use-abortable-load';
+import { Alert, EmptyState, Skeleton } from '@/app/components/ui';
+import PageLayout from '@/app/components/PageLayout';
+import { API_BASE_URL, apiFetch } from '@/lib/api-client';
 
 type RequestItem = {
   id: string;
@@ -46,25 +50,7 @@ type PurchaseRequest = {
   } | null;
 };
 
-const statusLabels: Record<string, string> = {
-  NEW: 'Новая',
-  ACCEPTED: 'Принята',
-  APPROVED: 'Принята',
-  IN_PROGRESS: 'В работе',
-  CONVERTED: 'Передана в закупку',
-  REJECTED: 'Отклонена',
-  CANCELLED: 'Отменена',
-};
 
-const statusStyles: Record<string, string> = {
-  NEW: 'bg-blue-50 text-blue-700 ring-blue-100',
-  ACCEPTED: 'bg-emerald-50 text-emerald-700 ring-emerald-100',
-  APPROVED: 'bg-emerald-50 text-emerald-700 ring-emerald-100',
-  IN_PROGRESS: 'bg-violet-50 text-violet-700 ring-violet-100',
-  CONVERTED: 'bg-violet-50 text-violet-700 ring-violet-100',
-  REJECTED: 'bg-rose-50 text-rose-700 ring-rose-100',
-  CANCELLED: 'bg-slate-100 text-slate-600 ring-slate-200',
-};
 
 function formatDateTime(value: string) {
   return new Intl.DateTimeFormat('ru-RU', {
@@ -92,7 +78,7 @@ function getErrorMessage(data: unknown, fallback: string): string {
   return fallback;
 }
 
-function RequestsContent() {
+export default function RequestsPage() {
   const [requests, setRequests] = useState<PurchaseRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -107,7 +93,7 @@ function RequestsContent() {
       });
       if (signal.aborted) return;
 
-      // AuthGate получает событие от apiFetch и скрывает защищённую страницу.
+      // Оболочка обрабатывает отказ в доступе и скрывает защищённый список.
       if (response.status === 401 || response.status === 403) {
         setRequests([]);
         return;
@@ -173,7 +159,7 @@ function RequestsContent() {
   );
 
   return (
-    <AppShell
+    <PageLayout
       title="Входящие заявки"
       subtitle="Заявки сотрудников, ожидающие обработки отделом снабжения"
       action={
@@ -206,11 +192,13 @@ function RequestsContent() {
               <circle cx="11" cy="11" r="7" />
               <path d="m16 16 4 4" />
             </svg>
-            <input
+            <Input
+              type="search"
+              aria-label="Поиск входящих заявок"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Номер, сотрудник или позиция"
-              className="h-11 w-full rounded-xl border border-slate-200 pl-11 pr-4 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+              className="pl-9"
             />
           </div>
 
@@ -229,39 +217,13 @@ function RequestsContent() {
       </section>
 
       {error && (
-        <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-700">
-          {error}
-        </div>
+        <div className="mb-4"><Alert tone="danger">{error}</Alert></div>
       )}
 
       {loading ? (
-        <div className="mt-5 grid gap-4">
-          {[1, 2, 3].map((item) => (
-            <div
-              key={item}
-              className="h-48 animate-pulse rounded-3xl border border-slate-200 bg-white"
-            />
-          ))}
-        </div>
+        <Skeleton label="Загружаем заявки" />
       ) : filteredRequests.length === 0 ? (
-        <section className="mt-5 rounded-3xl border border-dashed border-slate-300 bg-white px-5 py-14 text-center">
-          <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-slate-100 text-slate-400">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              className="h-6 w-6"
-              stroke="currentColor"
-              strokeWidth="1.8"
-            >
-              <path d="M5 4h14v16H5z" />
-              <path d="M8 9h8M8 13h5" />
-            </svg>
-          </div>
-          <h2 className="mt-4 font-semibold text-slate-800">Заявок не найдено</h2>
-          <p className="mt-1 text-sm text-slate-400">
-            Попробуйте изменить фильтр или строку поиска.
-          </p>
-        </section>
+        <EmptyState title="Заявок не найдено" description="Попробуйте изменить фильтр или строку поиска." />
       ) : (
         <div className="mt-5 space-y-4">
           {filteredRequests.map((request) => (
@@ -281,7 +243,7 @@ function RequestsContent() {
           ))}
         </div>
       )}
-    </AppShell>
+    </PageLayout>
   );
 }
 
@@ -354,15 +316,13 @@ function RequestCard({
     }
   }
 
-  const statusClass =
-    statusStyles[request.status] ??
-    'bg-slate-100 text-slate-600 ring-slate-200';
 
   return (
     <article className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
       <button
         type="button"
         onClick={() => setExpanded((value) => !value)}
+        aria-expanded={expanded}
         className="flex w-full items-start justify-between gap-4 p-4 text-left sm:p-5"
       >
         <div className="min-w-0">
@@ -370,11 +330,7 @@ function RequestCard({
             <span className="text-sm font-semibold text-slate-950">
               Заявка №{request.number}
             </span>
-            <span
-              className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ${statusClass}`}
-            >
-              {statusLabels[request.status] ?? request.status}
-            </span>
+            <StatusBadge status={request.status} kind="request" />
           </div>
           <div className="mt-2 text-base font-semibold text-slate-900">
             {requesterLabel(request)}
@@ -459,12 +415,12 @@ function RequestCard({
           </div>
 
           {request.task ? (
-            <a
+            <Link
               href={`/tasks/${request.task.id}`}
               className="mt-4 flex h-11 w-full items-center justify-center rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 sm:ml-auto sm:w-auto sm:px-5"
             >
               Перейти к закупке №{request.task.number}
-            </a>
+            </Link>
           ) : (
             <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-xs leading-5 text-slate-400">
@@ -475,7 +431,7 @@ function RequestCard({
                   type="button"
                   onClick={() => void handleAccept()}
                   disabled={accepting}
-                  className="h-11 w-full rounded-xl bg-blue-600 px-5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+                  className="ui-button ui-button--primary h-11 w-full px-5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                 >
                   {accepting ? 'Принимаем...' : 'Принять в работу'}
                 </button>
@@ -490,13 +446,5 @@ function RequestCard({
         </div>
       )}
     </article>
-  );
-}
-
-export default function RequestsPage() {
-  return (
-    <AuthGate>
-      <RequestsContent />
-    </AuthGate>
   );
 }

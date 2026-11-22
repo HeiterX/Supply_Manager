@@ -40,9 +40,10 @@ async function getErrorMessage(
  * 401 -> возвращает null.
  * Другие ошибки -> выбрасывает исключение.
  */
-export async function getCurrentUser(): Promise<AuthUser | null> {
+export async function getCurrentUser(signal?: AbortSignal): Promise<AuthUser | null> {
   const response = await apiFetch('/auth/me', {
     cache: 'no-store',
+    signal,
   });
 
   if (response.status === 401) {

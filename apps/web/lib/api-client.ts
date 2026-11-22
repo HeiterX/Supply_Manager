@@ -24,17 +24,18 @@ export async function apiFetch(
   path: `/${string}`,
   options: RequestInit = {},
 ): Promise<Response> {
+  const page = typeof window === 'undefined' ? null : window.location.pathname;
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
     credentials: 'include',
   });
 
-  if (typeof window !== 'undefined' && isProtectedResource(path)) {
+  if (typeof window !== 'undefined' && !options.signal?.aborted && isProtectedResource(path.split('?')[0])) {
     if (response.status === 401) {
       window.dispatchEvent(new Event(AUTH_EVENTS.unauthorized));
     }
 
-    if (response.status === 403) {
+    if (response.status === 403 && window.location.pathname === page) {
       window.dispatchEvent(new Event(AUTH_EVENTS.forbidden));
     }
   }

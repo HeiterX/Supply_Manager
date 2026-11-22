@@ -1,12 +1,20 @@
 'use client';
 
-import AuthGate from '../../components/AuthGate';
-import { apiFetch } from '../../../lib/api-client';
+import { useConfirmation } from '@/app/components/use-confirmation';
+
+import { Modal, ModalActions } from '@/app/components/Modal';
+
+import { Input, Textarea, Select } from '@/app/components/ui';
+
+import { apiFetch } from '@/lib/api-client';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useCallback, useMemo, useState, type FormEvent, type ReactNode } from 'react';
-import { useAbortableLoad } from '../../../lib/use-abortable-load';
-import AppShell from '../../components/AppShell';
+import { useAbortableLoad } from '@/lib/use-abortable-load';
+import { Alert, Skeleton, TableRegion } from '@/app/components/ui';
+import LoadError from '@/app/components/LoadError';
+import PageLayout from '@/app/components/PageLayout';
+import { StatusBadge } from '@/app/components/StatusBadge';
 
 type Activity = { id: string; taskId: string; text: string; createdAt: string };
 import ProcurementWorkspace, {
@@ -23,17 +31,6 @@ type Task = {
 type Tab = 'overview' | 'items' | 'offers' | 'order' | 'history';
 type HistoryFilter = 'all' | 'events' | 'notes';
 
-const statusLabels: Record<string, string> = {
-  NEW: 'Новая', SEARCHING: 'Поиск поставщика', NEGOTIATION: 'Переговоры / согласование', ORDERED: 'Заказано',
-  WAITING_PAYMENT: 'Ожидает оплаты', WAITING_SHIPMENT: 'Ожидает отгрузки', IN_TRANSIT: 'В пути',
-  READY_FOR_PICKUP: 'Готово к получению', RECEIVED: 'Получено', HANDED_OVER: 'Передано', CLOSED: 'Закрыто', CANCELLED: 'Отменено',
-};
-const statusTone: Record<string, string> = {
-  NEW: 'bg-slate-100 text-slate-700', SEARCHING: 'bg-violet-50 text-violet-700', NEGOTIATION: 'bg-fuchsia-50 text-fuchsia-700',
-  ORDERED: 'bg-indigo-50 text-indigo-700', WAITING_PAYMENT: 'bg-amber-50 text-amber-700', WAITING_SHIPMENT: 'bg-orange-50 text-orange-700',
-  IN_TRANSIT: 'bg-blue-50 text-blue-700', READY_FOR_PICKUP: 'bg-cyan-50 text-cyan-700', RECEIVED: 'bg-emerald-50 text-emerald-700',
-  HANDED_OVER: 'bg-teal-50 text-teal-700', CLOSED: 'bg-slate-100 text-slate-500', CANCELLED: 'bg-rose-50 text-rose-700',
-};
 const priorityLabels: Record<string, string> = { LOW: 'Низкий', NORMAL: 'Обычный', HIGH: 'Высокий', URGENT: 'Срочный' };
 
 function formatMoney(value: string | number | null, currency = 'RUB') {
@@ -168,6 +165,7 @@ function getActivityMeta(text: string) {
 
 function TaskContent({ taskId }: { taskId: string }) {
   const [task, setTask] = useState<Task | null>(null);
+  const { confirm, confirmation } = useConfirmation();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [activeTab, setActiveTab] = useState<Tab>('overview');
@@ -297,7 +295,7 @@ function TaskContent({ taskId }: { taskId: string }) {
     if (ok) setItemFormOpen(false);
   }
   async function deleteItem(item: TaskItem) {
-    if (!window.confirm(`Удалить позицию «${item.name}»?`)) return;
+    if (!await confirm(`Удалить позицию «${item.name}»?`)) return;
     await apiAction(`/items/${item.id}`, { method: 'DELETE' }, 'Позиция удалена');
   }
 
@@ -315,7 +313,7 @@ function TaskContent({ taskId }: { taskId: string }) {
   }
   async function selectOffer(offer: SupplierOffer) {
     if (task?.selectedOfferId === offer.id) return;
-    if (!window.confirm(`Выбрать поставщика «${offer.supplier.name}»?`)) return;
+    if (!await confirm(`Выбрать поставщика «${offer.supplier.name}»?`)) return;
     await apiAction(`/supplier-offers/${offer.id}/select`, { method: 'PATCH' }, `Поставщик «${offer.supplier.name}» выбран`);
   }
 
@@ -330,7 +328,7 @@ function TaskContent({ taskId }: { taskId: string }) {
 
   async function sendToPayment() { await apiAction('/purchase-order/send-to-payment', { method: 'PATCH' }, 'Счёт передан на оплату'); }
   async function confirmPayment() {
-    if (!window.confirm(`Подтвердить оплату счёта № ${task?.purchaseOrder?.invoiceNumber ?? 'без номера'}?`)) return;
+    if (!await confirm(`Подтвердить оплату счёта № ${task?.purchaseOrder?.invoiceNumber ?? 'без номера'}?`)) return;
     await apiAction('/purchase-order/confirm-payment', { method: 'PATCH' }, 'Оплата подтверждена');
   }
   async function submitShipment(event: FormEvent<HTMLFormElement>) {
@@ -341,11 +339,11 @@ function TaskContent({ taskId }: { taskId: string }) {
     if (ok) setShipModalOpen(false);
   }
   async function readyForPickup() {
-    if (!window.confirm('Подтвердить, что груз прибыл и готов к получению?')) return;
+    if (!await confirm('Подтвердить, что груз прибыл и готов к получению?')) return;
     await apiAction('/purchase-order/ready-for-pickup', { method: 'PATCH' }, 'Груз отмечен как готовый к получению');
   }
   async function receiveOrder() {
-    if (!window.confirm('Подтвердить фактическое получение товара?')) return;
+    if (!await confirm('Подтвердить фактическое получение товара?')) return;
     await apiAction('/purchase-order/receive', { method: 'PATCH' }, 'Получение подтверждено');
   }
   async function submitHandOver(event: FormEvent<HTMLFormElement>) {
@@ -354,7 +352,7 @@ function TaskContent({ taskId }: { taskId: string }) {
     if (ok) { setHandOverModalOpen(false); setHandedOverTo(''); }
   }
   async function closeOrder() {
-    if (!window.confirm('Закрыть закупку? После закрытия она перейдёт в завершённые.')) return;
+    if (!await confirm('Закрыть закупку? После закрытия она перейдёт в завершённые.')) return;
     await apiAction('/purchase-order/close', { method: 'PATCH' }, 'Закупка закрыта');
   }
   async function cancelOrder(event: FormEvent<HTMLFormElement>) {
@@ -589,7 +587,7 @@ function TaskContent({ taskId }: { taskId: string }) {
       if (task.status === 'CANCELLED') return null;
       const activeOrders = (task.purchaseOrders ?? []).filter(order => !order.cancelledAt);
       return <button onClick={() => setActiveTab(activeOrders.length ? 'order' : 'offers')}
-        className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-700">
+        className="ui-button ui-button--primary w-full px-4 py-3 text-sm font-semibold">
         {activeOrders.length ? 'Управлять заказами поставщиков' : 'Добавить предложение поставщика'}
       </button>;
     }
@@ -608,8 +606,8 @@ function TaskContent({ taskId }: { taskId: string }) {
     return null;
   }
 
-  if (loading) return <AppShell title="Закупка"><div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500">Загружаем карточку...</div></AppShell>;
-  if (loadError || !task) return <AppShell title="Закупка"><div className="rounded-2xl border border-rose-200 bg-rose-50 p-5 text-rose-700">{loadError || 'Закупка не найдена'}</div></AppShell>;
+  if (loading) return <PageLayout title="Закупка"><Skeleton label="Загружаем карточку" /></PageLayout>;
+  if (loadError || !task) return <PageLayout title="Закупка"><LoadError message={loadError || "Закупка не найдена"} retry={() => void loadTask()} /></PageLayout>;
 
   const lockedItemIds = new Set((task.purchaseOrders ?? [])
     .filter(order => !order.cancelledAt)
@@ -621,22 +619,20 @@ function TaskContent({ taskId }: { taskId: string }) {
   ];
 
   return (
-    <AppShell
+    <PageLayout
       title={`№${task.number} · ${task.title}`}
       subtitle={task.description || 'Карточка закупки'}
       action={<Link href="/" className="rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50">← К списку</Link>}
     >
       <div className="mb-5 flex flex-wrap items-center gap-2">
-        <span className={`rounded-full px-3 py-1.5 text-xs font-semibold ${statusTone[task.status] ?? 'bg-slate-100 text-slate-700'}`}>{statusLabels[task.status] ?? task.status}</span>
+        <StatusBadge status={task.status} />
         <span className={`rounded-full px-3 py-1.5 text-xs font-semibold ${['URGENT','HIGH'].includes(task.priority) ? 'bg-rose-50 text-rose-700' : 'bg-slate-100 text-slate-600'}`}>{priorityLabels[task.priority] ?? task.priority}</span>
         {task.deadline && <span className="rounded-full bg-white px-3 py-1.5 text-xs font-medium text-slate-500 ring-1 ring-slate-200">Срок {formatDateTime(task.deadline)}</span>}
       </div>
 
-      {(message || actionError) && <div className={`mb-5 rounded-xl border px-4 py-3 text-sm ${actionError ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>{actionError || message}</div>}
+      {(message || actionError) && <div className="mb-5"><Alert tone={actionError ? "danger" : "success"}>{actionError || message}</Alert></div>}
 
-      <div className="mb-6 overflow-x-auto rounded-2xl border border-slate-200/80 bg-white p-1 shadow-sm">
-        <div className="flex min-w-max gap-1">{tabDefs.map(([value, label, count]) => <button key={value} onClick={() => setActiveTab(value)} className={`rounded-xl px-4 py-2.5 text-sm font-semibold transition ${activeTab === value ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`}>{label}{count !== null && <span className="ml-1.5 rounded-full bg-white/80 px-2 py-0.5 text-[11px] text-slate-400">{count}</span>}</button>)}</div>
-      </div>
+      <div className="ui-tabs ui-card mb-6" role="group" aria-label="Разделы закупки">{tabDefs.map(([value, label, count]) => <button key={value} type="button" aria-pressed={activeTab === value} onClick={() => setActiveTab(value)} className="ui-button ui-button--ghost">{label}{count !== null && <span className="ml-1.5 rounded-full bg-white/80 px-2 py-0.5 text-[11px] text-slate-400">{count}</span>}</button>)}</div>
 
       {activeTab === 'overview' && (
         <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
@@ -651,9 +647,9 @@ function TaskContent({ taskId }: { taskId: string }) {
             <section className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
               <div className="mb-5"><h2 className="font-semibold">Основная информация</h2><p className="mt-1 text-sm text-slate-500">Приоритет и напоминание по текущей закупке</p></div>
               <form onSubmit={saveOverview} className="grid gap-4 md:grid-cols-2">
-                <label><span className="mb-1.5 block text-sm font-medium">Приоритет</span><select value={priority} onChange={(e) => setPriority(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm"><option value="LOW">Низкий</option><option value="NORMAL">Обычный</option><option value="HIGH">Высокий</option><option value="URGENT">Срочный</option></select></label>
-                <label><span className="mb-1.5 block text-sm font-medium">Напоминание</span><input type="datetime-local" value={reminderAt} onChange={(e) => setReminderAt(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3.5 py-3 text-sm" /></label>
-                {editNextAction && <label className="md:col-span-2"><span className="mb-1.5 block text-sm font-medium">Следующее действие</span><textarea rows={2} value={nextAction} onChange={(e) => setNextAction(e.target.value)} className="w-full resize-none rounded-xl border border-slate-200 px-3.5 py-3 text-sm outline-none focus:border-blue-400" /><p className="mt-1.5 text-xs text-slate-400">Обычно действие меняется автоматически при переходе между этапами. Редактируйте его вручную только при необходимости.</p></label>}
+                <label><span className="mb-1.5 block text-sm font-medium">Приоритет</span><Select value={priority} onChange={(e) => setPriority(e.target.value)}><option value="LOW">Низкий</option><option value="NORMAL">Обычный</option><option value="HIGH">Высокий</option><option value="URGENT">Срочный</option></Select></label>
+                <label><span className="mb-1.5 block text-sm font-medium">Напоминание</span><Input type="datetime-local" value={reminderAt} onChange={(e) => setReminderAt(e.target.value)} /></label>
+                {editNextAction && <label className="md:col-span-2"><span className="mb-1.5 block text-sm font-medium">Следующее действие</span><Textarea rows={2} value={nextAction} onChange={(e) => setNextAction(e.target.value)} /><p className="mt-1.5 text-xs text-slate-400">Обычно действие меняется автоматически при переходе между этапами. Редактируйте его вручную только при необходимости.</p></label>}
                 <div className="md:col-span-2 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
                   <button type="button" onClick={() => setEditNextAction((value) => !value)} className="text-sm font-medium text-slate-500 transition hover:text-blue-700">{editNextAction ? 'Скрыть ручное редактирование' : 'Изменить следующее действие'}</button>
                   <button disabled={busy} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50">Сохранить изменения</button>
@@ -704,7 +700,7 @@ function TaskContent({ taskId }: { taskId: string }) {
             </div>
             <button
               onClick={openNewItem} disabled={task.status === 'CLOSED' || task.status === 'CANCELLED'}
-              className="shrink-0 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700"
+              className="ui-button ui-button--primary shrink-0 px-4 py-2.5 text-sm font-semibold transition"
             >
               ＋ Добавить позицию
             </button>
@@ -742,11 +738,10 @@ function TaskContent({ taskId }: { taskId: string }) {
             <div className="flex flex-col gap-3 border-b border-slate-100 p-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="relative w-full sm:max-w-sm">
                 <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true">⌕</span>
-                <input
+                <Input
                   value={itemSearch}
                   onChange={(event) => setItemSearch(event.target.value)}
                   placeholder="Найти по названию, артикулу или примечанию"
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50/60 py-2.5 pl-9 pr-3.5 text-sm outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-50"
                 />
               </div>
               {task.items.length > 0 && (
@@ -765,7 +760,7 @@ function TaskContent({ taskId }: { taskId: string }) {
                 <div className="mx-auto mt-1 max-w-sm text-sm text-slate-500">
                   Добавьте комплектующие, материалы или другие позиции, которые необходимо закупить.
                 </div>
-                <button onClick={openNewItem} className="mt-5 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700">
+                <button onClick={openNewItem} className="ui-button ui-button--primary mt-5 px-4 py-2.5 text-sm font-semibold">
                   Добавить первую позицию
                 </button>
               </div>
@@ -779,7 +774,7 @@ function TaskContent({ taskId }: { taskId: string }) {
               </div>
             ) : (
               <>
-                <div className="hidden overflow-x-auto md:block">
+                <TableRegion label="Позиции закупки" className="hidden md:block">
                   <table className="w-full min-w-[900px] text-left text-sm">
                     <thead className="bg-slate-50/80 text-xs font-medium text-slate-400">
                       <tr>
@@ -845,7 +840,7 @@ function TaskContent({ taskId }: { taskId: string }) {
                       </tfoot>
                     )}
                   </table>
-                </div>
+                </TableRegion>
 
                 <div className="divide-y divide-slate-100 md:hidden">
                   {filteredItems.map((item) => {
@@ -902,7 +897,7 @@ function TaskContent({ taskId }: { taskId: string }) {
             </div>
             <button
               onClick={() => setSupplierFormOpen(true)}
-              className="shrink-0 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700"
+              className="ui-button ui-button--primary shrink-0 px-4 py-2.5 text-sm font-semibold transition"
             >
               ＋ Добавить предложение
             </button>
@@ -957,7 +952,7 @@ function TaskContent({ taskId }: { taskId: string }) {
               </div>
               <button
                 onClick={() => setSupplierFormOpen(true)}
-                className="mt-5 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"
+                className="ui-button ui-button--primary mt-5 px-4 py-2.5 text-sm font-semibold"
               >
                 Добавить первое предложение
               </button>
@@ -974,7 +969,7 @@ function TaskContent({ taskId }: { taskId: string }) {
 
                 <label className="flex items-center gap-2 text-sm text-slate-500">
                   <span className="shrink-0">Сортировка</span>
-                  <select
+                  <Select
                     value={offerSort}
                     onChange={(event) =>
                       setOfferSort(event.target.value as 'total' | 'delivery' | 'recent')
@@ -984,7 +979,7 @@ function TaskContent({ taskId }: { taskId: string }) {
                     <option value="total">По итоговой стоимости</option>
                     <option value="delivery">По сроку поставки</option>
                     <option value="recent">Сначала новые</option>
-                  </select>
+                  </Select>
                 </label>
               </div>
 
@@ -1126,7 +1121,7 @@ function TaskContent({ taskId }: { taskId: string }) {
                               </div>
                               <button
                                 onClick={() => setOrderFormOpen(true)}
-                                className="shrink-0 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"
+                                className="ui-button ui-button--primary shrink-0 px-4 py-2.5 text-sm font-semibold"
                               >
                                 Оформить заказ →
                               </button>
@@ -1162,7 +1157,7 @@ function TaskContent({ taskId }: { taskId: string }) {
                     setActiveTab('offers');
                   }
                 }}
-                className="mt-5 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"
+                className="ui-button ui-button--primary mt-5 px-4 py-2.5 text-sm font-semibold"
               >
                 {task.selectedOffer ? 'Оформить заказ' : 'К предложениям'}
               </button>
@@ -1173,9 +1168,7 @@ function TaskContent({ taskId }: { taskId: string }) {
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
                     <h2 className="text-lg font-semibold text-slate-950">Текущий заказ</h2>
-                    <span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusTone[task.status] ?? 'bg-slate-100 text-slate-700'}`}>
-                      {statusLabels[task.status] ?? task.status}
-                    </span>
+                    <StatusBadge status={task.status} />
                   </div>
                   <p className="mt-1 text-sm text-slate-500">
                     {task.purchaseOrder.supplier.name}
@@ -1521,11 +1514,10 @@ function TaskContent({ taskId }: { taskId: string }) {
                 >
                   ⌕
                 </span>
-                <input
+                <Input
                   value={historySearch}
                   onChange={(event) => setHistorySearch(event.target.value)}
                   placeholder="Найти событие или заметку"
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50/60 py-2.5 pl-9 pr-3.5 text-sm outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-50"
                 />
               </div>
             </div>
@@ -1622,7 +1614,7 @@ function TaskContent({ taskId }: { taskId: string }) {
                 </div>
               </div>
 
-              <textarea
+              <Textarea
                 value={activityText}
                 onChange={(event) => setActivityText(event.target.value)}
                 rows={5}
@@ -1691,9 +1683,7 @@ function TaskContent({ taskId }: { taskId: string }) {
                   <div className="flex items-center justify-between gap-3">
                     <dt className="text-sm text-slate-400">Текущий этап</dt>
                     <dd>
-                      <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${statusTone[task.status] ?? 'bg-slate-100 text-slate-700'}`}>
-                        {statusLabels[task.status] ?? task.status}
-                      </span>
+                      <StatusBadge status={task.status} />
                     </dd>
                   </div>
                 </div>
@@ -1713,22 +1703,22 @@ function TaskContent({ taskId }: { taskId: string }) {
       )}
 
       {itemFormOpen && (
-        <Modal title={editingItemId ? 'Изменить позицию' : 'Новая позиция'} onClose={() => setItemFormOpen(false)}>
+        <Modal busy={busy} title={editingItemId ? 'Изменить позицию' : 'Новая позиция'} onClose={() => setItemFormOpen(false)}>
           <form onSubmit={saveItem} className="space-y-4">
             <Field label="Наименование *">
-              <input autoFocus value={itemName} onChange={(e) => setItemName(e.target.value)} placeholder="Например: Подшипник 6205-2RS" className="input" />
+              <Input data-initial-focus value={itemName} onChange={(e) => setItemName(e.target.value)} placeholder="Например: Подшипник 6205-2RS" className="input" />
             </Field>
 
             <Field label="Артикул / каталожный номер">
-              <input value={itemPartNumber} onChange={(e) => setItemPartNumber(e.target.value)} placeholder="6205-2RS, DN40 PN25..." className="input" />
+              <Input value={itemPartNumber} onChange={(e) => setItemPartNumber(e.target.value)} placeholder="6205-2RS, DN40 PN25..." className="input" />
             </Field>
 
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Количество *">
-                <input type="number" min="0.001" step="0.001" value={itemQuantity} onChange={(e) => setItemQuantity(e.target.value)} className="input" />
+                <Input type="number" min="0.001" step="0.001" value={itemQuantity} onChange={(e) => setItemQuantity(e.target.value)} className="input" />
               </Field>
               <Field label="Ед. измерения *">
-                <input value={itemUnit} onChange={(e) => setItemUnit(e.target.value)} placeholder="шт., кг, м..." list="task-item-units" className="input" />
+                <Input value={itemUnit} onChange={(e) => setItemUnit(e.target.value)} placeholder="шт., кг, м..." list="task-item-units" className="input" />
                 <datalist id="task-item-units">
                   <option value="шт." />
                   <option value="компл." />
@@ -1741,7 +1731,7 @@ function TaskContent({ taskId }: { taskId: string }) {
             </div>
 
             <Field label="Ориентировочная цена за единицу, ₽">
-              <input type="number" min="0" step="0.01" value={itemUnitPrice} onChange={(e) => setItemUnitPrice(e.target.value)} placeholder="Можно оставить пустым" className="input" />
+              <Input type="number" min="0" step="0.01" value={itemUnitPrice} onChange={(e) => setItemUnitPrice(e.target.value)} placeholder="Можно оставить пустым" className="input" />
             </Field>
 
             {itemUnitPrice.trim() !== '' && Number(itemUnitPrice) >= 0 && Number(itemQuantity) > 0 && (
@@ -1752,7 +1742,7 @@ function TaskContent({ taskId }: { taskId: string }) {
             )}
 
             <Field label="Примечание">
-              <textarea rows={3} value={itemNotes} onChange={(e) => setItemNotes(e.target.value)} placeholder="Характеристики, требования, производитель, аналог..." className="input resize-none" />
+              <Textarea rows={3} value={itemNotes} onChange={(e) => setItemNotes(e.target.value)} placeholder="Характеристики, требования, производитель, аналог..." className="input resize-none" />
             </Field>
 
             <ModalActions busy={busy} onCancel={() => setItemFormOpen(false)} submitLabel={editingItemId ? 'Сохранить изменения' : 'Добавить позицию'} />
@@ -1761,7 +1751,7 @@ function TaskContent({ taskId }: { taskId: string }) {
       )}
 
       {legacyMode && supplierFormOpen && (
-        <Modal title="Новое предложение поставщика" onClose={() => setSupplierFormOpen(false)}>
+        <Modal busy={busy} title="Новое предложение поставщика" onClose={() => setSupplierFormOpen(false)}>
           <form onSubmit={addSupplier} className="space-y-5">
             <div>
               <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
@@ -1769,8 +1759,8 @@ function TaskContent({ taskId }: { taskId: string }) {
               </div>
               <div className="space-y-3">
                 <Field label="Название поставщика *">
-                  <input
-                    autoFocus
+                  <Input
+                    data-initial-focus
                     value={supplierName}
                     onChange={(e) => setSupplierName(e.target.value)}
                     placeholder="ООО «Поставщик»"
@@ -1780,16 +1770,16 @@ function TaskContent({ taskId }: { taskId: string }) {
 
                 <div className="grid gap-3 sm:grid-cols-2">
                   <Field label="Контактное лицо">
-                    <input value={supplierContact} onChange={(e) => setSupplierContact(e.target.value)} placeholder="Иванов Иван" className="input" />
+                    <Input value={supplierContact} onChange={(e) => setSupplierContact(e.target.value)} placeholder="Иванов Иван" className="input" />
                   </Field>
                   <Field label="Телефон">
-                    <input value={supplierPhone} onChange={(e) => setSupplierPhone(e.target.value)} placeholder="+7 ..." className="input" />
+                    <Input value={supplierPhone} onChange={(e) => setSupplierPhone(e.target.value)} placeholder="+7 ..." className="input" />
                   </Field>
                   <Field label="Email">
-                    <input type="email" value={supplierEmail} onChange={(e) => setSupplierEmail(e.target.value)} placeholder="sales@company.ru" className="input" />
+                    <Input type="email" value={supplierEmail} onChange={(e) => setSupplierEmail(e.target.value)} placeholder="sales@company.ru" className="input" />
                   </Field>
                   <Field label="Сайт">
-                    <input value={supplierWebsite} onChange={(e) => setSupplierWebsite(e.target.value)} placeholder="company.ru" className="input" />
+                    <Input value={supplierWebsite} onChange={(e) => setSupplierWebsite(e.target.value)} placeholder="company.ru" className="input" />
                   </Field>
                 </div>
               </div>
@@ -1802,13 +1792,13 @@ function TaskContent({ taskId }: { taskId: string }) {
 
               <div className="grid gap-3 sm:grid-cols-3">
                 <Field label="Стоимость товара, ₽">
-                  <input type="number" min="0" step="0.01" value={offerPrice} onChange={(e) => setOfferPrice(e.target.value)} placeholder="0,00" className="input" />
+                  <Input type="number" min="0" step="0.01" value={offerPrice} onChange={(e) => setOfferPrice(e.target.value)} placeholder="0,00" className="input" />
                 </Field>
                 <Field label="Доставка, ₽">
-                  <input type="number" min="0" step="0.01" value={deliveryPrice} onChange={(e) => setDeliveryPrice(e.target.value)} placeholder="0,00" className="input" />
+                  <Input type="number" min="0" step="0.01" value={deliveryPrice} onChange={(e) => setDeliveryPrice(e.target.value)} placeholder="0,00" className="input" />
                 </Field>
                 <Field label="Срок, дней">
-                  <input type="number" min="0" value={deliveryDays} onChange={(e) => setDeliveryDays(e.target.value)} placeholder="Например, 5" className="input" />
+                  <Input type="number" min="0" value={deliveryDays} onChange={(e) => setDeliveryDays(e.target.value)} placeholder="Например, 5" className="input" />
                 </Field>
               </div>
 
@@ -1826,17 +1816,17 @@ function TaskContent({ taskId }: { taskId: string }) {
                   <div className="text-sm font-medium text-slate-800">Товар в наличии</div>
                   <div className="mt-0.5 text-xs text-slate-400">Можно отгрузить без ожидания производства или поставки</div>
                 </div>
-                <input
+                <Input
                   type="checkbox"
                   checked={inStock}
                   onChange={(e) => setInStock(e.target.checked)}
-                  className="h-4 w-4 accent-blue-600"
+                  className="ui-choice"
                 />
               </label>
             </div>
 
             <Field label="Комментарий к предложению">
-              <textarea
+              <Textarea
                 rows={3}
                 value={supplierNotes}
                 onChange={(e) => setSupplierNotes(e.target.value)}
@@ -1855,7 +1845,7 @@ function TaskContent({ taskId }: { taskId: string }) {
       )}
 
       {legacyMode && orderFormOpen && task.selectedOffer && (
-        <Modal title={`Оформить заказ у «${task.selectedOffer.supplier.name}»`} onClose={() => setOrderFormOpen(false)}>
+        <Modal busy={busy} title={`Оформить заказ у «${task.selectedOffer.supplier.name}»`} onClose={() => setOrderFormOpen(false)}>
           <form onSubmit={createOrder} className="space-y-5">
             <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
               <div className="text-xs font-semibold uppercase tracking-wide text-blue-500">Выбранное предложение</div>
@@ -1881,8 +1871,8 @@ function TaskContent({ taskId }: { taskId: string }) {
 
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Номер счёта *">
-                <input
-                  autoFocus
+                <Input
+                  data-initial-focus
                   value={invoiceNumber}
                   onChange={(e) => setInvoiceNumber(e.target.value)}
                   placeholder="Например: 125/26"
@@ -1890,7 +1880,7 @@ function TaskContent({ taskId }: { taskId: string }) {
                 />
               </Field>
               <Field label="Дата счёта *">
-                <input
+                <Input
                   type="datetime-local"
                   value={invoiceDate}
                   onChange={(e) => setInvoiceDate(e.target.value)}
@@ -1900,7 +1890,7 @@ function TaskContent({ taskId }: { taskId: string }) {
             </div>
 
             <Field label="Примечание к заказу">
-              <textarea
+              <Textarea
                 rows={3}
                 value={purchaseOrderNotes}
                 onChange={(e) => setPurchaseOrderNotes(e.target.value)}
@@ -1919,7 +1909,7 @@ function TaskContent({ taskId }: { taskId: string }) {
       )}
 
       {legacyMode && shipModalOpen && (
-        <Modal title="Подтвердить отгрузку" onClose={() => setShipModalOpen(false)}>
+        <Modal busy={busy} title="Подтвердить отгрузку" onClose={() => setShipModalOpen(false)}>
           <form onSubmit={submitShipment} className="space-y-5">
             <div className="rounded-xl bg-blue-50 px-4 py-3 text-sm text-blue-800">
               Зафиксируйте фактическую отгрузку и данные, по которым можно контролировать доставку.
@@ -1927,7 +1917,7 @@ function TaskContent({ taskId }: { taskId: string }) {
 
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Дата отгрузки *">
-                <input
+                <Input
                   type="datetime-local"
                   value={shippedAt}
                   onChange={(e) => setShippedAt(e.target.value)}
@@ -1936,7 +1926,7 @@ function TaskContent({ taskId }: { taskId: string }) {
               </Field>
 
               <Field label="Ожидаемое прибытие">
-                <input
+                <Input
                   type="datetime-local"
                   value={expectedDeliveryAt}
                   onChange={(e) => setExpectedDeliveryAt(e.target.value)}
@@ -1946,7 +1936,7 @@ function TaskContent({ taskId }: { taskId: string }) {
             </div>
 
             <Field label="Транспортная компания *">
-              <input
+              <Input
                 value={carrier}
                 onChange={(e) => setCarrier(e.target.value)}
                 placeholder="ПЭК, Деловые Линии, СДЭК..."
@@ -1955,7 +1945,7 @@ function TaskContent({ taskId }: { taskId: string }) {
             </Field>
 
             <Field label="Трек / ТТН">
-              <input
+              <Input
                 value={trackingNumber}
                 onChange={(e) => setTrackingNumber(e.target.value)}
                 placeholder="Номер отправления или товарно-транспортной накладной"
@@ -1978,15 +1968,12 @@ function TaskContent({ taskId }: { taskId: string }) {
         </Modal>
       )}
 
-      {legacyMode && handOverModalOpen && <Modal title="Передать товар" onClose={() => setHandOverModalOpen(false)}><form onSubmit={submitHandOver} className="space-y-4"><Field label="Кому передан товар *"><input autoFocus value={handedOverTo} onChange={(e) => setHandedOverTo(e.target.value)} placeholder="Механик Иванов И.И., склад №2..." className="input" /></Field><p className="text-sm text-slate-500">Дата и время передачи будут зафиксированы автоматически.</p><ModalActions busy={busy} onCancel={() => setHandOverModalOpen(false)} submitLabel="Подтвердить передачу" /></form></Modal>}
+      {legacyMode && handOverModalOpen && <Modal busy={busy} title="Передать товар" onClose={() => setHandOverModalOpen(false)}><form onSubmit={submitHandOver} className="space-y-4"><Field label="Кому передан товар *"><Input data-initial-focus value={handedOverTo} onChange={(e) => setHandedOverTo(e.target.value)} placeholder="Механик Иванов И.И., склад №2..." className="input" /></Field><p className="text-sm text-slate-500">Дата и время передачи будут зафиксированы автоматически.</p><ModalActions busy={busy} onCancel={() => setHandOverModalOpen(false)} submitLabel="Подтвердить передачу" /></form></Modal>}
 
-      {legacyMode && cancelModalOpen && <Modal title="Отменить заказ" onClose={() => setCancelModalOpen(false)}><form onSubmit={cancelOrder} className="space-y-4"><div className="rounded-xl border border-rose-100 bg-rose-50 p-4 text-sm text-rose-700">Заказ останется в истории, а закупка вернётся к выбору поставщика.</div><Field label="Причина отмены *"><textarea autoFocus rows={3} value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} className="input resize-none" /></Field><ModalActions busy={busy} onCancel={() => setCancelModalOpen(false)} submitLabel="Отменить заказ" danger /></form></Modal>}
+      {legacyMode && cancelModalOpen && <Modal busy={busy} title="Отменить заказ" onClose={() => setCancelModalOpen(false)}><form onSubmit={cancelOrder} className="space-y-4"><div className="rounded-xl border border-rose-100 bg-rose-50 p-4 text-sm text-rose-700">Заказ останется в истории, а закупка вернётся к выбору поставщика.</div><Field label="Причина отмены *"><Textarea data-initial-focus rows={3} value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} className="input resize-none" /></Field><ModalActions busy={busy} onCancel={() => setCancelModalOpen(false)} submitLabel="Отменить заказ" danger /></form></Modal>}
 
-      <style jsx global>{`
-        .input { width: 100%; border-radius: 0.75rem; border: 1px solid rgb(226 232 240); padding: 0.75rem 0.875rem; font-size: 0.875rem; outline: none; background: white; }
-        .input:focus { border-color: rgb(96 165 250); box-shadow: 0 0 0 3px rgb(219 234 254 / 0.65); }
-      `}</style>
-    </AppShell>
+      {confirmation}
+    </PageLayout>
   );
 }
 
@@ -1996,18 +1983,9 @@ function Info({ label, value }: { label: string; value: string }) {
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return <label className="block"><span className="mb-1.5 block text-sm font-medium text-slate-700">{label}</span>{children}</label>;
 }
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
-  return <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/30 backdrop-blur-[2px] sm:items-center sm:p-4"><div className="max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-t-3xl bg-white p-5 shadow-2xl sm:rounded-3xl sm:p-6"><div className="mb-5 flex items-start justify-between gap-4"><h2 className="text-xl font-semibold">{title}</h2><button type="button" onClick={onClose} className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-slate-400 hover:bg-slate-100">×</button></div>{children}</div></div>;
-}
-function ModalActions({ busy, onCancel, submitLabel, danger = false }: { busy: boolean; onCancel: () => void; submitLabel: string; danger?: boolean }) {
-  return <div className="flex justify-end gap-2 border-t border-slate-100 pt-4"><button type="button" disabled={busy} onClick={onCancel} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 disabled:opacity-50">Отмена</button><button type="submit" disabled={busy} className={`rounded-xl px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50 ${danger ? 'bg-rose-600 hover:bg-rose-700' : 'bg-blue-600 hover:bg-blue-700'}`}>{busy ? 'Сохраняем...' : submitLabel}</button></div>;
-}
-
 export default function TaskPage() {
   const { id } = useParams<{ id: string }>();
   return (
-    <AuthGate>
-      <TaskContent key={id} taskId={id} />
-    </AuthGate>
+    <TaskContent key={id} taskId={id} />
   );
 }
