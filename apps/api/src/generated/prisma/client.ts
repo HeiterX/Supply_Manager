@@ -24,7 +24,7 @@ export * as $Enums from './enums.js'
 export * from "./enums.js"
 /**
  * ## Prisma Client
- * 
+ *
  * Type-safe database client for TypeScript
  * @example
  * ```
@@ -34,7 +34,7 @@ export * from "./enums.js"
  * // Fetch zero or more Tasks
  * const tasks = await prisma.task.findMany()
  * ```
- * 
+ *
  * Read more in our [docs](https://pris.ly/d/client).
  */
 export const PrismaClient = $Class.getPrismaClientClass()
@@ -43,61 +43,66 @@ export { Prisma }
 
 /**
  * Model Task
- * 
+ *
  */
 export type Task = Prisma.TaskModel
 /**
  * Model TaskItem
- * 
+ *
  */
 export type TaskItem = Prisma.TaskItemModel
 /**
  * Model TaskActivity
- * 
+ *
  */
 export type TaskActivity = Prisma.TaskActivityModel
 /**
  * Model Supplier
- * 
+ *
  */
 export type Supplier = Prisma.SupplierModel
 /**
  * Model SupplierOffer
- * 
+ *
  */
 export type SupplierOffer = Prisma.SupplierOfferModel
 /**
  * Model PurchaseOrder
- * 
+ *
  */
 export type PurchaseOrder = Prisma.PurchaseOrderModel
 /**
  * Model User
- * 
+ *
  */
 export type User = Prisma.UserModel
 /**
  * Model PurchaseRequest
- * 
+ *
  */
 export type PurchaseRequest = Prisma.PurchaseRequestModel
 /**
  * Model PurchaseRequestItem
- * 
+ *
  */
 export type PurchaseRequestItem = Prisma.PurchaseRequestItemModel
 /**
  * Model SupplierOfferItem
- * 
+ *
  */
 export type SupplierOfferItem = Prisma.SupplierOfferItemModel
 /**
  * Model PurchaseOrderItem
- * 
+ *
  */
 export type PurchaseOrderItem = Prisma.PurchaseOrderItemModel
 /**
  * Model SecurityAuditEvent
- * 
+ *
  */
 export type SecurityAuditEvent = Prisma.SecurityAuditEventModel
+/**
+ * Model PurchaseRequestHistory
+ *
+ */
+export type PurchaseRequestHistory = Prisma.PurchaseRequestHistoryModel

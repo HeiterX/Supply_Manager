@@ -408,7 +408,8 @@ export const ModelName = {
   PurchaseRequestItem: 'PurchaseRequestItem',
   SupplierOfferItem: 'SupplierOfferItem',
   PurchaseOrderItem: 'PurchaseOrderItem',
-  SecurityAuditEvent: 'SecurityAuditEvent'
+  SecurityAuditEvent: 'SecurityAuditEvent',
+  PurchaseRequestHistory: 'PurchaseRequestHistory'
 } as const
 
 export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -424,7 +425,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "task" | "taskItem" | "taskActivity" | "supplier" | "supplierOffer" | "purchaseOrder" | "user" | "purchaseRequest" | "purchaseRequestItem" | "supplierOfferItem" | "purchaseOrderItem" | "securityAuditEvent"
+    modelProps: "task" | "taskItem" | "taskActivity" | "supplier" | "supplierOffer" | "purchaseOrder" | "user" | "purchaseRequest" | "purchaseRequestItem" | "supplierOfferItem" | "purchaseOrderItem" | "securityAuditEvent" | "purchaseRequestHistory"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -1316,6 +1317,80 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         }
       }
     }
+    PurchaseRequestHistory: {
+      payload: Prisma.$PurchaseRequestHistoryPayload<ExtArgs>
+      fields: Prisma.PurchaseRequestHistoryFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.PurchaseRequestHistoryFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PurchaseRequestHistoryPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.PurchaseRequestHistoryFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PurchaseRequestHistoryPayload>
+        }
+        findFirst: {
+          args: Prisma.PurchaseRequestHistoryFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PurchaseRequestHistoryPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.PurchaseRequestHistoryFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PurchaseRequestHistoryPayload>
+        }
+        findMany: {
+          args: Prisma.PurchaseRequestHistoryFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PurchaseRequestHistoryPayload>[]
+        }
+        create: {
+          args: Prisma.PurchaseRequestHistoryCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PurchaseRequestHistoryPayload>
+        }
+        createMany: {
+          args: Prisma.PurchaseRequestHistoryCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.PurchaseRequestHistoryCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PurchaseRequestHistoryPayload>[]
+        }
+        delete: {
+          args: Prisma.PurchaseRequestHistoryDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PurchaseRequestHistoryPayload>
+        }
+        update: {
+          args: Prisma.PurchaseRequestHistoryUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PurchaseRequestHistoryPayload>
+        }
+        deleteMany: {
+          args: Prisma.PurchaseRequestHistoryDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.PurchaseRequestHistoryUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.PurchaseRequestHistoryUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PurchaseRequestHistoryPayload>[]
+        }
+        upsert: {
+          args: Prisma.PurchaseRequestHistoryUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PurchaseRequestHistoryPayload>
+        }
+        aggregate: {
+          args: Prisma.PurchaseRequestHistoryAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregatePurchaseRequestHistory>
+        }
+        groupBy: {
+          args: Prisma.PurchaseRequestHistoryGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.PurchaseRequestHistoryGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.PurchaseRequestHistoryCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.PurchaseRequestHistoryCountAggregateOutputType> | number
+        }
+      }
+    }
   }
 } & {
   other: {
@@ -1503,6 +1578,7 @@ export const PurchaseRequestScalarFieldEnum = {
   decisionComment: 'decisionComment',
   processedById: 'processedById',
   processedAt: 'processedAt',
+  assignedToId: 'assignedToId',
   taskId: 'taskId',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
@@ -1573,6 +1649,21 @@ export const SecurityAuditEventScalarFieldEnum = {
 } as const
 
 export type SecurityAuditEventScalarFieldEnum = (typeof SecurityAuditEventScalarFieldEnum)[keyof typeof SecurityAuditEventScalarFieldEnum]
+
+
+export const PurchaseRequestHistoryScalarFieldEnum = {
+  id: 'id',
+  requestId: 'requestId',
+  actorId: 'actorId',
+  actorName: 'actorName',
+  action: 'action',
+  fromStatus: 'fromStatus',
+  toStatus: 'toStatus',
+  comment: 'comment',
+  createdAt: 'createdAt'
+} as const
+
+export type PurchaseRequestHistoryScalarFieldEnum = (typeof PurchaseRequestHistoryScalarFieldEnum)[keyof typeof PurchaseRequestHistoryScalarFieldEnum]
 
 
 export const SortOrder = {
@@ -1942,6 +2033,7 @@ export type GlobalOmitConfig = {
   supplierOfferItem?: Prisma.SupplierOfferItemOmit
   purchaseOrderItem?: Prisma.PurchaseOrderItemOmit
   securityAuditEvent?: Prisma.SecurityAuditEventOmit
+  purchaseRequestHistory?: Prisma.PurchaseRequestHistoryOmit
 }
 
 /* Types for Logging */

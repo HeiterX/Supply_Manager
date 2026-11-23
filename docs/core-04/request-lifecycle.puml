@@ -1,0 +1,39 @@
+@startuml
+title CORE-04 — Жизненный цикл заявки
+
+hide empty description
+skinparam shadowing false
+
+[*] --> NEW : Подача заявки
+
+NEW --> IN_REVIEW : Взять на рассмотрение
+NEW --> REJECTED : Отклонить с причиной
+NEW --> CONVERTED : Принять заявку
+
+IN_REVIEW --> REJECTED : Отклонить с причиной
+IN_REVIEW --> CONVERTED : Принять заявку
+
+state NEW : Новая заявка
+state IN_REVIEW : Назначен ответственный
+state REJECTED : Отказ и комментарий
+state CONVERTED : Создана закупка Task
+
+note right of CONVERTED
+  Одна заявка -> одна закупка
+  Повторное принятие идемпотентно
+
+  Исходные позиции сохраняются.
+  Фотографии доступны через
+  связь с исходной заявкой.
+end note
+
+note bottom of IN_REVIEW
+  Решения сохраняются
+  в PurchaseRequestHistory.
+end note
+
+note bottom of REJECTED
+  Повторное принятие запрещено.
+end note
+
+@enduml

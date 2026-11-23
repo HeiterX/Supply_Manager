@@ -248,6 +248,7 @@ export type UserWhereInput = {
   updatedAt?: Prisma.DateTimeFilter<"User"> | Date | string
   purchaseRequests?: Prisma.PurchaseRequestListRelationFilter
   processedPurchaseRequests?: Prisma.PurchaseRequestListRelationFilter
+  assignedPurchaseRequests?: Prisma.PurchaseRequestListRelationFilter
 }
 
 export type UserOrderByWithRelationInput = {
@@ -266,6 +267,7 @@ export type UserOrderByWithRelationInput = {
   updatedAt?: Prisma.SortOrder
   purchaseRequests?: Prisma.PurchaseRequestOrderByRelationAggregateInput
   processedPurchaseRequests?: Prisma.PurchaseRequestOrderByRelationAggregateInput
+  assignedPurchaseRequests?: Prisma.PurchaseRequestOrderByRelationAggregateInput
 }
 
 export type UserWhereUniqueInput = Prisma.AtLeast<{
@@ -287,6 +289,7 @@ export type UserWhereUniqueInput = Prisma.AtLeast<{
   updatedAt?: Prisma.DateTimeFilter<"User"> | Date | string
   purchaseRequests?: Prisma.PurchaseRequestListRelationFilter
   processedPurchaseRequests?: Prisma.PurchaseRequestListRelationFilter
+  assignedPurchaseRequests?: Prisma.PurchaseRequestListRelationFilter
 }, "id" | "username" | "email" | "telegramChatId">
 
 export type UserOrderByWithAggregationInput = {
@@ -343,6 +346,7 @@ export type UserCreateInput = {
   updatedAt?: Date | string
   purchaseRequests?: Prisma.PurchaseRequestCreateNestedManyWithoutRequesterInput
   processedPurchaseRequests?: Prisma.PurchaseRequestCreateNestedManyWithoutProcessedByInput
+  assignedPurchaseRequests?: Prisma.PurchaseRequestCreateNestedManyWithoutAssignedToInput
 }
 
 export type UserUncheckedCreateInput = {
@@ -361,6 +365,7 @@ export type UserUncheckedCreateInput = {
   updatedAt?: Date | string
   purchaseRequests?: Prisma.PurchaseRequestUncheckedCreateNestedManyWithoutRequesterInput
   processedPurchaseRequests?: Prisma.PurchaseRequestUncheckedCreateNestedManyWithoutProcessedByInput
+  assignedPurchaseRequests?: Prisma.PurchaseRequestUncheckedCreateNestedManyWithoutAssignedToInput
 }
 
 export type UserUpdateInput = {
@@ -379,6 +384,7 @@ export type UserUpdateInput = {
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   purchaseRequests?: Prisma.PurchaseRequestUpdateManyWithoutRequesterNestedInput
   processedPurchaseRequests?: Prisma.PurchaseRequestUpdateManyWithoutProcessedByNestedInput
+  assignedPurchaseRequests?: Prisma.PurchaseRequestUpdateManyWithoutAssignedToNestedInput
 }
 
 export type UserUncheckedUpdateInput = {
@@ -397,6 +403,7 @@ export type UserUncheckedUpdateInput = {
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   purchaseRequests?: Prisma.PurchaseRequestUncheckedUpdateManyWithoutRequesterNestedInput
   processedPurchaseRequests?: Prisma.PurchaseRequestUncheckedUpdateManyWithoutProcessedByNestedInput
+  assignedPurchaseRequests?: Prisma.PurchaseRequestUncheckedUpdateManyWithoutAssignedToNestedInput
 }
 
 export type UserCreateManyInput = {
@@ -520,6 +527,12 @@ export type UserCreateNestedOneWithoutProcessedPurchaseRequestsInput = {
   connect?: Prisma.UserWhereUniqueInput
 }
 
+export type UserCreateNestedOneWithoutAssignedPurchaseRequestsInput = {
+  create?: Prisma.XOR<Prisma.UserCreateWithoutAssignedPurchaseRequestsInput, Prisma.UserUncheckedCreateWithoutAssignedPurchaseRequestsInput>
+  connectOrCreate?: Prisma.UserCreateOrConnectWithoutAssignedPurchaseRequestsInput
+  connect?: Prisma.UserWhereUniqueInput
+}
+
 export type UserUpdateOneWithoutPurchaseRequestsNestedInput = {
   create?: Prisma.XOR<Prisma.UserCreateWithoutPurchaseRequestsInput, Prisma.UserUncheckedCreateWithoutPurchaseRequestsInput>
   connectOrCreate?: Prisma.UserCreateOrConnectWithoutPurchaseRequestsInput
@@ -540,6 +553,16 @@ export type UserUpdateOneWithoutProcessedPurchaseRequestsNestedInput = {
   update?: Prisma.XOR<Prisma.XOR<Prisma.UserUpdateToOneWithWhereWithoutProcessedPurchaseRequestsInput, Prisma.UserUpdateWithoutProcessedPurchaseRequestsInput>, Prisma.UserUncheckedUpdateWithoutProcessedPurchaseRequestsInput>
 }
 
+export type UserUpdateOneWithoutAssignedPurchaseRequestsNestedInput = {
+  create?: Prisma.XOR<Prisma.UserCreateWithoutAssignedPurchaseRequestsInput, Prisma.UserUncheckedCreateWithoutAssignedPurchaseRequestsInput>
+  connectOrCreate?: Prisma.UserCreateOrConnectWithoutAssignedPurchaseRequestsInput
+  upsert?: Prisma.UserUpsertWithoutAssignedPurchaseRequestsInput
+  disconnect?: Prisma.UserWhereInput | boolean
+  delete?: Prisma.UserWhereInput | boolean
+  connect?: Prisma.UserWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.UserUpdateToOneWithWhereWithoutAssignedPurchaseRequestsInput, Prisma.UserUpdateWithoutAssignedPurchaseRequestsInput>, Prisma.UserUncheckedUpdateWithoutAssignedPurchaseRequestsInput>
+}
+
 export type UserCreateWithoutPurchaseRequestsInput = {
   id?: string
   fullName: string
@@ -555,6 +578,7 @@ export type UserCreateWithoutPurchaseRequestsInput = {
   createdAt?: Date | string
   updatedAt?: Date | string
   processedPurchaseRequests?: Prisma.PurchaseRequestCreateNestedManyWithoutProcessedByInput
+  assignedPurchaseRequests?: Prisma.PurchaseRequestCreateNestedManyWithoutAssignedToInput
 }
 
 export type UserUncheckedCreateWithoutPurchaseRequestsInput = {
@@ -572,6 +596,7 @@ export type UserUncheckedCreateWithoutPurchaseRequestsInput = {
   createdAt?: Date | string
   updatedAt?: Date | string
   processedPurchaseRequests?: Prisma.PurchaseRequestUncheckedCreateNestedManyWithoutProcessedByInput
+  assignedPurchaseRequests?: Prisma.PurchaseRequestUncheckedCreateNestedManyWithoutAssignedToInput
 }
 
 export type UserCreateOrConnectWithoutPurchaseRequestsInput = {
@@ -594,6 +619,7 @@ export type UserCreateWithoutProcessedPurchaseRequestsInput = {
   createdAt?: Date | string
   updatedAt?: Date | string
   purchaseRequests?: Prisma.PurchaseRequestCreateNestedManyWithoutRequesterInput
+  assignedPurchaseRequests?: Prisma.PurchaseRequestCreateNestedManyWithoutAssignedToInput
 }
 
 export type UserUncheckedCreateWithoutProcessedPurchaseRequestsInput = {
@@ -611,11 +637,53 @@ export type UserUncheckedCreateWithoutProcessedPurchaseRequestsInput = {
   createdAt?: Date | string
   updatedAt?: Date | string
   purchaseRequests?: Prisma.PurchaseRequestUncheckedCreateNestedManyWithoutRequesterInput
+  assignedPurchaseRequests?: Prisma.PurchaseRequestUncheckedCreateNestedManyWithoutAssignedToInput
 }
 
 export type UserCreateOrConnectWithoutProcessedPurchaseRequestsInput = {
   where: Prisma.UserWhereUniqueInput
   create: Prisma.XOR<Prisma.UserCreateWithoutProcessedPurchaseRequestsInput, Prisma.UserUncheckedCreateWithoutProcessedPurchaseRequestsInput>
+}
+
+export type UserCreateWithoutAssignedPurchaseRequestsInput = {
+  id?: string
+  fullName: string
+  username: string
+  email?: string | null
+  phone?: string | null
+  department?: string | null
+  position?: string | null
+  passwordHash: string
+  role?: $Enums.UserRole
+  status?: $Enums.UserStatus
+  telegramChatId?: string | null
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  purchaseRequests?: Prisma.PurchaseRequestCreateNestedManyWithoutRequesterInput
+  processedPurchaseRequests?: Prisma.PurchaseRequestCreateNestedManyWithoutProcessedByInput
+}
+
+export type UserUncheckedCreateWithoutAssignedPurchaseRequestsInput = {
+  id?: string
+  fullName: string
+  username: string
+  email?: string | null
+  phone?: string | null
+  department?: string | null
+  position?: string | null
+  passwordHash: string
+  role?: $Enums.UserRole
+  status?: $Enums.UserStatus
+  telegramChatId?: string | null
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  purchaseRequests?: Prisma.PurchaseRequestUncheckedCreateNestedManyWithoutRequesterInput
+  processedPurchaseRequests?: Prisma.PurchaseRequestUncheckedCreateNestedManyWithoutProcessedByInput
+}
+
+export type UserCreateOrConnectWithoutAssignedPurchaseRequestsInput = {
+  where: Prisma.UserWhereUniqueInput
+  create: Prisma.XOR<Prisma.UserCreateWithoutAssignedPurchaseRequestsInput, Prisma.UserUncheckedCreateWithoutAssignedPurchaseRequestsInput>
 }
 
 export type UserUpsertWithoutPurchaseRequestsInput = {
@@ -644,6 +712,7 @@ export type UserUpdateWithoutPurchaseRequestsInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   processedPurchaseRequests?: Prisma.PurchaseRequestUpdateManyWithoutProcessedByNestedInput
+  assignedPurchaseRequests?: Prisma.PurchaseRequestUpdateManyWithoutAssignedToNestedInput
 }
 
 export type UserUncheckedUpdateWithoutPurchaseRequestsInput = {
@@ -661,6 +730,7 @@ export type UserUncheckedUpdateWithoutPurchaseRequestsInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   processedPurchaseRequests?: Prisma.PurchaseRequestUncheckedUpdateManyWithoutProcessedByNestedInput
+  assignedPurchaseRequests?: Prisma.PurchaseRequestUncheckedUpdateManyWithoutAssignedToNestedInput
 }
 
 export type UserUpsertWithoutProcessedPurchaseRequestsInput = {
@@ -689,6 +759,7 @@ export type UserUpdateWithoutProcessedPurchaseRequestsInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   purchaseRequests?: Prisma.PurchaseRequestUpdateManyWithoutRequesterNestedInput
+  assignedPurchaseRequests?: Prisma.PurchaseRequestUpdateManyWithoutAssignedToNestedInput
 }
 
 export type UserUncheckedUpdateWithoutProcessedPurchaseRequestsInput = {
@@ -706,6 +777,54 @@ export type UserUncheckedUpdateWithoutProcessedPurchaseRequestsInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   purchaseRequests?: Prisma.PurchaseRequestUncheckedUpdateManyWithoutRequesterNestedInput
+  assignedPurchaseRequests?: Prisma.PurchaseRequestUncheckedUpdateManyWithoutAssignedToNestedInput
+}
+
+export type UserUpsertWithoutAssignedPurchaseRequestsInput = {
+  update: Prisma.XOR<Prisma.UserUpdateWithoutAssignedPurchaseRequestsInput, Prisma.UserUncheckedUpdateWithoutAssignedPurchaseRequestsInput>
+  create: Prisma.XOR<Prisma.UserCreateWithoutAssignedPurchaseRequestsInput, Prisma.UserUncheckedCreateWithoutAssignedPurchaseRequestsInput>
+  where?: Prisma.UserWhereInput
+}
+
+export type UserUpdateToOneWithWhereWithoutAssignedPurchaseRequestsInput = {
+  where?: Prisma.UserWhereInput
+  data: Prisma.XOR<Prisma.UserUpdateWithoutAssignedPurchaseRequestsInput, Prisma.UserUncheckedUpdateWithoutAssignedPurchaseRequestsInput>
+}
+
+export type UserUpdateWithoutAssignedPurchaseRequestsInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  fullName?: Prisma.StringFieldUpdateOperationsInput | string
+  username?: Prisma.StringFieldUpdateOperationsInput | string
+  email?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  phone?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  department?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  position?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  passwordHash?: Prisma.StringFieldUpdateOperationsInput | string
+  role?: Prisma.EnumUserRoleFieldUpdateOperationsInput | $Enums.UserRole
+  status?: Prisma.EnumUserStatusFieldUpdateOperationsInput | $Enums.UserStatus
+  telegramChatId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  purchaseRequests?: Prisma.PurchaseRequestUpdateManyWithoutRequesterNestedInput
+  processedPurchaseRequests?: Prisma.PurchaseRequestUpdateManyWithoutProcessedByNestedInput
+}
+
+export type UserUncheckedUpdateWithoutAssignedPurchaseRequestsInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  fullName?: Prisma.StringFieldUpdateOperationsInput | string
+  username?: Prisma.StringFieldUpdateOperationsInput | string
+  email?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  phone?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  department?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  position?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  passwordHash?: Prisma.StringFieldUpdateOperationsInput | string
+  role?: Prisma.EnumUserRoleFieldUpdateOperationsInput | $Enums.UserRole
+  status?: Prisma.EnumUserStatusFieldUpdateOperationsInput | $Enums.UserStatus
+  telegramChatId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  purchaseRequests?: Prisma.PurchaseRequestUncheckedUpdateManyWithoutRequesterNestedInput
+  processedPurchaseRequests?: Prisma.PurchaseRequestUncheckedUpdateManyWithoutProcessedByNestedInput
 }
 
 
@@ -716,11 +835,13 @@ export type UserUncheckedUpdateWithoutProcessedPurchaseRequestsInput = {
 export type UserCountOutputType = {
   purchaseRequests: number
   processedPurchaseRequests: number
+  assignedPurchaseRequests: number
 }
 
 export type UserCountOutputTypeSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   purchaseRequests?: boolean | UserCountOutputTypeCountPurchaseRequestsArgs
   processedPurchaseRequests?: boolean | UserCountOutputTypeCountProcessedPurchaseRequestsArgs
+  assignedPurchaseRequests?: boolean | UserCountOutputTypeCountAssignedPurchaseRequestsArgs
 }
 
 /**
@@ -747,6 +868,13 @@ export type UserCountOutputTypeCountProcessedPurchaseRequestsArgs<ExtArgs extend
   where?: Prisma.PurchaseRequestWhereInput
 }
 
+/**
+ * UserCountOutputType without action
+ */
+export type UserCountOutputTypeCountAssignedPurchaseRequestsArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  where?: Prisma.PurchaseRequestWhereInput
+}
+
 
 export type UserSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
   id?: boolean
@@ -764,6 +892,7 @@ export type UserSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = r
   updatedAt?: boolean
   purchaseRequests?: boolean | Prisma.User$purchaseRequestsArgs<ExtArgs>
   processedPurchaseRequests?: boolean | Prisma.User$processedPurchaseRequestsArgs<ExtArgs>
+  assignedPurchaseRequests?: boolean | Prisma.User$assignedPurchaseRequestsArgs<ExtArgs>
   _count?: boolean | Prisma.UserCountOutputTypeDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["user"]>
 
@@ -819,6 +948,7 @@ export type UserOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = run
 export type UserInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   purchaseRequests?: boolean | Prisma.User$purchaseRequestsArgs<ExtArgs>
   processedPurchaseRequests?: boolean | Prisma.User$processedPurchaseRequestsArgs<ExtArgs>
+  assignedPurchaseRequests?: boolean | Prisma.User$assignedPurchaseRequestsArgs<ExtArgs>
   _count?: boolean | Prisma.UserCountOutputTypeDefaultArgs<ExtArgs>
 }
 export type UserIncludeCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {}
@@ -829,6 +959,7 @@ export type $UserPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs =
   objects: {
     purchaseRequests: Prisma.$PurchaseRequestPayload<ExtArgs>[]
     processedPurchaseRequests: Prisma.$PurchaseRequestPayload<ExtArgs>[]
+    assignedPurchaseRequests: Prisma.$PurchaseRequestPayload<ExtArgs>[]
   }
   scalars: runtime.Types.Extensions.GetPayloadResult<{
     id: string
@@ -1240,6 +1371,7 @@ export interface Prisma__UserClient<T, Null = never, ExtArgs extends runtime.Typ
   readonly [Symbol.toStringTag]: "PrismaPromise"
   purchaseRequests<T extends Prisma.User$purchaseRequestsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.User$purchaseRequestsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$PurchaseRequestPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   processedPurchaseRequests<T extends Prisma.User$processedPurchaseRequestsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.User$processedPurchaseRequestsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$PurchaseRequestPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
+  assignedPurchaseRequests<T extends Prisma.User$assignedPurchaseRequestsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.User$assignedPurchaseRequestsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$PurchaseRequestPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   /**
    * Attaches callbacks for the resolution and/or rejection of the Promise.
    * @param onfulfilled The callback to execute when the Promise is resolved.
@@ -1702,6 +1834,30 @@ export type User$purchaseRequestsArgs<ExtArgs extends runtime.Types.Extensions.I
  * User.processedPurchaseRequests
  */
 export type User$processedPurchaseRequestsArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the PurchaseRequest
+   */
+  select?: Prisma.PurchaseRequestSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the PurchaseRequest
+   */
+  omit?: Prisma.PurchaseRequestOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.PurchaseRequestInclude<ExtArgs> | null
+  where?: Prisma.PurchaseRequestWhereInput
+  orderBy?: Prisma.PurchaseRequestOrderByWithRelationInput | Prisma.PurchaseRequestOrderByWithRelationInput[]
+  cursor?: Prisma.PurchaseRequestWhereUniqueInput
+  take?: number
+  skip?: number
+  distinct?: Prisma.PurchaseRequestScalarFieldEnum | Prisma.PurchaseRequestScalarFieldEnum[]
+}
+
+/**
+ * User.assignedPurchaseRequests
+ */
+export type User$assignedPurchaseRequestsArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   /**
    * Select specific fields to fetch from the PurchaseRequest
    */
