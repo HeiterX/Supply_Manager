@@ -493,3 +493,16 @@ model PurchaseOrderItem {
   @@index([taskItemId])
   @@index([supplierOfferItemId])
 }
+
+model SecurityAuditEvent {
+  id           String   @id @default(uuid())
+
+  actorId      String
+  targetUserId String
+  action       String
+
+  createdAt    DateTime @default(now())
+
+  @@index([actorId, createdAt])
+  @@index([targetUserId, createdAt])
+}

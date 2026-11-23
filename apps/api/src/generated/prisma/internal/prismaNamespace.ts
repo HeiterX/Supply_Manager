@@ -407,7 +407,8 @@ export const ModelName = {
   PurchaseRequest: 'PurchaseRequest',
   PurchaseRequestItem: 'PurchaseRequestItem',
   SupplierOfferItem: 'SupplierOfferItem',
-  PurchaseOrderItem: 'PurchaseOrderItem'
+  PurchaseOrderItem: 'PurchaseOrderItem',
+  SecurityAuditEvent: 'SecurityAuditEvent'
 } as const
 
 export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -423,7 +424,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "task" | "taskItem" | "taskActivity" | "supplier" | "supplierOffer" | "purchaseOrder" | "user" | "purchaseRequest" | "purchaseRequestItem" | "supplierOfferItem" | "purchaseOrderItem"
+    modelProps: "task" | "taskItem" | "taskActivity" | "supplier" | "supplierOffer" | "purchaseOrder" | "user" | "purchaseRequest" | "purchaseRequestItem" | "supplierOfferItem" | "purchaseOrderItem" | "securityAuditEvent"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -1241,6 +1242,80 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         }
       }
     }
+    SecurityAuditEvent: {
+      payload: Prisma.$SecurityAuditEventPayload<ExtArgs>
+      fields: Prisma.SecurityAuditEventFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.SecurityAuditEventFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SecurityAuditEventPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.SecurityAuditEventFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SecurityAuditEventPayload>
+        }
+        findFirst: {
+          args: Prisma.SecurityAuditEventFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SecurityAuditEventPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.SecurityAuditEventFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SecurityAuditEventPayload>
+        }
+        findMany: {
+          args: Prisma.SecurityAuditEventFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SecurityAuditEventPayload>[]
+        }
+        create: {
+          args: Prisma.SecurityAuditEventCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SecurityAuditEventPayload>
+        }
+        createMany: {
+          args: Prisma.SecurityAuditEventCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.SecurityAuditEventCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SecurityAuditEventPayload>[]
+        }
+        delete: {
+          args: Prisma.SecurityAuditEventDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SecurityAuditEventPayload>
+        }
+        update: {
+          args: Prisma.SecurityAuditEventUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SecurityAuditEventPayload>
+        }
+        deleteMany: {
+          args: Prisma.SecurityAuditEventDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.SecurityAuditEventUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.SecurityAuditEventUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SecurityAuditEventPayload>[]
+        }
+        upsert: {
+          args: Prisma.SecurityAuditEventUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SecurityAuditEventPayload>
+        }
+        aggregate: {
+          args: Prisma.SecurityAuditEventAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateSecurityAuditEvent>
+        }
+        groupBy: {
+          args: Prisma.SecurityAuditEventGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.SecurityAuditEventGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.SecurityAuditEventCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.SecurityAuditEventCountAggregateOutputType> | number
+        }
+      }
+    }
   }
 } & {
   other: {
@@ -1487,6 +1562,17 @@ export const PurchaseOrderItemScalarFieldEnum = {
 } as const
 
 export type PurchaseOrderItemScalarFieldEnum = (typeof PurchaseOrderItemScalarFieldEnum)[keyof typeof PurchaseOrderItemScalarFieldEnum]
+
+
+export const SecurityAuditEventScalarFieldEnum = {
+  id: 'id',
+  actorId: 'actorId',
+  targetUserId: 'targetUserId',
+  action: 'action',
+  createdAt: 'createdAt'
+} as const
+
+export type SecurityAuditEventScalarFieldEnum = (typeof SecurityAuditEventScalarFieldEnum)[keyof typeof SecurityAuditEventScalarFieldEnum]
 
 
 export const SortOrder = {
@@ -1855,6 +1941,7 @@ export type GlobalOmitConfig = {
   purchaseRequestItem?: Prisma.PurchaseRequestItemOmit
   supplierOfferItem?: Prisma.SupplierOfferItemOmit
   purchaseOrderItem?: Prisma.PurchaseOrderItemOmit
+  securityAuditEvent?: Prisma.SecurityAuditEventOmit
 }
 
 /* Types for Logging */
