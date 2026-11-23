@@ -95,6 +95,7 @@ model Task {
 
   // Закупаемые позиции
   items TaskItem[]
+  itemChanges TaskItemChange[]
 
   // Все предложения поставщиков по этой задаче
   supplierOffers SupplierOffer[] @relation("TaskSupplierOffers")
@@ -134,6 +135,18 @@ model TaskItem {
   notes      String?
   sortOrder  Int      @default(0)
 
+  // Каталожная карточка — ссылка, а не замена исходной спецификации
+  catalogItemId String?
+  catalogItem   CatalogItem? @relation(fields: [catalogItemId], references: [id], onDelete: SetNull)
+
+  // Исходная строка заявки; snapshot остаётся даже при её последующем удалении
+  sourceRequestItemId String?
+  sourceRequestItem PurchaseRequestItem? @relation(fields: [sourceRequestItemId], references: [id], onDelete: SetNull)
+  originalSnapshot Json?
+  technicalParameters Json?
+  requiredAt DateTime?
+  changes TaskItemChange[]
+
   // Предложения поставщиков по этой позиции
   supplierOfferItems SupplierOfferItem[]
 
@@ -145,6 +158,48 @@ model TaskItem {
 
   @@index([taskId])
   @@index([name])
+  @@index([catalogItemId])
+  @@index([sourceRequestItemId])
+}
+
+// Справочник: fingerprint учитывает артикул, единицу и вариант характеристик.
+// Номенклатура не заменяет данные исходной заявки автоматически.
+model CatalogItem {
+  id String @id @default(uuid())
+  name String
+  normalizedName String
+  partNumber String?
+  normalizedPartNumber String?
+  category String @default("Без категории")
+  unit String
+  attributes Json @default("{}")
+  fingerprint String @unique
+  active Boolean @default(true)
+  taskItems TaskItem[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([normalizedName])
+  @@index([normalizedPartNumber])
+  @@index([category])
+}
+
+// Аудит редактирования позиции переживает удаление самой позиции.
+model TaskItemChange {
+  id String @id @default(uuid())
+  taskId String
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  taskItemId String?
+  taskItem TaskItem? @relation(fields: [taskItemId], references: [id], onDelete: SetNull)
+  itemLabel String
+  action String
+  oldValue Json?
+  newValue Json?
+  actorId String?
+  createdAt DateTime @default(now())
+
+  @@index([taskId, createdAt])
+  @@index([taskItemId])
 }
 
 model TaskActivity {
@@ -434,6 +489,8 @@ model PurchaseRequestItem {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  taskItems TaskItem[]
 
   @@index([requestId])
   @@index([name])
