@@ -29,6 +29,12 @@ enum TaskPriority {
   URGENT
 }
 
+enum SupplierDirectoryStatus {
+  ACTIVE
+  PAUSED
+  BLOCKED
+}
+
 enum SupplierOfferStatus {
   REQUESTED
   WAITING_RESPONSE
@@ -220,23 +226,44 @@ model TaskActivity {
 model Supplier {
   id String @id @default(uuid())
 
-  // Основная информация о поставщике
-  name    String
+  name String
+  normalizedName String? @unique
+  taxId String? @unique
+  legalAddress String?
+  bankDetails String?
   contact String?
-  phone   String?
-  email   String?
+  phone String?
+  email String?
   website String?
-
-  // Произвольная заметка о поставщике
+  categories String[] @default([])
+  status SupplierDirectoryStatus @default(ACTIVE)
+  responsibleId String?
+  responsible User? @relation("ResponsibleSuppliers", fields: [responsibleId], references: [id], onDelete: SetNull)
   notes String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  offers         SupplierOffer[]
+  history SupplierChange[]
+  offers SupplierOffer[]
   purchaseOrders PurchaseOrder[]
 
   @@index([name])
+  @@index([status])
+  @@index([responsibleId])
+}
+
+model SupplierChange {
+  id String @id @default(uuid())
+  supplierId String
+  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  actorId String?
+  action String
+  before Json?
+  after Json?
+  createdAt DateTime @default(now())
+
+  @@index([supplierId, createdAt])
 }
 
 model SupplierOffer {
@@ -249,8 +276,18 @@ model SupplierOffer {
   supplier   Supplier @relation(fields: [supplierId], references: [id])
 
   status SupplierOfferStatus @default(REQUESTED)
+  currency String? // Валюта КП: null означает «не указано»
+  validUntil DateTime?
+  paymentTerms String?
+  deliveryTerms String?
+  version Int @default(1)
+  decisionReason String?
+  decidedById String?
+  decidedAt DateTime?
+  revisions SupplierOfferRevision[]
+  documents SupplierOfferDocument[]
 
-  // Стоимость товара в рублях
+  // Стоимость товара (только в указанной валюте)
   price Decimal? @db.Decimal(14, 2)
 
   // Стоимость доставки
@@ -286,6 +323,36 @@ model SupplierOffer {
   @@index([taskId])
   @@index([supplierId])
   @@index([status])
+  @@index([validUntil])
+}
+
+model SupplierOfferRevision {
+  id String @id @default(uuid())
+  offerId String
+  offer SupplierOffer @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  version Int
+  action String
+  actorId String?
+  snapshot Json
+  createdAt DateTime @default(now())
+
+  @@index([offerId, version])
+}
+
+model SupplierOfferDocument {
+  id String @id @default(uuid())
+  offerId String
+  offer SupplierOffer @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  version Int
+  originalName String
+  storageName String @unique
+  mimeType String
+  size Int
+  sha256 String
+  uploadedById String?
+  createdAt DateTime @default(now())
+
+  @@index([offerId, createdAt])
 }
 
 model PurchaseOrder {
@@ -406,6 +473,7 @@ model User {
   processedPurchaseRequests PurchaseRequest[] @relation("ProcessedPurchaseRequests")
 
   assignedPurchaseRequests PurchaseRequest[] @relation("AssignedPurchaseRequests")
+  responsibleSuppliers Supplier[] @relation("ResponsibleSuppliers")
 
   @@index([fullName])
   @@index([department])
