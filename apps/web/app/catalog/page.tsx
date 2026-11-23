@@ -57,9 +57,8 @@ function CatalogContent() {
   const [showForm, setShowForm] = useState(false);
 
   const load = useCallback(async (signal?: AbortSignal) => {
-    setLoading(true);
     try {
-      const response = await apiFetch('/catalog?q=' + encodeURIComponent(query.trim()), {
+      const response = await apiFetch(`/catalog?q=${encodeURIComponent(query.trim())}`, {
         cache: 'no-store', signal,
       });
       if (!response.ok) throw new Error(describeError(await response.json().catch(() => null)));
@@ -140,7 +139,7 @@ function CatalogContent() {
         <input
           id="catalog-search"
           value={query}
-          onChange={(event) => setQuery(event.target.value)}
+          onChange={(event) => { setQuery(event.target.value); setLoading(true); }}
           placeholder="Например: 6205-2RS, насос, кабель"
           className="mt-2 h-12 w-full rounded-xl border border-slate-200 px-4 text-sm outline-none focus:border-blue-400"
         />
