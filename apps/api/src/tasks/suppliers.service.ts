@@ -28,6 +28,15 @@ const supplierSnapshot = (item: {
 export class SuppliersService {
   constructor(private readonly prisma: PrismaService) {}
 
+  async responsibles() {
+    return this.prisma.user.findMany({
+      where: { status: 'ACTIVE', role: { in: ['PROCUREMENT', 'ADMIN'] } },
+      select: { id: true, fullName: true, role: true },
+      orderBy: { fullName: 'asc' },
+      take: 200,
+    });
+  }
+
   async list(q?: string) {
     const term = q?.trim().slice(0, 120);
     return this.prisma.supplier.findMany({
