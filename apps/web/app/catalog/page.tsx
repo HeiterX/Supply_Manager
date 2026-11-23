@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import AppShell from '../components/AppShell';
 import AuthGate from '../components/AuthGate';
 import { apiFetch } from '../../lib/api-client';
@@ -55,31 +55,39 @@ function CatalogContent() {
   const [unit, setUnit] = useState('шт.');
   const [attributes, setAttributes] = useState('');
   const [showForm, setShowForm] = useState(false);
-
-  const load = useCallback(async (signal?: AbortSignal) => {
-    try {
-      const response = await apiFetch(`/catalog?q=${encodeURIComponent(query.trim())}`, {
-        cache: 'no-store', signal,
-      });
-      if (!response.ok) throw new Error(describeError(await response.json().catch(() => null)));
-      const data: unknown = await response.json();
-      if (!Array.isArray(data)) throw new Error('Ошибка формата ответа');
-      if (!signal?.aborted) {
-        setItems(data as CatalogItem[]);
-        setError('');
-      }
-    } catch (e) {
-      if (!signal?.aborted) setError(e instanceof Error ? e.message : 'Ошибка поиска');
-    } finally {
-      if (!signal?.aborted) setLoading(false);
-    }
-  }, [query]);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
-    void load(controller.signal);
+    // Результаты сети попадают в state только через Promise callbacks.
+    // Синхронные обновления состояния в effect не выполняются.
+    void apiFetch(`/catalog?q=${encodeURIComponent(query.trim())}`, {
+      cache: 'no-store',
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(describeError(await response.json().catch(() => null)));
+        }
+        const data: unknown = await response.json();
+        if (!Array.isArray(data)) throw new Error('Ошибка формата ответа');
+        return data as CatalogItem[];
+      })
+      .then((data) => {
+        if (controller.signal.aborted) return;
+        setItems(data);
+        setError('');
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          setError(error instanceof Error ? error.message : 'Ошибка поиска');
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
     return () => controller.abort();
-  }, [load]);
+  }, [query, refreshKey]);
 
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -110,7 +118,8 @@ function CatalogContent() {
       setCategory('');
       setUnit('шт.');
       setAttributes('');
-      await load();
+      setLoading(true);
+      setRefreshKey((value) => value + 1);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось сохранить карточку');
     } finally {
