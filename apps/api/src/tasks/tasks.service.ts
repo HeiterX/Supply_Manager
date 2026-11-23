@@ -687,6 +687,25 @@ export class TasksService {
 
     return this.prisma.$transaction(
       async (tx) => {
+        // Повторяем проверку после блокировки Task: никакая позиция не может
+        // быть изменена или удалена параллельно с созданием КП.
+        await this.lockTaskItemTransaction(tx, taskId);
+        if (offerItems.length) {
+          const currentItems = await tx.taskItem.findMany({
+            where: { taskId, id: { in: taskItemIds } },
+            select: { id: true, name: true, quantity: true },
+          });
+          if (currentItems.length !== taskItemIds.length) {
+            throw new ConflictException('Состав закупки изменился: обновите позиции КП');
+          }
+          const itemMap = new Map(currentItems.map((item) => [item.id, item]));
+          for (const line of offerItems) {
+            const item = itemMap.get(line.taskItemId);
+            if (!item || Math.round(line.quantity * 1000) > Math.round(item.quantity.toNumber() * 1000)) {
+              throw new ConflictException('Количество или позиция изменились: обновите КП');
+            }
+          }
+        }
         const supplier =
           await tx.supplier.create({
             data: {
