@@ -7,10 +7,13 @@ import { TasksService } from './tasks.service.js';
 import { MultiOrdersService } from './multi-orders.service.js';
 import { CatalogController } from './catalog.controller.js';
 import { CatalogService } from './catalog.service.js';
+import { SuppliersService } from './suppliers.service.js';
+import { SuppliersController } from './suppliers.controller.js';
+import { OfferDocumentsService } from './offer-documents.service.js';
 
 @Module({
   imports: [PrismaModule, AuthModule],
-  controllers: [TasksController, CatalogController],
-  providers: [TasksService, MultiOrdersService, CatalogService],
+  controllers: [TasksController, CatalogController, SuppliersController],
+  providers: [TasksService, MultiOrdersService, CatalogService, SuppliersService, OfferDocumentsService],
 })
 export class TasksModule {}
