@@ -55,7 +55,7 @@ export class OfferDocumentsService {
     }
     const storageName = randomUUID() + kind.ext;
     const name = basename(file.originalname.replace(/\\/g, '/'))
-      .replace(/[\x00-\x1F\x7F]/g, '_');
+      .split('').map(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127 ? '_' : char).join('');
     const folder = directory();
     await mkdir(folder, { recursive: true, mode: 0o700 });
     await writeFile(join(folder, storageName), file.buffer, { flag: 'wx', mode: 0o600 });
