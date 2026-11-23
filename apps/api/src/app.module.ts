@@ -1,5 +1,8 @@
 
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
+
+import { CsrfGuard } from './security/csrf.guard.js';
 
 import { AdminUsersModule } from './admin-users/admin-users.module.js';
 import { AuthModule } from './auth/auth.module.js';
@@ -14,6 +17,12 @@ import { TasksModule } from './tasks/tasks.module.js';
     AdminUsersModule,
     PurchaseRequestsModule,
     TasksModule,
+  ],
+  providers: [
+    {
+      provide: APP_GUARD,
+      useClass: CsrfGuard,
+    },
   ],
 })
 export class AppModule {}
