@@ -359,6 +359,48 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
           <p className="mt-1 text-sm text-slate-500">Каждый поставщик предлагает конкретные позиции, цены и количество. Разные наборы позиций нельзя сравнивать только по общей сумме.</p></div>
         <button disabled={busy || isClosed || !task.items.length} onClick={openOffer} className={primaryClass}>＋ Добавить КП</button>
       </div>
+      {task.supplierOffers.length > 0 && (
+        <section className="overflow-x-auto rounded-2xl border border-slate-200 bg-white p-4">
+          <h3 className="font-semibold text-slate-900">Сравнение КП по позициям</h3>
+          <p className="mt-1 text-xs text-slate-500">Автоматического выбора нет; валюты не конвертируются, неизвестные цены и условия отмечены явно.</p>
+          <table className="mt-4 w-full min-w-[650px] text-left text-xs">
+            <thead className="border-b border-slate-200">
+              <tr><th className="p-2">Потребность</th>{task.supplierOffers.map(offer => (
+                <th key={offer.id} className="min-w-[175px] p-2">
+                  {offer.supplier.name}<span className="block font-normal text-slate-500">v{offer.version} · {offer.currency ?? 'валюта не указана'}</span>
+                </th>
+              ))}</tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {task.items.map(item => <tr key={item.id}>
+                <td className="p-2 font-semibold">{item.name}
+                  <span className="block font-normal text-slate-500">Требуется {qty(item.quantity)} {item.unit}</span>
+                </td>
+                {task.supplierOffers.map(o => {
+                  const line = o.items.find(i => i.taskItemId === item.id);
+                  return <td key={o.id} className="p-2">
+                    {!line ? 'Не предложено' : <>
+                      <div className="font-semibold">{quoteMoney(line.unitPrice, o.currency)} / {item.unit}</div>
+                      <div className="mt-1 text-slate-500">{qty(line.quantity)} {item.unit}</div>
+                      <div className="text-slate-500">{line.inStock === null ? 'Наличие не указано' : line.inStock ? 'В наличии' : 'Под заказ'}</div>
+                    </>}
+                  </td>;
+                })}
+              </tr>)}
+              <tr className="bg-slate-50">
+                <td className="p-2 font-semibold">Условия КП</td>
+                {task.supplierOffers.map(o => <td key={o.id} className="p-2">
+                  <div>Поставка: {o.deliveryDays === null ? 'не указана' : `${o.deliveryDays} дн.`}</div>
+                  <div>Оплата: {o.paymentTerms || 'не указана'}</div>
+                  <div>Доставка: {o.deliveryTerms || 'не указана'}</div>
+                  <div>Действует до: {o.validUntil ? date(o.validUntil) : 'не указано'}</div>
+                  <div className="mt-1 font-semibold">Товары: {quoteMoney(o.price, o.currency)}</div>
+                </td>)}
+              </tr>
+            </tbody>
+          </table>
+        </section>
+      )}
       {!task.supplierOffers.length ? <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500">Пока нет предложений поставщиков. Добавьте первое КП.</div> :
         <div className="grid gap-4 xl:grid-cols-2">{task.supplierOffers.map(offer => {
           const ordered = orderByOffer(offer.id);
@@ -366,12 +408,16 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
           return <article key={offer.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-semibold text-slate-950">{offer.supplier.name}</h3>
               <p className="mt-1 text-xs text-slate-500">{[offer.supplier.contact, offer.supplier.phone, offer.supplier.email].filter(Boolean).join(' · ') || 'Контакты не указаны'}</p></div>
-              {ordered && <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">Заказ оформлен</span>}</div>
+              <div className="flex flex-wrap gap-2">
+                {ordered && <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">Заказ оформлен</span>}
+                {offer.decisionReason && <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">Выбрано вручную</span>}
+                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs">Версия {offer.version}</span>
+              </div></div>
             {!offer.items?.length ? <div className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-700">КП старого формата без позиций. Для многопоставочного заказа добавьте новое КП с позициями.</div> :
               <div className="mt-4 space-y-2">{offer.items.map(item => <div key={item.id} className="rounded-xl bg-slate-50 p-3">
                 <div className="flex flex-wrap items-start justify-between gap-2"><div className="text-sm font-medium text-slate-800">{item.taskItem.name}</div>
-                  <div className="text-sm font-semibold text-slate-800">{item.unitPrice === null ? 'Цена не указана' : money(Number(item.unitPrice) * Number(item.quantity))}</div></div>
-                <p className="mt-1 text-xs text-slate-500">{qty(item.quantity)} {item.taskItem.unit} · {money(item.unitPrice)} / {item.taskItem.unit} · {item.inStock === true ? 'В наличии' : item.inStock === false ? 'Под заказ' : 'Наличие не указано'}</p>
+                  <div className="text-sm font-semibold text-slate-800">{item.unitPrice === null ? 'Цена не указана' : quoteMoney(Number(item.unitPrice) * Number(item.quantity), offer.currency)}</div></div>
+                <p className="mt-1 text-xs text-slate-500">{qty(item.quantity)} {item.taskItem.unit} · {quoteMoney(item.unitPrice, offer.currency)} / {item.taskItem.unit} · {item.inStock === true ? 'В наличии' : item.inStock === false ? 'Под заказ' : 'Наличие не указано'}</p>
                 {item.notes && <p className="mt-1 text-xs text-slate-500">{item.notes}</p>}
               </div>)}</div>}
             <div className="mt-4 flex flex-wrap justify-between gap-3 border-t border-slate-100 pt-4 text-sm"><div><span className="text-slate-500">Товары: </span><b>{money(offer.price)}</b>
