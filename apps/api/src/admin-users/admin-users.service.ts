@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 
+import type { AuthUser } from '../auth/auth.types.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 const adminUserSelect = {
@@ -20,13 +21,21 @@ const adminUserSelect = {
   createdAt: true,
 } as const;
 
+function isTransactionConflict(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === 'P2034'
+  );
+}
+
 @Injectable()
 export class AdminUsersService {
   constructor(
     private readonly prisma: PrismaService,
   ) {}
 
-  // Получение списка пользователей
   async findAll() {
     return this.prisma.user.findMany({
       select: adminUserSelect,
@@ -37,7 +46,6 @@ export class AdminUsersService {
     });
   }
 
-  // Активация нового сотрудника
   async activate(userId: string, actorId: string) {
     return this.prisma.$transaction(async (tx) => {
       const result = await tx.user.updateMany({
@@ -82,7 +90,6 @@ export class AdminUsersService {
     });
   }
 
-  // Блокировка пользователя
   async block(userId: string, actorId: string) {
     if (userId === actorId) {
       throw new ForbiddenException(
@@ -131,7 +138,6 @@ export class AdminUsersService {
             );
           }
 
-          // Защита последнего администратора
           if (target.role === 'ADMIN') {
             const activeAdmins = await tx.user.count({
               where: {
@@ -147,8 +153,6 @@ export class AdminUsersService {
             }
           }
 
-          // Меняем статус только при совпадении
-          // проверенного состояния пользователя
           const result = await tx.user.updateMany({
             where: {
               id: userId,
@@ -166,7 +170,6 @@ export class AdminUsersService {
             );
           }
 
-          // Записываем блокировку в журнал
           await tx.securityAuditEvent.create({
             data: {
               actorId,
@@ -185,17 +188,126 @@ export class AdminUsersService {
         },
       );
     } catch (error: unknown) {
-      // Конкурирующие транзакции могут вызвать
-      // Prisma P2034. Не раскрываем внутреннюю
-      // ошибку БД пользователю.
-      if (
-        typeof error === 'object' &&
-        error !== null &&
-        'code' in error &&
-        error.code === 'P2034'
-      ) {
+      if (isTransactionConflict(error)) {
         throw new ConflictException(
           'Данные пользователя изменились. Повторите операцию.',
+        );
+      }
+
+      throw error;
+    }
+  }
+
+  async changeRole(
+    userId: string,
+    actorId: string,
+    newRole: AuthUser['role'],
+  ) {
+    if (userId === actorId) {
+      throw new ForbiddenException(
+        'Нельзя изменять собственную роль',
+      );
+    }
+
+    try {
+      return await this.prisma.$transaction(
+        async (tx) => {
+          const actor = await tx.user.findUnique({
+            where: { id: actorId },
+            select: {
+              role: true,
+              status: true,
+            },
+          });
+
+          if (
+            !actor ||
+            actor.role !== 'ADMIN' ||
+            actor.status !== 'ACTIVE'
+          ) {
+            throw new ForbiddenException(
+              'Недостаточно прав администратора',
+            );
+          }
+
+          const target = await tx.user.findUnique({
+            where: { id: userId },
+            select: {
+              role: true,
+              status: true,
+            },
+          });
+
+          if (!target) {
+            throw new NotFoundException(
+              'Пользователь не найден',
+            );
+          }
+
+          if (target.role === newRole) {
+            throw new ConflictException(
+              'У пользователя уже назначена эта роль',
+            );
+          }
+
+          if (
+            target.role === 'ADMIN' &&
+            target.status === 'ACTIVE' &&
+            newRole !== 'ADMIN'
+          ) {
+            const activeAdmins = await tx.user.count({
+              where: {
+                role: 'ADMIN',
+                status: 'ACTIVE',
+              },
+            });
+
+            if (activeAdmins <= 1) {
+              throw new ConflictException(
+                'Нельзя изменить роль последнего активного администратора',
+              );
+            }
+          }
+
+          const result = await tx.user.updateMany({
+            where: {
+              id: userId,
+              role: target.role,
+              status: target.status,
+            },
+            data: {
+              role: newRole,
+            },
+          });
+
+          if (result.count !== 1) {
+            throw new ConflictException(
+              'Данные пользователя изменились. Повторите операцию.',
+            );
+          }
+
+          await tx.securityAuditEvent.create({
+            data: {
+              actorId,
+              targetUserId: userId,
+              action:
+                `USER_ROLE_CHANGED_${target.role}_TO_${newRole}`,
+            },
+          });
+
+          return tx.user.findUniqueOrThrow({
+            where: { id: userId },
+            select: adminUserSelect,
+          });
+        },
+        {
+          isolationLevel: 'Serializable',
+        },
+      );
+    } catch (error: unknown) {
+      if (isTransactionConflict(error)) {
+        throw new ConflictException(
+          'Конкурирующее изменение пользователя. Повторите операцию.',
         );
       }
 

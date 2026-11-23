@@ -1,5 +1,6 @@
 
 import {
+  Body,
   Controller,
   Get,
   Param,
@@ -12,10 +13,10 @@ import {
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { RolesGuard } from '../auth/roles.guard.js';
 import { Roles } from '../auth/roles.decorator.js';
-
 import type { AuthenticatedRequest } from '../auth/auth.types.js';
 
 import { AdminUsersService } from './admin-users.service.js';
+import { UpdateUserRoleDto } from './dto/update-user-role.dto.js';
 
 @Controller('admin/users')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -25,16 +26,14 @@ export class AdminUsersController {
     private readonly adminUsersService: AdminUsersService,
   ) {}
 
-  // GET /api/v1/admin/users
   @Get()
   findAll() {
     return this.adminUsersService.findAll();
   }
 
-  // PATCH /api/v1/admin/users/:id/activate
   @Patch(':id/activate')
   activate(
-    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Req() request: AuthenticatedRequest,
   ) {
     return this.adminUsersService.activate(
@@ -43,15 +42,27 @@ export class AdminUsersController {
     );
   }
 
-  // PATCH /api/v1/admin/users/:id/block
   @Patch(':id/block')
   block(
-    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Req() request: AuthenticatedRequest,
   ) {
     return this.adminUsersService.block(
       id,
       request.authUser.id,
+    );
+  }
+
+  @Patch(':id/role')
+  changeRole(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateUserRoleDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.adminUsersService.changeRole(
+      id,
+      request.authUser.id,
+      dto.role,
     );
   }
 }
