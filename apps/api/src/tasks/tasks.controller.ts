@@ -12,6 +12,8 @@ import {
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { RolesGuard } from '../auth/roles.guard.js';
 import { Roles } from '../auth/roles.decorator.js';
+import { CurrentUser } from '../auth/current-user.decorator.js';
+import type { AuthUser } from '../auth/auth.types.js';
 
 import { HandOverPurchaseOrderDto } from './dto/hand-over-purchase-order.dto.js';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto.js';
@@ -66,27 +68,38 @@ export class TasksController {
 
   @Post(':taskId/items')
   addTaskItem(
+    @CurrentUser() user: AuthUser,
     @Param('taskId') taskId: string,
     @Body() dto: CreateTaskItemDto,
   ) {
-    return this.tasksService.addTaskItem(taskId, dto);
+    return this.tasksService.addTaskItem(taskId, dto, user.id);
   }
 
   @Patch(':taskId/items/:itemId')
   updateTaskItem(
+    @CurrentUser() user: AuthUser,
     @Param('taskId') taskId: string,
     @Param('itemId') itemId: string,
     @Body() dto: UpdateTaskItemDto,
   ) {
-    return this.tasksService.updateTaskItem(taskId, itemId, dto);
+    return this.tasksService.updateTaskItem(taskId, itemId, dto, user.id);
+  }
+
+  @Get(':taskId/items/:itemId/history')
+  findTaskItemHistory(
+    @Param('taskId') taskId: string,
+    @Param('itemId') itemId: string,
+  ) {
+    return this.tasksService.findTaskItemHistory(taskId, itemId);
   }
 
   @Delete(':taskId/items/:itemId')
   deleteTaskItem(
+    @CurrentUser() user: AuthUser,
     @Param('taskId') taskId: string,
     @Param('itemId') itemId: string,
   ) {
-    return this.tasksService.deleteTaskItem(taskId, itemId);
+    return this.tasksService.deleteTaskItem(taskId, itemId, user.id);
   }
 
   @Post(':id/activities')
