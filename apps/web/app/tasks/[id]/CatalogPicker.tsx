@@ -29,7 +29,7 @@ export default function CatalogPicker({
     setBusy(true);
     setError('');
     try {
-      const response = await apiFetch('/catalog?q=' + encodeURIComponent(query.trim()), {
+      const response = await apiFetch(`/catalog?q=${encodeURIComponent(query.trim())}`, {
         cache: 'no-store',
       });
       if (!response.ok) throw new Error('Не удалось выполнить поиск по каталогу');
