@@ -18,6 +18,11 @@ export class SuppliersController {
     return this.service.list(query);
   }
 
+  @Get('responsibles')
+  responsibles() {
+    return this.service.responsibles();
+  }
+
   @Get(':id')
   one(@Param('id') id: string) {
     return this.service.one(id);
