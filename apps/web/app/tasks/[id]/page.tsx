@@ -8,6 +8,7 @@ import { useParams } from 'next/navigation';
 import { useCallback, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { useAbortableLoad } from '../../../lib/use-abortable-load';
 import AppShell from '../../components/AppShell';
+import CatalogPicker, { type CatalogChoice } from './CatalogPicker';
 
 type Activity = { id: string; taskId: string; text: string; createdAt: string };
 import ProcurementWorkspace, {
@@ -19,6 +20,7 @@ type Task = {
   deadline: string | null; nextAction: string | null; reminderAt: string | null; createdAt: string; updatedAt: string; closedAt: string | null;
   selectedOfferId: string | null; selectedOffer: SupplierOffer | null; activities: Activity[]; items: TaskItem[]; supplierOffers: SupplierOffer[];
   purchaseOrder: PurchaseOrder | null; purchaseOrders?: PurchaseOrder[];
+  itemChanges?: Array<{ id: string; itemLabel: string; action: string; oldValue: unknown; newValue: unknown; actorId: string | null; createdAt: string }>;
   sourceRequest?: {
     id: string;
     number: number;
@@ -60,6 +62,24 @@ function formatDateTime(value: string | null) {
   if (!value) return '—';
   return new Intl.DateTimeFormat('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value));
 }
+function parseSpecificationLines(source: string): Record<string, string> {
+  const result: Array<[string, string]> = [];
+  for (const raw of source.split('\n')) {
+    if (!raw.trim()) continue;
+    const colon = raw.indexOf(':');
+    const key = raw.slice(0, colon).trim();
+    const value = raw.slice(colon + 1).trim();
+    if (colon < 1 || !key || !value || result.some(([name]) => name.toUpperCase() === key.toUpperCase())) {
+      throw new Error('Характеристики указываются как «параметр: значение», без повторений');
+    }
+    result.push([key, value]);
+  }
+  return Object.fromEntries(result);
+}
+function specificationLines(specs?: Record<string, string> | null): string {
+  return Object.entries(specs ?? {}).map(([name, value]) => `${name}: ${value}`).join('\n');
+}
+
 function toDateTimeLocal(value: string | null) {
   if (!value) return '';
   const date = new Date(value); const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000); return local.toISOString().slice(0, 16);
@@ -199,6 +219,9 @@ function TaskContent({ taskId }: { taskId: string }) {
   const [itemUnit, setItemUnit] = useState('шт.');
   const [itemUnitPrice, setItemUnitPrice] = useState('');
   const [itemNotes, setItemNotes] = useState('');
+  const [itemCatalogId, setItemCatalogId] = useState('');
+  const [itemRequiredAt, setItemRequiredAt] = useState('');
+  const [itemSpecs, setItemSpecs] = useState('');
   const [itemSearch, setItemSearch] = useState('');
 
   const [supplierFormOpen, setSupplierFormOpen] = useState(false);
@@ -289,10 +312,26 @@ function TaskContent({ taskId }: { taskId: string }) {
   }
 
   function openNewItem() {
-    setEditingItemId(null); setItemName(''); setItemPartNumber(''); setItemQuantity('1'); setItemUnit('шт.'); setItemUnitPrice(''); setItemNotes(''); setItemFormOpen(true);
+    setEditingItemId(null); setItemName(''); setItemPartNumber(''); setItemQuantity('1'); setItemUnit('шт.'); setItemUnitPrice(''); setItemNotes('');
+    setItemCatalogId(''); setItemRequiredAt(''); setItemSpecs('');
+    setItemFormOpen(true);
   }
   function openEditItem(item: TaskItem) {
-    setEditingItemId(item.id); setItemName(item.name); setItemPartNumber(item.partNumber ?? ''); setItemQuantity(String(item.quantity)); setItemUnit(item.unit); setItemUnitPrice(item.unitPrice === null ? '' : String(item.unitPrice)); setItemNotes(item.notes ?? ''); setItemFormOpen(true);
+    setEditingItemId(item.id); setItemName(item.name); setItemPartNumber(item.partNumber ?? ''); setItemQuantity(String(item.quantity)); setItemUnit(item.unit); setItemUnitPrice(item.unitPrice === null ? '' : String(item.unitPrice)); setItemNotes(item.notes ?? '');
+    setItemCatalogId(item.catalogItemId ?? '');
+    setItemRequiredAt(item.requiredAt ? item.requiredAt.slice(0, 10) : '');
+    setItemSpecs(specificationLines(item.technicalParameters));
+    setItemFormOpen(true);
+  }
+  function selectCatalogItem(choice: CatalogChoice) {
+    if (!editingItemId) {
+      // Только для новой позиции разрешено заполнить поля из справочника.
+      setItemName(choice.name);
+      setItemPartNumber(choice.partNumber ?? '');
+      setItemUnit(choice.unit);
+      setItemSpecs(specificationLines(choice.attributes));
+    }
+    setItemCatalogId(choice.id);
   }
   async function saveItem(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -300,10 +339,24 @@ function TaskContent({ taskId }: { taskId: string }) {
     if (!itemName.trim() || !itemUnit.trim() || !Number.isFinite(quantity) || quantity <= 0 || (price !== undefined && (!Number.isFinite(price) || price < 0))) {
       setActionError('Проверьте наименование, количество, единицу измерения и цену.'); return;
     }
+    let technicalParameters: Record<string, string>;
+    try {
+      technicalParameters = parseSpecificationLines(itemSpecs);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Некорректные характеристики');
+      return;
+    }
     const path = editingItemId ? `/items/${editingItemId}` : '/items';
     const ok = await apiAction(path, {
       method: editingItemId ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: itemName.trim(), partNumber: itemPartNumber.trim(), quantity, unit: itemUnit.trim(), unitPrice: price, currency: 'RUB', notes: itemNotes.trim() }),
+      body: JSON.stringify({
+        name: itemName.trim(), partNumber: itemPartNumber.trim(),
+        quantity, unit: itemUnit.trim(), unitPrice: price, currency: 'RUB',
+        notes: itemNotes.trim(),
+        catalogItemId: itemCatalogId || undefined,
+        technicalParameters,
+        requiredAt: itemRequiredAt ? new Date(`${itemRequiredAt}T23:59:59`).toISOString() : undefined,
+      }),
     }, editingItemId ? 'Позиция обновлена' : 'Позиция добавлена');
     if (ok) setItemFormOpen(false);
   }
@@ -625,7 +678,11 @@ function TaskContent({ taskId }: { taskId: string }) {
   const lockedItemIds = new Set((task.purchaseOrders ?? [])
     .filter(order => !order.cancelledAt)
     .flatMap(order => (order.items ?? []).map(line => line.taskItemId)));
-  const itemLocked = (id: string) => lockedItemIds.has(id) || task.status === 'CLOSED' || task.status === 'CANCELLED';
+  const itemLocked = (id: string) =>
+    lockedItemIds.has(id) ||
+    (task.purchaseOrders ?? []).some(order => (order.items ?? []).some(line => line.taskItemId === id)) ||
+    task.supplierOffers.some(offer => (offer.items ?? []).some(line => line.taskItemId === id)) ||
+    task.status === 'CLOSED' || task.status === 'CANCELLED';
 
   const tabDefs: Array<[Tab, string, number | null]> = [
     ['overview', 'Обзор', null], ['items', 'Позиции', task.items.length], ['offers', 'Предложения', task.supplierOffers.length], ['order', 'Заказы', task.purchaseOrders?.length ?? 0], ['history', 'История', task.activities.length],
@@ -1789,6 +1846,8 @@ function TaskContent({ taskId }: { taskId: string }) {
               <input value={itemPartNumber} onChange={(e) => setItemPartNumber(e.target.value)} placeholder="6205-2RS, DN40 PN25..." className="input" />
             </Field>
 
+            <CatalogPicker selectedId={itemCatalogId} onSelect={selectCatalogItem} />
+
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Количество *">
                 <input type="number" min="0.001" step="0.001" value={itemQuantity} onChange={(e) => setItemQuantity(e.target.value)} className="input" />
@@ -1817,9 +1876,21 @@ function TaskContent({ taskId }: { taskId: string }) {
               </div>
             )}
 
-            <Field label="Примечание">
-              <textarea rows={3} value={itemNotes} onChange={(e) => setItemNotes(e.target.value)} placeholder="Характеристики, требования, производитель, аналог..." className="input resize-none" />
+            <Field label="Необходимо до">
+              <input type="date" value={itemRequiredAt} onChange={(e) => setItemRequiredAt(e.target.value)} className="input" />
             </Field>
+            <Field label="Технические характеристики (параметр: значение)">
+              <textarea rows={4} value={itemSpecs} onChange={(e) => setItemSpecs(e.target.value)} placeholder={'Материал: сталь\nДиаметр: 25 мм'} className="input resize-none" />
+            </Field>
+            <Field label="Примечание">
+              <textarea rows={3} value={itemNotes} onChange={(e) => setItemNotes(e.target.value)} placeholder="Условия использования, дополнительные требования..." className="input resize-none" />
+            </Field>
+            {editingItemId && (
+              <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-700">
+                Исходные данные заявки сохраняются отдельно. Привязка номенклатуры не подменяет оригинальную спецификацию.
+                Редактирование позиции с КП или заказами запрещено.
+              </p>
+            )}
 
             <ModalActions busy={busy} onCancel={() => setItemFormOpen(false)} submitLabel={editingItemId ? 'Сохранить изменения' : 'Добавить позицию'} />
           </form>
