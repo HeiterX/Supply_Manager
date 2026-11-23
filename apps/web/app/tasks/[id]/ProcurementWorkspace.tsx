@@ -510,11 +510,54 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
 
     {offerOpen && <Dialog title={editingOffer ? "Редактировать КП" : "Новое коммерческое предложение"} onClose={() => setOfferOpen(false)}>
       <form onSubmit={saveOffer} className="space-y-5"><div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Поставщик *"><input autoFocus required className={inputClass} value={supplier.name} onChange={e => setSupplier(s => ({ ...s, name: e.target.value }))} placeholder="ООО «ПромСнаб»" /></Field>
+        <Field label="Поставщик *">
+          <input autoFocus required readOnly={Boolean(supplierId)} className={inputClass} value={supplier.name}
+            onChange={e => setSupplier(s => ({ ...s, name: e.target.value }))}
+            placeholder="ООО «ПромСнаб»" />
+          {supplierId && <button type="button" className="mt-2 text-xs text-blue-600" onClick={() => {
+            setSupplierId(''); setSupplier({ name: '', contact: '', phone: '', email: '', website: '' });
+          }}>Выбрать другого поставщика</button>}
+        </Field>
         <Field label="Контактное лицо"><input className={inputClass} value={supplier.contact} onChange={e => setSupplier(s => ({ ...s, contact: e.target.value }))} /></Field>
         <Field label="Телефон"><input className={inputClass} value={supplier.phone} onChange={e => setSupplier(s => ({ ...s, phone: e.target.value }))} /></Field>
         <Field label="Email"><input type="email" className={inputClass} value={supplier.email} onChange={e => setSupplier(s => ({ ...s, email: e.target.value }))} /></Field>
         <Field label="Сайт (с https://)"><input type="url" className={inputClass} value={supplier.website} onChange={e => setSupplier(s => ({ ...s, website: e.target.value }))} placeholder="https://example.ru" /></Field>
+      </div>
+      <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-3">
+        <h4 className="text-xs font-semibold text-slate-700">Найти поставщика в едином справочнике</h4>
+        <div className="mt-2 flex gap-2">
+          <input value={supplierQuery} className={inputClass} onChange={e => setSupplierQuery(e.target.value)}
+            placeholder="Название, ИНН, контакт" />
+          <button type="button" onClick={() => void searchSuppliers()} className={secondaryClass}>Найти</button>
+        </div>
+        {supplierMatches.length > 0 && <div className="mt-2 max-h-44 space-y-1 overflow-y-auto">
+          {supplierMatches.map(s => <button key={s.id} type="button"
+            disabled={s.status === 'BLOCKED' || s.status === 'PAUSED'} onClick={() => pickSupplier(s)}
+            className="block w-full rounded-lg bg-white p-2 text-left text-xs text-slate-700 hover:bg-blue-100 disabled:opacity-40">
+            <b>{s.name}</b> · {s.taxId ?? 'ИНН не указан'} · {s.status ?? 'ACTIVE'}
+          </button>)}
+        </div>}
+        <p className="mt-2 text-xs text-slate-500">Новый поставщик с уникальным названием будет добавлен в справочник при сохранении КП. Существующая карточка не изменяется из формы КП.</p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Валюта КП">
+          <select value={offerCurrency} onChange={e => setOfferCurrency(e.target.value)} className={inputClass}>
+            <option value="">Не указана</option>
+            <option value="RUB">RUB · рубли</option>
+            <option value="EUR">EUR · евро</option>
+            <option value="USD">USD · доллары</option>
+            <option value="CNY">CNY · юани</option>
+          </select>
+        </Field>
+        <Field label="Действует до">
+          <input type="date" value={validUntil} onChange={e => setValidUntil(e.target.value)} className={inputClass} />
+        </Field>
+        <Field label="Условия оплаты">
+          <textarea rows={2} maxLength={2000} value={paymentTerms} onChange={e => setPaymentTerms(e.target.value)} className={inputClass} placeholder="Например: 50% предоплата" />
+        </Field>
+        <Field label="Условия доставки">
+          <textarea rows={2} maxLength={2000} value={deliveryTerms} onChange={e => setDeliveryTerms(e.target.value)} className={inputClass} placeholder="Самовывоз, ТК, включена..." />
+        </Field>
       </div>
       <div><h3 className="font-semibold text-slate-900">Позиции предложения</h3><p className="mt-1 text-xs text-slate-500">Снимите галочку с позиций, которые поставщик не предлагает. Можно указать частичное количество.</p>
         <div className="mt-3 space-y-3">{task.items.map(item => {
@@ -522,20 +565,42 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
           return <div key={item.id} className="rounded-xl border border-slate-200 p-3">
             <label className="flex items-center gap-3 text-sm font-semibold"><input type="checkbox" checked={row.selected} onChange={e => updateDraft(item.id, { selected: e.target.checked })} />{item.name} <span className="font-normal text-slate-400">нужно {qty(item.quantity)} {item.unit}</span></label>
             {row.selected && <div className="mt-3 grid gap-3 sm:grid-cols-2"><Field label={`Количество, ${item.unit} *`}><input required type="number" min="0.001" max={Number(item.quantity)} step="0.001" className={inputClass} value={row.quantity} onChange={e => updateDraft(item.id, { quantity: e.target.value })} /></Field>
-              <Field label="Цена за единицу, ₽"><input type="number" min="0" step="0.01" className={inputClass} value={row.price} onChange={e => updateDraft(item.id, { price: e.target.value })} placeholder="Можно оставить пустым" /></Field>
+              <Field label={`Цена за единицу, ${offerCurrency || 'валюта не указана'}`}><input type="number" min="0" step="0.01" className={inputClass} value={row.price} onChange={e => updateDraft(item.id, { price: e.target.value })} placeholder="Можно оставить пустым" /></Field>
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={row.inStock} onChange={e => updateDraft(item.id, { inStock: e.target.checked })} />В наличии</label>
-              <div className="text-right text-sm font-semibold">Сумма: {row.price === '' ? '—' : money(Number(row.price) * Number(row.quantity))}</div>
+              <div className="text-right text-sm font-semibold">Сумма: {row.price === '' ? 'не указана' : quoteMoney(Number(row.price) * Number(row.quantity), offerCurrency || null)}</div>
               <div className="sm:col-span-2"><input className={inputClass} value={row.notes} onChange={e => updateDraft(item.id, { notes: e.target.value })} placeholder="Комментарий по позиции" /></div>
             </div>}
           </div>;
         })}</div></div>
-      <div className="grid gap-3 sm:grid-cols-2"><Field label="Стоимость доставки, ₽"><input type="number" min="0" step="0.01" className={inputClass} value={deliveryPrice} onChange={e => setDeliveryPrice(e.target.value)} /></Field>
+      <div className="grid gap-3 sm:grid-cols-2"><Field label={`Стоимость доставки, ${offerCurrency || 'валюта не указана'}`}><input type="number" min="0" step="0.01" className={inputClass} value={deliveryPrice} onChange={e => setDeliveryPrice(e.target.value)} /></Field>
         <Field label="Срок поставки, дней"><input type="number" min="0" step="1" className={inputClass} value={deliveryDays} onChange={e => setDeliveryDays(e.target.value)} /></Field></div>
-      <div className="rounded-xl bg-blue-50 p-4 text-sm"><div className="flex justify-between"><span>Товары</span><b>{offeredPriced ? money(offeredTotal) : 'Не все цены указаны'}</b></div>
-        <div className="mt-2 flex justify-between"><span>Итого с доставкой</span><b>{offeredPriced ? money(offeredTotal + Number(deliveryPrice || 0)) : '—'}</b></div></div>
+      <div className="rounded-xl bg-blue-50 p-4 text-sm">
+        <div className="flex justify-between"><span>Товары</span><b>{offeredPriced ? quoteMoney(offeredTotal, offerCurrency || null) : 'Не все цены указаны'}</b></div>
+        <div className="mt-2 flex justify-between"><span>Итого с доставкой</span>
+          <b>{offeredPriced && deliveryPrice !== '' ? quoteMoney(offeredTotal + Number(deliveryPrice), offerCurrency || null) : 'Не рассчитано'}</b>
+        </div>
+        <p className="mt-2 text-xs text-blue-800">Если цена, валюта или доставка неизвестны — итог не рассчитывается.</p>
+      </div>
       <Field label="Комментарий к КП"><textarea rows={3} className={inputClass} value={offerNotes} onChange={e => setOfferNotes(e.target.value)} /></Field>
       {localError && <p className="text-sm text-rose-600">{localError}</p>}
       <div className="flex flex-wrap justify-end gap-2"><button type="button" onClick={() => setOfferOpen(false)} className={secondaryClass}>Отмена</button><button disabled={busy || !task.items.some(i => draft[i.id]?.selected)} className={primaryClass}>{editingOffer ? "Сохранить изменения" : "Сохранить КП"}</button></div>
+      </form>
+    </Dialog>}
+
+    {decisionOffer && <Dialog title={`Ручной выбор КП «${decisionOffer.supplier.name}»`} onClose={() => setDecisionOffer(null)}>
+      <form onSubmit={selectOfferManually} className="space-y-4">
+        <p className="text-sm text-slate-600">Версия {decisionOffer.version} · цена {quoteMoney(decisionOffer.price, decisionOffer.currency)}.
+          Система не выбирает поставщиков автоматически. Решение попадёт в историю.</p>
+        <Field label="Причина выбора (не менее 10 символов) *">
+          <textarea required minLength={10} maxLength={2000} rows={4}
+            className={inputClass} value={decisionReason} onChange={e => setDecisionReason(e.target.value)}
+            placeholder="Почему выбрано это КП: техническое соответствие, срок, цена и условия" />
+        </Field>
+        {localError && <p className="text-sm text-rose-600">{localError}</p>}
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={() => setDecisionOffer(null)} className={secondaryClass}>Отмена</button>
+          <button disabled={busy || decisionReason.trim().length < 10} className={primaryClass}>Зафиксировать решение</button>
+        </div>
       </form>
     </Dialog>}
 
