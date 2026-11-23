@@ -196,7 +196,8 @@ describe('CORE-05: catalog, procurement line invariants and audit', () => {
 
   it('blocks deletion or editing with a linked commercial offer', async () => {
     const offer = await procurement.client.post(`${api}/tasks/${taskId}/supplier-offers`).send({
-      supplierName: 'Поставщик CORE-05',
+      supplierName: `Поставщик CORE-05-${randomUUID().slice(0, 8)}`,
+      currency: 'RUB',
       items: [{
         taskItemId: itemId,
         quantity: 3,
@@ -219,6 +220,9 @@ describe('CORE-05: catalog, procurement line invariants and audit', () => {
   });
 
   it('orders only offered amounts and displays ordered, received and handed-over progress', async () => {
+    await procurement.client.patch(`${api}/tasks/${taskId}/supplier-offers/${offerId}/decision`)
+      .send({ reason: 'Техническое соответствие подтверждено, приемлемые условия поставки' })
+      .expect(200);
     const order = await procurement.client.post(
       `${api}/tasks/${taskId}/supplier-offers/${offerId}/purchase-order`,
     ).send({
