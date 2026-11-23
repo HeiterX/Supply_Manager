@@ -1,0 +1,33 @@
+@startuml
+title CORE-06 — поставщик, КП, версия и заказ
+skinparam shadowing false
+actor "Снабженец" as P
+participant "Справочник поставщиков" as S
+participant "Карточка закупки" as T
+participant "КП и версии" as Q
+participant "Документы КП" as D
+participant "Заказы" as O
+
+P -> S : Найти поставщика / создать карточку
+S --> P : Supplier.id, контакты, статус
+P -> T : Открыть закупку с TaskItem
+P -> Q : Создать КП по строкам + supplierId
+Q -> S : Переиспользовать поставщика без изменения реквизитов
+Q -> Q : CREATED v1
+P -> D : Прикрепить PDF / PNG / JPEG
+D -> D : Magic bytes, MIME, размер <= 8 МБ
+D -> Q : Версия, SHA-256, автор
+P -> Q : Изменить условия (expectedVersion)
+Q -> Q : CREATED v1 остаётся, UPDATED v2
+P -> Q : Сравнить КП / вручную выбрать с причиной
+Q -> Q : SELECTED + actor + reason
+P -> O : Заказать позиции по выбранному КП
+O -> O : Проверить остаток, срок, RUB, поставщика
+O -> Q : supplierOfferId, снимок условий
+O -> S : История заказов поставщика
+note over S,Q
+Оригинальная спецификация TaskItem не меняется.
+КП без цены/валюты не участвует в ложных суммах.
+Валюты не конвертируются автоматически.
+end note
+@enduml
