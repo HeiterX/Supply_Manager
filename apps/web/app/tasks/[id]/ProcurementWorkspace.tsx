@@ -1,10 +1,13 @@
 'use client';
 
 import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { apiFetch, API_BASE_URL } from '../../../lib/api-client';
 
 export type Supplier = {
   id: string; name: string; contact: string | null; phone: string | null;
   email: string | null; website: string | null; notes: string | null;
+  status?: 'ACTIVE' | 'PAUSED' | 'BLOCKED';
+  taxId?: string | null; categories?: string[];
 };
 export type TaskItem = {
   id: string; taskId: string; name: string; partNumber: string | null;
@@ -29,6 +32,11 @@ export type SupplierOffer = {
   id: string; status: string; price: string | null; deliveryPrice: string | null;
   deliveryDays: number | null; inStock: boolean | null; notes: string | null;
   requestedAt: string; receivedAt: string | null; supplier: Supplier;
+  supplierId: string; version: number; currency: string | null;
+  validUntil: string | null; paymentTerms: string | null; deliveryTerms: string | null;
+  decisionReason: string | null; decidedAt: string | null;
+  documents?: Array<{ id: string; version: number; originalName: string; createdAt: string; size: number }>;
+  revisions?: Array<{ id: string; version: number; action: string; snapshot: unknown; createdAt: string }>;
   items: SupplierOfferItem[];
 };
 export type PurchaseOrderItem = {
@@ -61,6 +69,10 @@ type ActionForm = { order: PurchaseOrder; action: ActionName };
 
 const money = (v: string | number | null) => v === null || !Number.isFinite(Number(v)) ? '—' :
   new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 2 }).format(Number(v));
+const quoteMoney = (v: string | number | null, currency: string | null) =>
+  v === null || !currency ? 'Не указано' : Number.isFinite(Number(v))
+    ? `${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2, minimumFractionDigits: 2 }).format(Number(v))} ${currency}`
+    : 'Не указано';
 const qty = (v: string | number) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 3 }).format(Number(v));
 const date = (v: string | null) => v ? new Date(v).toLocaleString('ru-RU') : '—';
 const localDate = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
@@ -103,6 +115,15 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
   const [offerOpen, setOfferOpen] = useState(false);
   const [editingOffer, setEditingOffer] = useState<SupplierOffer | null>(null);
   const [supplier, setSupplier] = useState({ name: '', contact: '', phone: '', email: '', website: '' });
+  const [supplierId, setSupplierId] = useState('');
+  const [supplierQuery, setSupplierQuery] = useState('');
+  const [supplierMatches, setSupplierMatches] = useState<Supplier[]>([]);
+  const [offerCurrency, setOfferCurrency] = useState('RUB');
+  const [validUntil, setValidUntil] = useState('');
+  const [paymentTerms, setPaymentTerms] = useState('');
+  const [deliveryTerms, setDeliveryTerms] = useState('');
+  const [decisionOffer, setDecisionOffer] = useState<SupplierOffer | null>(null);
+  const [decisionReason, setDecisionReason] = useState('');
   const [deliveryPrice, setDeliveryPrice] = useState('');
   const [deliveryDays, setDeliveryDays] = useState('');
   const [offerNotes, setOfferNotes] = useState('');
@@ -146,14 +167,64 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
     const row = orderDraft[item.id]; return sum + (row?.selected ? Number(row.quantity || 0) * Number(item.unitPrice ?? 0) : 0);
   }, 0) ?? 0;
 
+  async function searchSuppliers(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLocalError('');
+    try {
+      const response = await apiFetch(`/suppliers?q=${encodeURIComponent(supplierQuery.trim())}`, { cache: 'no-store' });
+      if (!response.ok) throw new Error('Поиск поставщиков недоступен');
+      setSupplierMatches(await response.json() as Supplier[]);
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : 'Ошибка поиска');
+    }
+  }
+
+  function pickSupplier(value: Supplier) {
+    setSupplierId(value.id);
+    setSupplier({
+      name: value.name, contact: value.contact ?? '', phone: value.phone ?? '',
+      email: value.email ?? '', website: value.website ?? '',
+    });
+    setSupplierMatches([]);
+  }
+
+  async function selectOfferManually(event: FormEvent) {
+    event.preventDefault();
+    if (!decisionOffer) return;
+    const ok = await onAction(`/supplier-offers/${decisionOffer.id}/decision`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: decisionReason.trim() }),
+    }, 'Выбор КП и его причина сохранены', setLocalError);
+    if (ok) { setDecisionOffer(null); setDecisionReason(''); }
+  }
+
+  async function uploadOfferDocument(offer: SupplierOffer, file: File | undefined) {
+    if (!file) return;
+    const form = new FormData();
+    form.append('file', file);
+    await onAction(`/supplier-offers/${offer.id}/documents`, {
+      method: 'POST', body: form,
+    }, `Документ «${file.name}» прикреплён к КП`, setLocalError);
+  }
+
   function openOffer() {
     setEditingOffer(null);
+    setSupplierId(''); setSupplierQuery(''); setSupplierMatches([]);
+    setSupplier({ name: '', contact: '', phone: '', email: '', website: '' });
+    setOfferCurrency('RUB'); setValidUntil(''); setPaymentTerms(''); setDeliveryTerms('');
+    setDeliveryPrice(''); setDeliveryDays(''); setOfferNotes('');
     setLocalError('');
     setDraft(Object.fromEntries(task.items.map(i => [i.id, { selected: true, quantity: String(i.quantity), price: '', inStock: true, notes: '' }])));
     setOfferOpen(true);
   }
   function openEditOffer(offer: SupplierOffer) {
     setEditingOffer(offer); setLocalError('');
+    setSupplierId(offer.supplierId);
+    setSupplierMatches([]); setSupplierQuery('');
+    setOfferCurrency(offer.currency ?? '');
+    setValidUntil(offer.validUntil ? offer.validUntil.slice(0, 10) : '');
+    setPaymentTerms(offer.paymentTerms ?? '');
+    setDeliveryTerms(offer.deliveryTerms ?? '');
     setSupplier({ name: offer.supplier.name, contact: offer.supplier.contact ?? '',
       phone: offer.supplier.phone ?? '', email: offer.supplier.email ?? '', website: offer.supplier.website ?? '' });
     setDeliveryPrice(offer.deliveryPrice === null ? '' : String(offer.deliveryPrice));
@@ -181,7 +252,7 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
   async function saveOffer(event: FormEvent) {
     event.preventDefault(); setLocalError('');
     const selected = task.items.filter(i => draft[i.id]?.selected);
-    if (!supplier.name.trim() || !selected.length) { setLocalError('Укажите поставщика и выберите позиции'); return; }
+    if ((!supplierId && !supplier.name.trim()) || !selected.length) { setLocalError('Укажите поставщика и выберите позиции'); return; }
     for (const item of selected) {
       const row = draft[item.id]; const amount = Number(row.quantity);
       if (!Number.isFinite(amount) || amount <= 0 || milli(amount) > milli(item.quantity) || Math.abs(amount * 1000 - milli(amount)) > 1e-6) {
@@ -193,17 +264,23 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
     }
     const ok = await onAction(editingOffer ? `/supplier-offers/${editingOffer.id}` : '/supplier-offers', { method: editingOffer ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        supplierId: supplierId || undefined,
         supplierName: supplier.name.trim(), contact: supplier.contact.trim() || undefined,
         phone: supplier.phone.trim() || undefined, email: supplier.email.trim() || undefined,
         website: supplier.website.trim() || undefined,
+        currency: offerCurrency || undefined,
+        validUntil: validUntil ? new Date(`${validUntil}T23:59:59`).toISOString() : undefined,
+        paymentTerms: paymentTerms.trim() || undefined,
+        deliveryTerms: deliveryTerms.trim() || undefined,
+        expectedVersion: editingOffer?.version,
         deliveryPrice: deliveryPrice === '' ? undefined : Number(deliveryPrice),
         deliveryDays: deliveryDays === '' ? undefined : Number(deliveryDays), notes: offerNotes.trim() || undefined,
         items: selected.map(i => ({ taskItemId: i.id, quantity: Number(draft[i.id].quantity),
           unitPrice: draft[i.id].price === '' ? undefined : Number(draft[i.id].price),
-          currency: 'RUB', inStock: draft[i.id].inStock, notes: draft[i.id].notes.trim() || undefined })),
+          currency: offerCurrency || undefined, inStock: draft[i.id].inStock, notes: draft[i.id].notes.trim() || undefined })),
       }),
     }, editingOffer ? 'КП обновлено' : 'Коммерческое предложение сохранено', setLocalError);
-    if (ok) { setOfferOpen(false); setEditingOffer(null); setSupplier({ name: '', contact: '', phone: '', email: '', website: '' }); setDeliveryPrice(''); setDeliveryDays(''); setOfferNotes(''); }
+    if (ok) { setOfferOpen(false); setEditingOffer(null); setSupplierId(''); setSupplier({ name: '', contact: '', phone: '', email: '', website: '' }); setDeliveryPrice(''); setDeliveryDays(''); setOfferNotes(''); }
   }
 
   async function saveOrder(event: FormEvent) {
