@@ -833,6 +833,35 @@ function TaskContent({ taskId }: { taskId: string }) {
             </button>
           </div>
 
+          <section className="overflow-x-auto rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="mb-3 font-semibold text-slate-900">Прогресс по позициям</h3>
+            <p className="mb-3 text-xs text-slate-500">«Предложено» — максимальное доступное КП, а не сумма альтернативных предложений. Отменённые заказы исключены.</p>
+            <table className="w-full min-w-[720px] text-left text-xs">
+              <thead className="border-b border-slate-100 text-slate-500">
+                <tr>
+                  <th className="p-2">Позиция</th>
+                  <th className="p-2">Требуется</th>
+                  <th className="p-2">Предложено</th>
+                  <th className="p-2">Заказано</th>
+                  <th className="p-2">Получено</th>
+                  <th className="p-2">Передано</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {task.items.map((item) => (
+                  <tr key={item.id}>
+                    <td className="p-2 font-medium text-slate-900">{item.name}</td>
+                    <td className="p-2">{formatQuantity(item.progress?.required ?? item.quantity)} {item.unit}</td>
+                    <td className="p-2">{formatQuantity(item.progress?.offered ?? 0)}</td>
+                    <td className="p-2">{formatQuantity(item.progress?.ordered ?? 0)}</td>
+                    <td className="p-2">{formatQuantity(item.progress?.received ?? 0)}</td>
+                    <td className="p-2">{formatQuantity(item.progress?.handedOver ?? 0)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm">
               <div className="text-xs font-medium text-slate-400">Всего позиций</div>
@@ -929,6 +958,16 @@ function TaskContent({ taskId }: { taskId: string }) {
                                   )}
                                   {item.notes && <span className="text-slate-400">· {item.notes}</span>}
                                 </div>
+                                <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
+                                  {item.catalogItem && <span className="rounded-md bg-blue-50 px-2 py-1 text-blue-700">Каталог: {item.catalogItem.category}</span>}
+                                  {item.sourceRequestItemId && <span className="rounded-md bg-slate-100 px-2 py-1">Исходная позиция заявки сохранена</span>}
+                                  {item.requiredAt && <span>Нужно до {formatDateTime(item.requiredAt)}</span>}
+                                </div>
+                                {item.technicalParameters && Object.keys(item.technicalParameters).length > 0 && (
+                                  <p className="mt-2 text-xs text-slate-600">
+                                    Характеристики: {Object.entries(item.technicalParameters).map(([k,v]) => `${k}: ${v}`).join(' · ')}
+                                  </p>
+                                )}
                               </div>
                             </td>
                             <td className="whitespace-nowrap px-5 py-4 font-medium text-slate-700">
@@ -1011,6 +1050,36 @@ function TaskContent({ taskId }: { taskId: string }) {
               </>
             )}
           </div>
+          {(task.itemChanges?.length ?? 0) > 0 && (
+            <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="font-semibold text-slate-900">История изменений позиций</h3>
+              <p className="mt-1 text-xs text-slate-500">
+                До и после редактирования. История сохраняется даже после удаления неиспользованной позиции.
+              </p>
+              <div className="mt-3 space-y-3">
+                {task.itemChanges?.map((entry) => (
+                  <details key={entry.id} className="rounded-xl bg-slate-50 p-3 text-sm">
+                    <summary className="cursor-pointer font-medium text-slate-800">
+                      {entry.action === 'CREATED' ? 'Создана' : entry.action === 'DELETED' ? 'Удалена' : 'Изменена'}:
+                      {' '}{entry.itemLabel} · {formatDateTime(entry.createdAt)}
+                    </summary>
+                    {entry.oldValue !== null && (
+                      <div className="mt-3">
+                        <div className="mb-1 text-xs font-semibold text-slate-500">До изменения</div>
+                        <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg bg-white p-3 text-xs">{JSON.stringify(entry.oldValue, null, 2)}</pre>
+                      </div>
+                    )}
+                    {entry.newValue !== null && (
+                      <div className="mt-3">
+                        <div className="mb-1 text-xs font-semibold text-slate-500">После изменения</div>
+                        <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg bg-white p-3 text-xs">{JSON.stringify(entry.newValue, null, 2)}</pre>
+                      </div>
+                    )}
+                  </details>
+                ))}
+              </div>
+            </section>
+          )}
         </section>
       )}
 
