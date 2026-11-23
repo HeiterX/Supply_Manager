@@ -8,13 +8,15 @@ import type { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto.js';
 import { CreateSupplierOfferDto } from './dto/create-supplier-offer.dto.js';
+import { SuppliersService } from './suppliers.service.js';
+import { offerSnapshot, quotePrice } from './quote-utils.js';
 
 const milli = (value: number) => Math.round(value * 1000);
 const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
 @Injectable()
 export class MultiOrdersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly suppliers: SuppliersService) {}
 
   // A row lock serializes all allocations for the same procurement task.
   private async lockTask(tx: Prisma.TransactionClient, taskId: string) {
@@ -79,10 +81,14 @@ export class MultiOrdersService {
     });
   }
 
-  async updateOffer(taskId: string, offerId: string, dto: CreateSupplierOfferDto) {
-    if (!dto.supplierName?.trim() || !dto.items?.length) {
+  async updateOffer(taskId: string, offerId: string, dto: CreateSupplierOfferDto, actorId?: string) {
+    if ((!dto.supplierId && !dto.supplierName?.trim()) || !dto.items?.length) {
       throw new BadRequestException('Укажите поставщика и позиции КП');
     }
+    if (dto.validUntil && new Date(dto.validUntil).getTime() < Date.now()) {
+      throw new BadRequestException('Нельзя установить истёкший срок КП');
+    }
+    const pricing = quotePrice(dto);
     const items = dto.items;
     if (new Set(items.map(item => item.taskItemId)).size !== items.length) {
       throw new BadRequestException('Позиции КП не должны повторяться');
@@ -93,6 +99,12 @@ export class MultiOrdersService {
       if (!offer) throw new NotFoundException('КП не найдено');
       const orders = await tx.purchaseOrder.count({ where: { taskId, supplierOfferId: offerId } });
       if (orders) throw new ConflictException('КП уже использовалось в заказе. Для новых условий добавьте новое КП');
+      if (dto.expectedVersion !== undefined && dto.expectedVersion !== offer.version) {
+        throw new ConflictException('КП изменено другим пользователем. Перезагрузите страницу');
+      }
+      if (offer.status === 'REJECTED') {
+        throw new ConflictException('Отклонённое КП нельзя редактировать');
+      }
       const byId = new Map<string, (typeof task.items)[number]>(task.items.map(item => [item.id, item]));
       for (const item of items) {
         const taskItem = byId.get(item.taskItemId);
@@ -103,22 +115,83 @@ export class MultiOrdersService {
           throw new BadRequestException('Сейчас поддерживаются КП в рублях');
         }
       }
-      const hasPrices = items.every(item => item.unitPrice !== undefined);
-      const price = hasPrices ? money(items.reduce((sum, item) => sum + item.quantity * (item.unitPrice ?? 0), 0)) : null;
-      await tx.supplier.update({ where: { id: offer.supplierId }, data: {
-        name: dto.supplierName.trim(), contact: dto.contact?.trim() || null,
-        phone: dto.phone?.trim() || null, email: dto.email?.trim() || null,
-        website: dto.website?.trim() || null,
-      } });
+      const supplier = await this.suppliers.resolveForOffer(tx, dto, actorId);
+      const hadRevision = await tx.supplierOfferRevision.count({ where: { offerId } });
+      if (!hadRevision) {
+        const baseline = await tx.supplierOffer.findUniqueOrThrow({
+          where: { id: offerId }, include: { items: true },
+        });
+        await tx.supplierOfferRevision.create({ data: {
+          offerId, version: baseline.version, actorId: actorId ?? null,
+          action: 'BASELINE', snapshot: offerSnapshot(baseline),
+        } });
+      }
       const updated = await tx.supplierOffer.update({ where: { id: offerId }, data: {
-        price, deliveryPrice: dto.deliveryPrice ?? null, deliveryDays: dto.deliveryDays ?? null,
+        supplierId: supplier.id,
+        version: { increment: 1 },
+        price: pricing.price, currency: pricing.currency,
+        deliveryPrice: dto.deliveryPrice ?? null, deliveryDays: dto.deliveryDays ?? null,
+        validUntil: dto.validUntil ? new Date(dto.validUntil) : null,
+        paymentTerms: dto.paymentTerms?.trim() || null,
+        deliveryTerms: dto.deliveryTerms?.trim() || null,
         notes: dto.notes?.trim() || null, status: 'OFFER_RECEIVED',
+        decisionReason: null, decidedById: null, decidedAt: null,
         items: { deleteMany: {}, create: items.map(item => ({
           taskItemId: item.taskItemId, quantity: item.quantity, unitPrice: item.unitPrice,
-          currency: 'RUB', inStock: item.inStock, notes: item.notes?.trim() || null,
+          currency: pricing.currency ?? item.currency?.trim().toUpperCase() ?? 'RUB',
+          inStock: item.inStock, notes: item.notes?.trim() || null,
         })) },
       }, include: { supplier: true, items: { include: { taskItem: true } } } });
-      await tx.taskActivity.create({ data: { taskId, text: `Изменено предложение поставщика «${updated.supplier.name}»` } });
+      await tx.supplierOfferRevision.create({ data: {
+        offerId, version: updated.version, actorId: actorId ?? null,
+        action: 'UPDATED', snapshot: offerSnapshot(updated),
+      } });
+      await tx.task.updateMany({
+        where: { id: taskId, selectedOfferId: offerId },
+        data: { selectedOfferId: null },
+      });
+      await tx.taskActivity.create({ data: {
+        taskId, text: `КП поставщика «${updated.supplier.name}» обновлено до версии ${updated.version}`,
+      } });
+      return updated;
+    }, { timeout: 15000 });
+  }
+
+  async selectOffer(taskId: string, offerId: string, reason: string, actorId: string) {
+    const decisionReason = reason?.trim();
+    if (!decisionReason || decisionReason.length < 10 || decisionReason.length > 2000) {
+      throw new BadRequestException('Причина выбора должна содержать от 10 до 2000 символов');
+    }
+    return this.prisma.$transaction(async tx => {
+      await this.lockTask(tx, taskId);
+      const offer = await tx.supplierOffer.findFirst({
+        where: { taskId, id: offerId },
+        include: { items: true, supplier: true },
+      });
+      if (!offer) throw new NotFoundException('КП не найдено');
+      if (!offer.items.length) throw new ConflictException('Выбрать КП без позиций нельзя');
+      if (offer.validUntil && offer.validUntil.getTime() < Date.now()) {
+        throw new ConflictException('Срок действия КП истёк');
+      }
+      if (offer.supplier.status !== 'ACTIVE') {
+        throw new ConflictException('Поставщик заблокирован или приостановлен');
+      }
+      const existingOrders = await tx.purchaseOrder.count({ where: { supplierOfferId: offerId } });
+      if (existingOrders) throw new ConflictException('КП уже использовалось в заказе; решение нельзя переписать');
+      const updated = await tx.supplierOffer.update({
+        where: { id: offerId },
+        data: {
+          status: 'SELECTED', decisionReason, decidedById: actorId, decidedAt: new Date(),
+        },
+        include: { items: true, supplier: true },
+      });
+      await tx.supplierOfferRevision.create({ data: {
+        offerId, version: updated.version, actorId, action: 'SELECTED',
+        snapshot: offerSnapshot(updated),
+      } });
+      await tx.taskActivity.create({ data: {
+        taskId, text: `Вручную выбрано КП «${updated.supplier.name}» (версия ${updated.version}). Причина: ${decisionReason}`,
+      } });
       return updated;
     }, { timeout: 15000 });
   }
@@ -142,6 +215,18 @@ export class MultiOrdersService {
       });
       if (!offer) throw new NotFoundException('Предложение поставщика не найдено');
       if (!offer.items.length) throw new BadRequestException('У КП нет позиций. Создайте новое КП с позициями');
+      if (!offer.decisionReason || offer.status !== 'SELECTED') {
+        throw new ConflictException('Перед заказом выберите КП вручную и укажите причину решения');
+      }
+      if (offer.validUntil && offer.validUntil.getTime() < Date.now()) {
+        throw new ConflictException('Срок действия КП истёк');
+      }
+      if (offer.supplier.status !== 'ACTIVE') {
+        throw new ConflictException('Поставщик заблокирован или приостановлен');
+      }
+      if (offer.currency !== 'RUB') {
+        throw new ConflictException('Оформление заказа пока доступно только для КП в RUB; пересчёт валют запрещён');
+      }
       const orders = await tx.purchaseOrder.findMany({
         where: { taskId, cancelledAt: null }, include: { items: true },
       });
