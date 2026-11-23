@@ -29,6 +29,7 @@ describe('CORE-06: supplier directory, quotations, revisions and documents', () 
   const taskIds: string[] = [];
   const uploadedNames: string[] = [];
   const suffix = randomUUID().replaceAll('-', '').slice(0, 10);
+  const taxId = (BigInt('0x' + suffix) % 10000000000n).toString().padStart(10, '0');
   const api = '/api/v1';
 
   beforeAll(async () => {
@@ -69,7 +70,7 @@ describe('CORE-06: supplier directory, quotations, revisions and documents', () 
   it('creates canonical supplier and blocks normalized name/tax ID duplicates', async () => {
     const name = `CORE06 Судовые детали ${suffix}`;
     const created = await procurement.client.post(`${api}/suppliers`).send({
-      name, taxId: '1234567890', contact: 'Ирина',
+      name, taxId: taxId, contact: 'Ирина',
       categories: ['Электрика', 'Механика'],
       responsibleId: procurement.userId,
       status: 'ACTIVE',
@@ -78,7 +79,7 @@ describe('CORE-06: supplier directory, quotations, revisions and documents', () 
     supplierId = created.body.id as string;
     supplierIds.push(supplierId);
     await procurement.client.post(`${api}/suppliers`).send({
-      name: name.toUpperCase(), taxId: '1234567890',
+      name: name.toUpperCase(), taxId: taxId,
     }).expect(409);
 
     const list = await procurement.client.get(`${api}/suppliers?q=${suffix}`).expect(200);
