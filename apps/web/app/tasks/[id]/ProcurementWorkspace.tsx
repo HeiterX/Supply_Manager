@@ -420,12 +420,58 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
                 <p className="mt-1 text-xs text-slate-500">{qty(item.quantity)} {item.taskItem.unit} · {quoteMoney(item.unitPrice, offer.currency)} / {item.taskItem.unit} · {item.inStock === true ? 'В наличии' : item.inStock === false ? 'Под заказ' : 'Наличие не указано'}</p>
                 {item.notes && <p className="mt-1 text-xs text-slate-500">{item.notes}</p>}
               </div>)}</div>}
-            <div className="mt-4 flex flex-wrap justify-between gap-3 border-t border-slate-100 pt-4 text-sm"><div><span className="text-slate-500">Товары: </span><b>{money(offer.price)}</b>
-              <div className="text-xs text-slate-500">Доставка: {money(offer.deliveryPrice)} · Срок: {offer.deliveryDays ?? '—'} дн.</div></div>
-              <div className="text-right"><span className="text-xs text-slate-400">Итого по КП</span><div className="font-bold">{known ? money(Number(offer.price) + Number(offer.deliveryPrice ?? 0)) : 'Не рассчитано'}</div></div></div>
+            <div className="mt-4 flex flex-wrap justify-between gap-3 border-t border-slate-100 pt-4 text-sm">
+              <div><span className="text-slate-500">Товары: </span><b>{quoteMoney(offer.price, offer.currency)}</b>
+                <div className="text-xs text-slate-500">Доставка: {quoteMoney(offer.deliveryPrice, offer.currency)} · Срок: {offer.deliveryDays === null ? 'не указан' : `${offer.deliveryDays} дн.`}</div>
+                <div className="text-xs text-slate-500">Действует до: {offer.validUntil ? date(offer.validUntil) : 'не указано'}</div>
+                <div className="mt-1 text-xs text-slate-500">Оплата: {offer.paymentTerms || 'не указана'}</div>
+                <div className="text-xs text-slate-500">Доставка: {offer.deliveryTerms || 'условия не указаны'}</div>
+              </div>
+              <div className="text-right"><span className="text-xs text-slate-400">Итого по КП</span>
+                <div className="font-bold">{known && offer.currency && offer.deliveryPrice !== null
+                  ? quoteMoney(Number(offer.price) + Number(offer.deliveryPrice), offer.currency)
+                  : 'Не рассчитано'}</div>
+              </div>
+            </div>
             {offer.notes && <p className="mt-3 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">{offer.notes}</p>}
+            {offer.decisionReason && <p className="mt-3 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">Причина ручного выбора: {offer.decisionReason}</p>}
+            <div className="mt-3 rounded-xl border border-slate-100 p-3">
+              <h4 className="text-xs font-semibold">Документы КП</h4>
+              {(offer.documents ?? []).length === 0 && <p className="mt-2 text-xs text-slate-500">Файл пока не прикреплён</p>}
+              {(offer.documents ?? []).map(doc => (
+                <a key={doc.id} href={`${API_BASE_URL}/tasks/${task.id}/supplier-offers/${offer.id}/documents/${doc.id}`}
+                  target="_blank" rel="noreferrer" className="mt-2 block text-xs font-semibold text-blue-700 hover:underline">
+                  {doc.originalName} · версия {doc.version}
+                </a>
+              ))}
+              {!isClosed && <label className="mt-3 block text-xs text-slate-600">
+                Прикрепить PDF/PNG/JPEG (до 8 МБ)
+                <input type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
+                  className="mt-1 block w-full text-xs" disabled={busy}
+                  onChange={e => { void uploadOfferDocument(offer, e.target.files?.[0]); e.target.value = ''; }} />
+              </label>}
+            </div>
+            {(offer.revisions ?? []).length > 0 && <details className="mt-3 rounded-xl bg-slate-50 p-3 text-xs">
+              <summary className="cursor-pointer font-semibold">История версий и решений ({offer.revisions?.length})</summary>
+              <div className="mt-3 space-y-2">{offer.revisions?.map(rev => (
+                <details key={rev.id} className="rounded-lg border border-slate-200 bg-white p-2">
+                  <summary className="cursor-pointer">v{rev.version} · {rev.action} · {date(rev.createdAt)}</summary>
+                  <pre className="mt-2 overflow-x-auto whitespace-pre-wrap">{JSON.stringify(rev.snapshot, null, 2)}</pre>
+                </details>
+              ))}</div>
+            </details>}
             {!isClosed && !orders.some(order => order.supplierOfferId === offer.id) && <button disabled={busy} onClick={() => openEditOffer(offer)} className={`mt-4 ${secondaryClass}`}>Изменить КП</button>}
-            {!ordered && offer.items?.length > 0 && !isClosed && <button disabled={busy || offer.items.every(i => available(i.taskItemId) <= 0)} onClick={() => openOrder(offer)} className={`mt-4 w-full ${primaryClass}`}>Оформить заказ у поставщика →</button>}
+            {!orders.some(order => order.supplierOfferId === offer.id) && offer.items.length > 0 && !isClosed &&
+              <button disabled={busy || Boolean(offer.validUntil && new Date(offer.validUntil) < new Date())}
+                onClick={() => { setDecisionOffer(offer); setDecisionReason(offer.decisionReason ?? ''); setLocalError(''); }}
+                className={`ml-2 mt-4 ${secondaryClass}`}>Выбрать КП с причиной</button>}
+            {!ordered && offer.items?.length > 0 && !isClosed && <button
+              disabled={busy || !offer.decisionReason || offer.currency !== 'RUB' ||
+                Boolean(offer.validUntil && new Date(offer.validUntil) < new Date()) ||
+                offer.items.every(i => available(i.taskItemId) <= 0)}
+              onClick={() => openOrder(offer)} className={`mt-4 w-full ${primaryClass}`}>Оформить заказ у поставщика →</button>}
+            {!offer.decisionReason && <p className="mt-2 text-xs text-amber-700">Перед заказом требуется ручное решение с причиной.</p>}
+            {offer.currency && offer.currency !== 'RUB' && <p className="mt-2 text-xs text-amber-700">Заказы в {offer.currency} пока не поддержаны; валюты не пересчитываются автоматически.</p>}
           </article>;
         })}</div>}
     </> : <>
