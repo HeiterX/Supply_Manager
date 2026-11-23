@@ -167,8 +167,7 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
     const row = orderDraft[item.id]; return sum + (row?.selected ? Number(row.quantity || 0) * Number(item.unitPrice ?? 0) : 0);
   }, 0) ?? 0;
 
-  async function searchSuppliers(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function searchSuppliers() {
     setLocalError('');
     try {
       const response = await apiFetch(`/suppliers?q=${encodeURIComponent(supplierQuery.trim())}`, { cache: 'no-store' });
