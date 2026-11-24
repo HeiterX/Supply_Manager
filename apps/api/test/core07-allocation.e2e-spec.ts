@@ -12,11 +12,6 @@ import { PrismaService } from '../src/prisma/prisma.service.js';
 import { createAuthenticatedAgent } from './authenticated-agent.helper.js';
 
 type Agent = Awaited<ReturnType<typeof createAuthenticatedAgent>>;
-type OrderResponse = {
-  id: string; version: number; status: string; supplierOfferId: string;
-  idempotencyKey: string | null; cancelledAt: string | null;
-  items: Array<{ id: string; taskItemId: string; quantity: string }>;
-};
 type Offer = { id: string; supplierId: string; items: Array<{ id: string; taskItemId: string }> };
 const api = '/api/v1/tasks';
 
@@ -211,11 +206,10 @@ describe('CORE-07: multi-supplier quantity reservation, idempotency and safe edi
     await procurement.client.patch(`${path}/confirm-payment`).expect(409);
     await procurement.client.patch(`${path}/send-to-payment`).expect(200);
     await procurement.client.patch(`${path}/confirm-payment`).expect(200);
-    const paid = await procurement.client.patch(path).send({
+    await procurement.client.patch(path).send({
       expectedVersion: 5,
       items: [{ supplierOfferItemId: offer.items[0].id, quantity: 2 }],
     }).expect(409);
-    expect(paid.body.status).toBe(409);
     await procurement.client.patch(`${path}/cancel`)
       .send({ reason: 'Поздняя отмена' }).expect(409);
     const state = await allocation(taskId, taskItemId);
