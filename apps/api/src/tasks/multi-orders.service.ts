@@ -507,6 +507,7 @@ export class MultiOrdersService {
   async action(
     taskId: string, orderId: string, action: string,
     body: { reason?: string; handedOverTo?: string; shippedAt?: string; carrier?: string; trackingNumber?: string; expectedDeliveryAt?: string } = {},
+    actorId?: string,
   ) {
     const transitions: Record<string, [string, string]> = {
       'send-to-payment': ['ORDERED', 'WAITING_PAYMENT'],
@@ -571,7 +572,28 @@ export class MultiOrdersService {
         }
         data.status = next as 'ORDERED' | 'WAITING_PAYMENT' | 'WAITING_SHIPMENT' | 'IN_TRANSIT' | 'READY_FOR_PICKUP' | 'RECEIVED' | 'HANDED_OVER';
       }
-      const updated = await tx.purchaseOrder.update({ where: { id: orderId }, data, include: { supplier: true, items: true } });
+      const before = orderSnapshot(order);
+      const revisionCount = await tx.purchaseOrderRevision.count({ where: { purchaseOrderId: orderId } });
+      if (!revisionCount) {
+        await tx.purchaseOrderRevision.create({
+          data: {
+            purchaseOrderId: orderId, action: 'BASELINE', version: order.version,
+            actorId: actorId ?? null, after: before,
+          },
+        });
+      }
+      data.version = { increment: 1 };
+      const updated = await tx.purchaseOrder.update({
+        where: { id: orderId }, data, include: { supplier: true, items: true },
+      });
+      await tx.purchaseOrderRevision.create({
+        data: {
+          purchaseOrderId: orderId,
+          action: action === 'cancel' ? 'CANCELLED' : action.toUpperCase().replaceAll('-', '_'),
+          version: updated.version, actorId: actorId ?? null,
+          before, after: orderSnapshot(updated),
+        },
+      });
       if (action === 'cancel') {
         const other = await tx.purchaseOrder.count({ where: { taskId, supplierOfferId: order.supplierOfferId, cancelledAt: null } });
         if (!other) await tx.supplierOffer.update({ where: { id: order.supplierOfferId }, data: { status: 'OFFER_RECEIVED' } });
