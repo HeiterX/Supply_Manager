@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { apiFetch, API_BASE_URL } from '../../../lib/api-client';
 
 export type Supplier = {
@@ -19,7 +19,7 @@ export type TaskItem = {
   requiredAt?: string | null;
   sourceRequestItemId?: string | null;
   originalSnapshot?: unknown;
-  progress?: { required: number; offered: number; ordered: number; received: number; handedOver: number };
+  progress?: { required: number; offered: number; ordered: number; reserved?: number; cancelled?: number; available?: number; received: number; handedOver: number };
   createdAt: string; updatedAt: string;
 };
 export type SupplierOfferItem = {
@@ -54,6 +54,8 @@ export type PurchaseOrder = {
   readyForPickupAt: string | null; receivedAt: string | null;
   handedOverAt: string | null; handedOverTo: string | null;
   cancelledAt: string | null; cancelReason: string | null;
+  version?: number;
+  revisions?: Array<{ id: string; action: string; version: number; actorId: string | null; before: unknown; after: unknown; createdAt: string }>;
   createdAt: string; updatedAt: string; supplier: Supplier;
   supplierOffer: SupplierOffer; items: PurchaseOrderItem[];
 };
@@ -129,6 +131,8 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
   const [offerNotes, setOfferNotes] = useState('');
   const [draft, setDraft] = useState<Record<string, Draft>>({});
   const [orderOffer, setOrderOffer] = useState<SupplierOffer | null>(null);
+  const [editingOrder, setEditingOrder] = useState<PurchaseOrder | null>(null);
+  const orderRequestKey = useRef<string | null>(null);
   const [orderDraft, setOrderDraft] = useState<Record<string, OrderDraft>>({});
   const [invoice, setInvoice] = useState('');
   const [invoiceDate, setInvoiceDate] = useState(localDate());
@@ -238,15 +242,42 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
     })));
     setOfferOpen(true);
   }
+  function remainingForOrder(taskItemId: string) {
+    const currently = editingOrder?.items
+      .filter(line => line.taskItemId === taskItemId)
+      .reduce((sum, line) => sum + milli(line.quantity), 0) ?? 0;
+    return available(taskItemId) + currently / 1000;
+  }
   function openOrder(offer: SupplierOffer) {
+    setEditingOrder(null);
+    orderRequestKey.current = crypto.randomUUID();
     setLocalError(''); setOrderOffer(offer); setInvoice(''); setInvoiceDate(localDate()); setOrderNotes('');
     setOrderDraft(Object.fromEntries(offer.items.map(i => {
       const amount = Math.min(Number(i.quantity), available(i.taskItemId));
       return [i.id, { selected: amount > 0, quantity: amount > 0 ? String(amount) : '0' }];
     })));
   }
+  function openEditOrder(order: PurchaseOrder) {
+    const offer = task.supplierOffers.find(entry => entry.id === order.supplierOfferId);
+    if (!offer) { setLocalError('Исходное КП не найдено. Редактирование невозможно.'); return; }
+    if (!order.items.length || !['ORDERED', 'WAITING_PAYMENT'].includes(order.status)) return;
+    setLocalError('');
+    setEditingOrder(order); setOrderOffer(offer); orderRequestKey.current = null;
+    setInvoice(order.invoiceNumber ?? '');
+    const invoiceDateValue = order.invoiceDate ? new Date(order.invoiceDate) : new Date();
+    setInvoiceDate(new Date(invoiceDateValue.getTime() - invoiceDateValue.getTimezoneOffset() * 60000).toISOString().slice(0, 16));
+    setOrderNotes(order.notes ?? '');
+    const previous = new Map(order.items.map(line => [line.supplierOfferItemId, line]));
+    setOrderDraft(Object.fromEntries(offer.items.map(line => {
+      const existing = previous.get(line.id);
+      return [line.id, { selected: Boolean(existing), quantity: existing ? String(existing.quantity) : '0' }];
+    })));
+  }
   function updateDraft(id: string, patch: Partial<Draft>) { setDraft(prev => ({ ...prev, [id]: { ...prev[id], ...patch } })); }
-  function updateOrderDraft(id: string, patch: Partial<OrderDraft>) { setOrderDraft(prev => ({ ...prev, [id]: { ...prev[id], ...patch } })); }
+  function updateOrderDraft(id: string, patch: Partial<OrderDraft>) {
+    if (!editingOrder) orderRequestKey.current = crypto.randomUUID();
+    setOrderDraft(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }));
+  }
 
   async function saveOffer(event: FormEvent) {
     event.preventDefault(); setLocalError('');
