@@ -10,6 +10,8 @@ import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto.js';
 import { CreateSupplierOfferDto } from './dto/create-supplier-offer.dto.js';
 import { SuppliersService } from './suppliers.service.js';
 import { offerSnapshot, quotePrice } from './quote-utils.js';
+import { orderCreateFingerprint, orderSnapshot } from './order-utils.js';
+import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto.js';
 
 const milli = (value: number) => Math.round(value * 1000);
 const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
@@ -196,7 +198,7 @@ export class MultiOrdersService {
     }, { timeout: 15000 });
   }
 
-  async createOrder(taskId: string, offerId: string, dto: CreatePurchaseOrderDto) {
+  async createOrder(taskId: string, offerId: string, dto: CreatePurchaseOrderDto, actorId?: string) {
     const requestedItems = dto.items;
     if (!requestedItems?.length) {
       throw new BadRequestException('Выберите хотя бы одну позицию для заказа');
@@ -207,8 +209,35 @@ export class MultiOrdersService {
     if (new Set(requestedItems.map(item => item.supplierOfferItemId)).size !== requestedItems.length) {
       throw new BadRequestException('Позиции заказа не должны повторяться');
     }
+    const fingerprint = dto.idempotencyKey ? orderCreateFingerprint(offerId, dto) : null;
+    const assertReplay = (order: { requestFingerprint: string | null }) => {
+      if (order.requestFingerprint !== fingerprint) {
+        throw new ConflictException('Ключ повтора уже применён для другого состава заказа');
+      }
+    };
+    if (dto.idempotencyKey) {
+      const earlier = await this.prisma.purchaseOrder.findFirst({
+        where: { taskId, idempotencyKey: dto.idempotencyKey },
+        include: { items: true, supplier: true },
+      });
+      if (earlier) {
+        assertReplay(earlier);
+        return earlier;
+      }
+    }
     return this.prisma.$transaction(async tx => {
       await this.lockTask(tx, taskId);
+      if (dto.idempotencyKey) {
+        // Второй concurrent request ждёт блокировки закупки и видит первый заказ.
+        const earlier = await tx.purchaseOrder.findFirst({
+          where: { taskId, idempotencyKey: dto.idempotencyKey },
+          include: { items: true, supplier: true },
+        });
+        if (earlier) {
+          assertReplay(earlier);
+          return earlier;
+        }
+      }
       const offer = await tx.supplierOffer.findFirst({
         where: { id: offerId, taskId },
         include: { supplier: true, items: { include: { taskItem: true } } },
@@ -268,6 +297,8 @@ export class MultiOrdersService {
       const order = await tx.purchaseOrder.create({
         data: {
           taskId, supplierId: offer.supplierId, supplierOfferId: offer.id,
+          idempotencyKey: dto.idempotencyKey ?? null,
+          requestFingerprint: fingerprint,
           status: 'ORDERED', invoiceNumber: dto.invoiceNumber.trim(), invoiceDate: new Date(dto.invoiceDate),
           notes: dto.notes?.trim() || null, price, deliveryPrice, totalPrice, deliveryDays: offer.deliveryDays,
           items: { create: lines.map(({ offerItem, quantity }) => ({
@@ -284,6 +315,10 @@ export class MultiOrdersService {
         selectedOfferId: offer.id, currentPurchaseOrderId: order.id,
       } });
       await this.refreshTask(tx, taskId);
+      await tx.purchaseOrderRevision.create({ data: {
+        purchaseOrderId: order.id, action: 'CREATED', version: order.version,
+        actorId: actorId ?? null, after: orderSnapshot(order),
+      } });
       await tx.taskActivity.create({ data: { taskId, text: `Оформлен заказ у «${offer.supplier.name}», счёт № ${order.invoiceNumber}, ${lines.length} поз.` } });
       return order;
     }, { timeout: 15000 });
