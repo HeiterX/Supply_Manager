@@ -201,6 +201,11 @@ export class TasksController {
     return this.multiOrders.createOrder(taskId, offerId, dto, user.id);
   }
 
+  @Patch(':taskId/orders/close')
+  closeMultiSupplierTask(@Param('taskId') taskId: string) {
+    return this.multiOrders.closeTask(taskId);
+  }
+
   @Patch(':taskId/orders/:orderId')
   updateMultiSupplierOrder(
     @CurrentUser() user: AuthUser,
@@ -209,11 +214,6 @@ export class TasksController {
     @Body() dto: UpdatePurchaseOrderDto,
   ) {
     return this.multiOrders.updateOrder(taskId, orderId, dto, user.id);
-  }
-
-  @Patch(':taskId/orders/close')
-  closeMultiSupplierTask(@Param('taskId') taskId: string) {
-    return this.multiOrders.closeTask(taskId);
   }
 
   @Patch(':taskId/orders/:orderId/:action')
