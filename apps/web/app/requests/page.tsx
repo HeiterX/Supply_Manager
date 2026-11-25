@@ -40,5 +40,5 @@ function RequestsContent() {
 }
 
 export default function RequestsPage() {
-  return <AuthGate allowEmployees><Suspense><RequestsContent /></Suspense></AuthGate>;
+  return <AuthGate allowEmployee><Suspense><RequestsContent /></Suspense></AuthGate>;
 }

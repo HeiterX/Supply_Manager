@@ -8,14 +8,17 @@ import { PurchaseRequestsService } from './purchase-requests.service.js';
 import { PublicRequestRateLimitGuard } from './public-request-rate-limit.guard.js';
 import { PublicUploadTokenGuard } from './public-upload-token.guard.js';
 import { TelegramUpdatesService } from './telegram-updates.service.js';
+import { TelegramWebhookController } from './telegram-webhook.controller.js';
+import { TasksModule } from '../tasks/tasks.module.js';
 
 @Module({
   imports: [
     PrismaModule,
     AuthModule,
     TelegramModule,
+    TasksModule,
   ],
-  controllers: [PurchaseRequestsController],
+  controllers: [PurchaseRequestsController, TelegramWebhookController],
   providers: [
     PurchaseRequestsService,
     PublicRequestRateLimitGuard,

@@ -77,6 +77,36 @@ export type PurchaseOrder = Prisma.PurchaseOrderModel
  */
 export type User = Prisma.UserModel
 /**
+ * Model TelegramLink
+ *
+ */
+export type TelegramLink = Prisma.TelegramLinkModel
+/**
+ * Model TelegramSubscription
+ *
+ */
+export type TelegramSubscription = Prisma.TelegramSubscriptionModel
+/**
+ * Model TelegramUpdateReceipt
+ *
+ */
+export type TelegramUpdateReceipt = Prisma.TelegramUpdateReceiptModel
+/**
+ * Model TelegramRate
+ *
+ */
+export type TelegramRate = Prisma.TelegramRateModel
+/**
+ * Model TelegramButton
+ *
+ */
+export type TelegramButton = Prisma.TelegramButtonModel
+/**
+ * Model TelegramDelivery
+ *
+ */
+export type TelegramDelivery = Prisma.TelegramDeliveryModel
+/**
  * Model PurchaseRequest
  * 
  */
@@ -96,3 +126,8 @@ export type SupplierOfferItem = Prisma.SupplierOfferItemModel
  * 
  */
 export type PurchaseOrderItem = Prisma.PurchaseOrderItemModel
+/**
+ * Model SecurityAuditEvent
+ * 
+ */
+export type SecurityAuditEvent = Prisma.SecurityAuditEventModel

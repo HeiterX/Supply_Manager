@@ -21,5 +21,5 @@ function RequestContent({ id }: { id: string }) {
 
 export default function RequestPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  return <AuthGate allowEmployees><RequestContent id={id} /></AuthGate>;
+  return <AuthGate allowEmployee><RequestContent id={id} /></AuthGate>;
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import { AUTH_EVENTS } from '../../lib/api-client';
+import Link from 'next/link';
 import {
   createContext,
   useContext,
@@ -26,7 +27,7 @@ type AuthStatus =
 
 type AuthGateProps = {
   children: ReactNode;
-  allowEmployees?: boolean;
+  allowEmployee?: boolean;
 };
 
 const CurrentUserContext = createContext<AuthUser | null>(null);
@@ -39,7 +40,7 @@ function hasProcurementAccess(user: AuthUser): boolean {
   return user.role === 'PROCUREMENT' || user.role === 'ADMIN';
 }
 
-export default function AuthGate({ children, allowEmployees = false }: AuthGateProps) {
+export default function AuthGate({ children, allowEmployee = false }: AuthGateProps) {
   const [status, setStatus] = useState<AuthStatus>('checking');
   const [user, setUser] = useState<AuthUser | null>(null);
 
@@ -60,7 +61,7 @@ export default function AuthGate({ children, allowEmployees = false }: AuthGateP
 
         if (!currentUser) {
           setStatus('guest');
-        } else if (allowEmployees || hasProcurementAccess(currentUser)) {
+        } else if (allowEmployee || hasProcurementAccess(currentUser)) {
           setStatus('authorized');
         } else {
           setStatus('forbidden');
@@ -81,7 +82,7 @@ export default function AuthGate({ children, allowEmployees = false }: AuthGateP
     return () => {
       active = false;
     };
-  }, [allowEmployees]);
+  }, [allowEmployee]);
 
   
   useEffect(() => {
@@ -134,7 +135,7 @@ export default function AuthGate({ children, allowEmployees = false }: AuthGateP
       setPassword('');
 
       setStatus(
-        allowEmployees || hasProcurementAccess(currentUser)
+        (allowEmployee || hasProcurementAccess(currentUser))
           ? 'authorized'
           : 'forbidden',
       );
@@ -203,7 +204,7 @@ export default function AuthGate({ children, allowEmployees = false }: AuthGateP
         </h1>
 
         <p className="mt-2 text-sm text-slate-500">
-          Войдите в свою учётную запись Supply Manager.
+          {allowEmployee ? 'Войдите в свою учётную запись Supply Manager.' : 'Войдите под учётной записью сотрудника снабжения.'}
         </p>
 
         <form onSubmit={handleLogin} className="mt-6 space-y-4">
@@ -257,6 +258,7 @@ export default function AuthGate({ children, allowEmployees = false }: AuthGateP
           Ваша роль: {user?.role}.
           Доступ к закупкам разрешён только PROCUREMENT и ADMIN.
         </p>
+        <Link href="/settings/telegram" className="mt-4 block text-blue-700 underline">Настройки Telegram</Link>
 
         {error && (
           <p className="mt-3 text-sm text-red-600">{error}</p>
@@ -277,6 +279,7 @@ export default function AuthGate({ children, allowEmployees = false }: AuthGateP
     <>
       <div className="flex items-center justify-end gap-4 px-6 py-3 text-sm">
         <span>{user?.fullName}</span>
+        <Link href="/settings/telegram" className="rounded-lg border px-3 py-2">Telegram</Link>
 
         <button
           onClick={handleLogout}

@@ -339,7 +339,12 @@ model User {
   status UserStatus @default(PENDING)
 
   // Для будущих персональных уведомлений через Telegram
-  telegramChatId String? @unique
+  telegramChatId        String?                @unique
+  telegramUsername      String?
+  telegramMuted         Boolean                @default(false)
+  telegramLinks         TelegramLink[]
+  telegramSubscriptions TelegramSubscription[]
+  telegramDeliveries    TelegramDelivery[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -354,6 +359,72 @@ model User {
   @@index([department])
   @@index([role])
   @@index([status])
+}
+
+model TelegramLink {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  claimedAt DateTime?
+  chatId    String?
+  username  String?
+
+  @@index([userId])
+}
+
+model TelegramSubscription {
+  userId   String
+  user     User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category String
+  enabled  Boolean @default(true)
+
+  @@id([userId, category])
+}
+
+model TelegramUpdateReceipt {
+  updateId   BigInt   @id
+  callbackId String?  @unique
+  createdAt  DateTime @default(now())
+}
+
+model TelegramRate {
+  chatId String   @id
+  window DateTime
+  count  Int      @default(0)
+}
+
+model TelegramButton {
+  id        String    @id
+  userId    String
+  command   String
+  expiresAt DateTime
+  usedAt    DateTime?
+}
+
+model TelegramDelivery {
+  id              String    @id @default(uuid())
+  eventKey        String
+  recipientKey    String
+  userId          String?
+  user            User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chatId          String
+  category        String?
+  procurementOnly Boolean   @default(false)
+  // Only minimal message data. Never tokens, passwords or documents.
+  text            String
+  keyboard        Json?
+  status          String    @default("PENDING")
+  attempts        Int       @default(0)
+  availableAt     DateTime  @default(now())
+  leaseUntil      DateTime?
+  messageId       Int?
+  errorCode       String?
+  createdAt       DateTime  @default(now())
+
+  @@unique([eventKey, recipientKey])
+  @@index([status, availableAt])
 }
 
 model PurchaseRequest {
@@ -492,4 +563,17 @@ model PurchaseOrderItem {
   @@index([purchaseOrderId])
   @@index([taskItemId])
   @@index([supplierOfferItemId])
+}
+
+model SecurityAuditEvent {
+  id           String   @id @default(uuid())
+
+  actorId      String
+  targetUserId String
+  action       String
+
+  createdAt    DateTime @default(now())
+
+  @@index([actorId, createdAt])
+  @@index([targetUserId, createdAt])
 }
