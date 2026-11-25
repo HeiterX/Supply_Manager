@@ -40,5 +40,57 @@ export async function createAuthenticatedAgent(
     .send({ username, password })
     .expect(200);
 
-  return { client, userId };
+  const csrfResponse = await client
+    .get('/api/v1/auth/csrf')
+    .expect(200);
+
+  const token: unknown = csrfResponse.body.csrfToken;
+
+  if (
+    typeof token !== 'string' ||
+    !/^[a-f0-9]{64}$/.test(token)
+  ) {
+    throw new Error('Некорректный тестовый CSRF-токен');
+  }
+
+  const protectedMethods = new Set([
+    'post',
+    'put',
+    'patch',
+    'delete',
+  ]);
+
+  const protectedClient = new Proxy(client, {
+    get(target, property, receiver) {
+      const original: unknown = Reflect.get(
+        target,
+        property,
+        receiver,
+      );
+
+      if (typeof original !== 'function') {
+        return original;
+      }
+
+      if (protectedMethods.has(String(property))) {
+        return (url: string) => {
+          const method = original as (
+            path: string,
+          ) => ReturnType<typeof client.post>;
+
+          return method
+            .call(target, url)
+            .set('X-CSRF-Token', token);
+        };
+      }
+
+      return original.bind(target);
+    },
+  });
+
+  return {
+    client: protectedClient,
+    userId,
+    csrfToken: token,
+  };
 }

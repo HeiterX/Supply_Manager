@@ -19,6 +19,7 @@ describe('Purchase requests (e2e)', () => {
   let userId = '';
   let purchaseRequestId = '';
   let authCookie = '';
+  let csrfToken = '';
   let publicRequestId = '';
   let publicItemIds: string[] = [];
   let publicUploadToken = '';
@@ -88,6 +89,13 @@ describe('Purchase requests (e2e)', () => {
     }
 
     authCookie = cookie;
+
+    const csrfResponse = await request(app.getHttpServer())
+      .get('/api/v1/auth/csrf')
+      .set('Cookie', authCookie)
+      .expect(200);
+
+    csrfToken = csrfResponse.body.csrfToken as string;
   });
 
   afterAll(async () => {
@@ -127,6 +135,7 @@ describe('Purchase requests (e2e)', () => {
     const createResponse = await request(app.getHttpServer())
       .post('/api/v1/purchase-requests')
       .set('Cookie', authCookie)
+      .set('X-CSRF-Token', csrfToken)
       .send({
         title: 'Комплектующие для ремонта насоса',
         description: 'Необходимо для планового ремонта',
