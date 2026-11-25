@@ -27,6 +27,13 @@ const rules = [
       !path.endsWith('/.gitkeep'),
   },
   {
+    name: 'private business files, backups and key material',
+    match: (path) =>
+      /(^|\/)(?:backups|private-documents|commercial-documents|attachments|mailbox)\//i.test(path) ||
+      /\.(?:eml|msg|pem|key|p12|pfx|backup|sql\.gz|zip|7z|rar|tgz|tar(?:\.gz)?)$/i.test(path) ||
+      /(?:\.backup-|\.bak$|:Zone\.Identifier$)/i.test(path),
+  },
+  {
     name: 'local model weights',
     match: (path) => /\.(?:gguf|safetensors|pt|pth)$/i.test(path),
   },
