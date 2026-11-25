@@ -36,6 +36,8 @@ export type UserMinAggregateOutputType = {
   role: $Enums.UserRole | null
   status: $Enums.UserStatus | null
   telegramChatId: string | null
+  telegramUsername: string | null
+  telegramMuted: boolean | null
   createdAt: Date | null
   updatedAt: Date | null
 }
@@ -52,6 +54,8 @@ export type UserMaxAggregateOutputType = {
   role: $Enums.UserRole | null
   status: $Enums.UserStatus | null
   telegramChatId: string | null
+  telegramUsername: string | null
+  telegramMuted: boolean | null
   createdAt: Date | null
   updatedAt: Date | null
 }
@@ -68,6 +72,8 @@ export type UserCountAggregateOutputType = {
   role: number
   status: number
   telegramChatId: number
+  telegramUsername: number
+  telegramMuted: number
   createdAt: number
   updatedAt: number
   _all: number
@@ -86,6 +92,8 @@ export type UserMinAggregateInputType = {
   role?: true
   status?: true
   telegramChatId?: true
+  telegramUsername?: true
+  telegramMuted?: true
   createdAt?: true
   updatedAt?: true
 }
@@ -102,6 +110,8 @@ export type UserMaxAggregateInputType = {
   role?: true
   status?: true
   telegramChatId?: true
+  telegramUsername?: true
+  telegramMuted?: true
   createdAt?: true
   updatedAt?: true
 }
@@ -118,6 +128,8 @@ export type UserCountAggregateInputType = {
   role?: true
   status?: true
   telegramChatId?: true
+  telegramUsername?: true
+  telegramMuted?: true
   createdAt?: true
   updatedAt?: true
   _all?: true
@@ -207,6 +219,8 @@ export type UserGroupByOutputType = {
   role: $Enums.UserRole
   status: $Enums.UserStatus
   telegramChatId: string | null
+  telegramUsername: string | null
+  telegramMuted: boolean
   createdAt: Date
   updatedAt: Date
   _count: UserCountAggregateOutputType | null
@@ -244,8 +258,13 @@ export type UserWhereInput = {
   role?: Prisma.EnumUserRoleFilter<"User"> | $Enums.UserRole
   status?: Prisma.EnumUserStatusFilter<"User"> | $Enums.UserStatus
   telegramChatId?: Prisma.StringNullableFilter<"User"> | string | null
+  telegramUsername?: Prisma.StringNullableFilter<"User"> | string | null
+  telegramMuted?: Prisma.BoolFilter<"User"> | boolean
   createdAt?: Prisma.DateTimeFilter<"User"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"User"> | Date | string
+  telegramLinks?: Prisma.TelegramLinkListRelationFilter
+  telegramSubscriptions?: Prisma.TelegramSubscriptionListRelationFilter
+  telegramDeliveries?: Prisma.TelegramDeliveryListRelationFilter
   purchaseRequests?: Prisma.PurchaseRequestListRelationFilter
   processedPurchaseRequests?: Prisma.PurchaseRequestListRelationFilter
 }
@@ -262,8 +281,13 @@ export type UserOrderByWithRelationInput = {
   role?: Prisma.SortOrder
   status?: Prisma.SortOrder
   telegramChatId?: Prisma.SortOrderInput | Prisma.SortOrder
+  telegramUsername?: Prisma.SortOrderInput | Prisma.SortOrder
+  telegramMuted?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
+  telegramLinks?: Prisma.TelegramLinkOrderByRelationAggregateInput
+  telegramSubscriptions?: Prisma.TelegramSubscriptionOrderByRelationAggregateInput
+  telegramDeliveries?: Prisma.TelegramDeliveryOrderByRelationAggregateInput
   purchaseRequests?: Prisma.PurchaseRequestOrderByRelationAggregateInput
   processedPurchaseRequests?: Prisma.PurchaseRequestOrderByRelationAggregateInput
 }
@@ -283,8 +307,13 @@ export type UserWhereUniqueInput = Prisma.AtLeast<{
   passwordHash?: Prisma.StringFilter<"User"> | string
   role?: Prisma.EnumUserRoleFilter<"User"> | $Enums.UserRole
   status?: Prisma.EnumUserStatusFilter<"User"> | $Enums.UserStatus
+  telegramUsername?: Prisma.StringNullableFilter<"User"> | string | null
+  telegramMuted?: Prisma.BoolFilter<"User"> | boolean
   createdAt?: Prisma.DateTimeFilter<"User"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"User"> | Date | string
+  telegramLinks?: Prisma.TelegramLinkListRelationFilter
+  telegramSubscriptions?: Prisma.TelegramSubscriptionListRelationFilter
+  telegramDeliveries?: Prisma.TelegramDeliveryListRelationFilter
   purchaseRequests?: Prisma.PurchaseRequestListRelationFilter
   processedPurchaseRequests?: Prisma.PurchaseRequestListRelationFilter
 }, "id" | "username" | "email" | "telegramChatId">
@@ -301,6 +330,8 @@ export type UserOrderByWithAggregationInput = {
   role?: Prisma.SortOrder
   status?: Prisma.SortOrder
   telegramChatId?: Prisma.SortOrderInput | Prisma.SortOrder
+  telegramUsername?: Prisma.SortOrderInput | Prisma.SortOrder
+  telegramMuted?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   _count?: Prisma.UserCountOrderByAggregateInput
@@ -323,6 +354,8 @@ export type UserScalarWhereWithAggregatesInput = {
   role?: Prisma.EnumUserRoleWithAggregatesFilter<"User"> | $Enums.UserRole
   status?: Prisma.EnumUserStatusWithAggregatesFilter<"User"> | $Enums.UserStatus
   telegramChatId?: Prisma.StringNullableWithAggregatesFilter<"User"> | string | null
+  telegramUsername?: Prisma.StringNullableWithAggregatesFilter<"User"> | string | null
+  telegramMuted?: Prisma.BoolWithAggregatesFilter<"User"> | boolean
   createdAt?: Prisma.DateTimeWithAggregatesFilter<"User"> | Date | string
   updatedAt?: Prisma.DateTimeWithAggregatesFilter<"User"> | Date | string
 }
@@ -339,8 +372,13 @@ export type UserCreateInput = {
   role?: $Enums.UserRole
   status?: $Enums.UserStatus
   telegramChatId?: string | null
+  telegramUsername?: string | null
+  telegramMuted?: boolean
   createdAt?: Date | string
   updatedAt?: Date | string
+  telegramLinks?: Prisma.TelegramLinkCreateNestedManyWithoutUserInput
+  telegramSubscriptions?: Prisma.TelegramSubscriptionCreateNestedManyWithoutUserInput
+  telegramDeliveries?: Prisma.TelegramDeliveryCreateNestedManyWithoutUserInput
   purchaseRequests?: Prisma.PurchaseRequestCreateNestedManyWithoutRequesterInput
   processedPurchaseRequests?: Prisma.PurchaseRequestCreateNestedManyWithoutProcessedByInput
 }
@@ -357,8 +395,13 @@ export type UserUncheckedCreateInput = {
   role?: $Enums.UserRole
   status?: $Enums.UserStatus
   telegramChatId?: string | null
+  telegramUsername?: string | null
+  telegramMuted?: boolean
   createdAt?: Date | string
   updatedAt?: Date | string
+  telegramLinks?: Prisma.TelegramLinkUncheckedCreateNestedManyWithoutUserInput
+  telegramSubscriptions?: Prisma.TelegramSubscriptionUncheckedCreateNestedManyWithoutUserInput
+  telegramDeliveries?: Prisma.TelegramDeliveryUncheckedCreateNestedManyWithoutUserInput
   purchaseRequests?: Prisma.PurchaseRequestUncheckedCreateNestedManyWithoutRequesterInput
   processedPurchaseRequests?: Prisma.PurchaseRequestUncheckedCreateNestedManyWithoutProcessedByInput
 }
@@ -375,8 +418,13 @@ export type UserUpdateInput = {
   role?: Prisma.EnumUserRoleFieldUpdateOperationsInput | $Enums.UserRole
   status?: Prisma.EnumUserStatusFieldUpdateOperationsInput | $Enums.UserStatus
   telegramChatId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  telegramUsername?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  telegramMuted?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  telegramLinks?: Prisma.TelegramLinkUpdateManyWithoutUserNestedInput
+  telegramSubscriptions?: Prisma.TelegramSubscriptionUpdateManyWithoutUserNestedInput
+  telegramDeliveries?: Prisma.TelegramDeliveryUpdateManyWithoutUserNestedInput
   purchaseRequests?: Prisma.PurchaseRequestUpdateManyWithoutRequesterNestedInput
   processedPurchaseRequests?: Prisma.PurchaseRequestUpdateManyWithoutProcessedByNestedInput
 }
@@ -393,8 +441,13 @@ export type UserUncheckedUpdateInput = {
   role?: Prisma.EnumUserRoleFieldUpdateOperationsInput | $Enums.UserRole
   status?: Prisma.EnumUserStatusFieldUpdateOperationsInput | $Enums.UserStatus
   telegramChatId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  telegramUsername?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  telegramMuted?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  telegramLinks?: Prisma.TelegramLinkUncheckedUpdateManyWithoutUserNestedInput
+  telegramSubscriptions?: Prisma.TelegramSubscriptionUncheckedUpdateManyWithoutUserNestedInput
+  telegramDeliveries?: Prisma.TelegramDeliveryUncheckedUpdateManyWithoutUserNestedInput
   purchaseRequests?: Prisma.PurchaseRequestUncheckedUpdateManyWithoutRequesterNestedInput
   processedPurchaseRequests?: Prisma.PurchaseRequestUncheckedUpdateManyWithoutProcessedByNestedInput
 }
@@ -411,6 +464,8 @@ export type UserCreateManyInput = {
   role?: $Enums.UserRole
   status?: $Enums.UserStatus
   telegramChatId?: string | null
+  telegramUsername?: string | null
+  telegramMuted?: boolean
   createdAt?: Date | string
   updatedAt?: Date | string
 }
@@ -427,6 +482,8 @@ export type UserUpdateManyMutationInput = {
   role?: Prisma.EnumUserRoleFieldUpdateOperationsInput | $Enums.UserRole
   status?: Prisma.EnumUserStatusFieldUpdateOperationsInput | $Enums.UserStatus
   telegramChatId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  telegramUsername?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  telegramMuted?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -443,6 +500,8 @@ export type UserUncheckedUpdateManyInput = {
   role?: Prisma.EnumUserRoleFieldUpdateOperationsInput | $Enums.UserRole
   status?: Prisma.EnumUserStatusFieldUpdateOperationsInput | $Enums.UserStatus
   telegramChatId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  telegramUsername?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  telegramMuted?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -459,6 +518,8 @@ export type UserCountOrderByAggregateInput = {
   role?: Prisma.SortOrder
   status?: Prisma.SortOrder
   telegramChatId?: Prisma.SortOrder
+  telegramUsername?: Prisma.SortOrder
+  telegramMuted?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
 }
@@ -475,6 +536,8 @@ export type UserMaxOrderByAggregateInput = {
   role?: Prisma.SortOrder
   status?: Prisma.SortOrder
   telegramChatId?: Prisma.SortOrder
+  telegramUsername?: Prisma.SortOrder
+  telegramMuted?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
 }
@@ -491,8 +554,15 @@ export type UserMinOrderByAggregateInput = {
   role?: Prisma.SortOrder
   status?: Prisma.SortOrder
   telegramChatId?: Prisma.SortOrder
+  telegramUsername?: Prisma.SortOrder
+  telegramMuted?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
+}
+
+export type UserScalarRelationFilter = {
+  is?: Prisma.UserWhereInput
+  isNot?: Prisma.UserWhereInput
 }
 
 export type UserNullableScalarRelationFilter = {
@@ -506,6 +576,54 @@ export type EnumUserRoleFieldUpdateOperationsInput = {
 
 export type EnumUserStatusFieldUpdateOperationsInput = {
   set?: $Enums.UserStatus
+}
+
+export type BoolFieldUpdateOperationsInput = {
+  set?: boolean
+}
+
+export type UserCreateNestedOneWithoutTelegramLinksInput = {
+  create?: Prisma.XOR<Prisma.UserCreateWithoutTelegramLinksInput, Prisma.UserUncheckedCreateWithoutTelegramLinksInput>
+  connectOrCreate?: Prisma.UserCreateOrConnectWithoutTelegramLinksInput
+  connect?: Prisma.UserWhereUniqueInput
+}
+
+export type UserUpdateOneRequiredWithoutTelegramLinksNestedInput = {
+  create?: Prisma.XOR<Prisma.UserCreateWithoutTelegramLinksInput, Prisma.UserUncheckedCreateWithoutTelegramLinksInput>
+  connectOrCreate?: Prisma.UserCreateOrConnectWithoutTelegramLinksInput
+  upsert?: Prisma.UserUpsertWithoutTelegramLinksInput
+  connect?: Prisma.UserWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.UserUpdateToOneWithWhereWithoutTelegramLinksInput, Prisma.UserUpdateWithoutTelegramLinksInput>, Prisma.UserUncheckedUpdateWithoutTelegramLinksInput>
+}
+
+export type UserCreateNestedOneWithoutTelegramSubscriptionsInput = {
+  create?: Prisma.XOR<Prisma.UserCreateWithoutTelegramSubscriptionsInput, Prisma.UserUncheckedCreateWithoutTelegramSubscriptionsInput>
+  connectOrCreate?: Prisma.UserCreateOrConnectWithoutTelegramSubscriptionsInput
+  connect?: Prisma.UserWhereUniqueInput
+}
+
+export type UserUpdateOneRequiredWithoutTelegramSubscriptionsNestedInput = {
+  create?: Prisma.XOR<Prisma.UserCreateWithoutTelegramSubscriptionsInput, Prisma.UserUncheckedCreateWithoutTelegramSubscriptionsInput>
+  connectOrCreate?: Prisma.UserCreateOrConnectWithoutTelegramSubscriptionsInput
+  upsert?: Prisma.UserUpsertWithoutTelegramSubscriptionsInput
+  connect?: Prisma.UserWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.UserUpdateToOneWithWhereWithoutTelegramSubscriptionsInput, Prisma.UserUpdateWithoutTelegramSubscriptionsInput>, Prisma.UserUncheckedUpdateWithoutTelegramSubscriptionsInput>
+}
+
+export type UserCreateNestedOneWithoutTelegramDeliveriesInput = {
+  create?: Prisma.XOR<Prisma.UserCreateWithoutTelegramDeliveriesInput, Prisma.UserUncheckedCreateWithoutTelegramDeliveriesInput>
+  connectOrCreate?: Prisma.UserCreateOrConnectWithoutTelegramDeliveriesInput
+  connect?: Prisma.UserWhereUniqueInput
+}
+
+export type UserUpdateOneWithoutTelegramDeliveriesNestedInput = {
+  create?: Prisma.XOR<Prisma.UserCreateWithoutTelegramDeliveriesInput, Prisma.UserUncheckedCreateWithoutTelegramDeliveriesInput>
+  connectOrCreate?: Prisma.UserCreateOrConnectWithoutTelegramDeliveriesInput
+  upsert?: Prisma.UserUpsertWithoutTelegramDeliveriesInput
+  disconnect?: Prisma.UserWhereInput | boolean
+  delete?: Prisma.UserWhereInput | boolean
+  connect?: Prisma.UserWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.UserUpdateToOneWithWhereWithoutTelegramDeliveriesInput, Prisma.UserUpdateWithoutTelegramDeliveriesInput>, Prisma.UserUncheckedUpdateWithoutTelegramDeliveriesInput>
 }
 
 export type UserCreateNestedOneWithoutPurchaseRequestsInput = {
@@ -540,6 +658,318 @@ export type UserUpdateOneWithoutProcessedPurchaseRequestsNestedInput = {
   update?: Prisma.XOR<Prisma.XOR<Prisma.UserUpdateToOneWithWhereWithoutProcessedPurchaseRequestsInput, Prisma.UserUpdateWithoutProcessedPurchaseRequestsInput>, Prisma.UserUncheckedUpdateWithoutProcessedPurchaseRequestsInput>
 }
 
+export type UserCreateWithoutTelegramLinksInput = {
+  id?: string
+  fullName: string
+  username: string
+  email?: string | null
+  phone?: string | null
+  department?: string | null
+  position?: string | null
+  passwordHash: string
+  role?: $Enums.UserRole
+  status?: $Enums.UserStatus
+  telegramChatId?: string | null
+  telegramUsername?: string | null
+  telegramMuted?: boolean
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  telegramSubscriptions?: Prisma.TelegramSubscriptionCreateNestedManyWithoutUserInput
+  telegramDeliveries?: Prisma.TelegramDeliveryCreateNestedManyWithoutUserInput
+  purchaseRequests?: Prisma.PurchaseRequestCreateNestedManyWithoutRequesterInput
+  processedPurchaseRequests?: Prisma.PurchaseRequestCreateNestedManyWithoutProcessedByInput
+}
+
+export type UserUncheckedCreateWithoutTelegramLinksInput = {
+  id?: string
+  fullName: string
+  username: string
+  email?: string | null
+  phone?: string | null
+  department?: string | null
+  position?: string | null
+  passwordHash: string
+  role?: $Enums.UserRole
+  status?: $Enums.UserStatus
+  telegramChatId?: string | null
+  telegramUsername?: string | null
+  telegramMuted?: boolean
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  telegramSubscriptions?: Prisma.TelegramSubscriptionUncheckedCreateNestedManyWithoutUserInput
+  telegramDeliveries?: Prisma.TelegramDeliveryUncheckedCreateNestedManyWithoutUserInput
+  purchaseRequests?: Prisma.PurchaseRequestUncheckedCreateNestedManyWithoutRequesterInput
+  processedPurchaseRequests?: Prisma.PurchaseRequestUncheckedCreateNestedManyWithoutProcessedByInput
+}
+
+export type UserCreateOrConnectWithoutTelegramLinksInput = {
+  where: Prisma.UserWhereUniqueInput
+  create: Prisma.XOR<Prisma.UserCreateWithoutTelegramLinksInput, Prisma.UserUncheckedCreateWithoutTelegramLinksInput>
+}
+
+export type UserUpsertWithoutTelegramLinksInput = {
+  update: Prisma.XOR<Prisma.UserUpdateWithoutTelegramLinksInput, Prisma.UserUncheckedUpdateWithoutTelegramLinksInput>
+  create: Prisma.XOR<Prisma.UserCreateWithoutTelegramLinksInput, Prisma.UserUncheckedCreateWithoutTelegramLinksInput>
+  where?: Prisma.UserWhereInput
+}
+
+export type UserUpdateToOneWithWhereWithoutTelegramLinksInput = {
+  where?: Prisma.UserWhereInput
+  data: Prisma.XOR<Prisma.UserUpdateWithoutTelegramLinksInput, Prisma.UserUncheckedUpdateWithoutTelegramLinksInput>
+}
+
+export type UserUpdateWithoutTelegramLinksInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  fullName?: Prisma.StringFieldUpdateOperationsInput | string
+  username?: Prisma.StringFieldUpdateOperationsInput | string
+  email?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  phone?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  department?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  position?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  passwordHash?: Prisma.StringFieldUpdateOperationsInput | string
+  role?: Prisma.EnumUserRoleFieldUpdateOperationsInput | $Enums.UserRole
+  status?: Prisma.EnumUserStatusFieldUpdateOperationsInput | $Enums.UserStatus
+  telegramChatId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  telegramUsername?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  telegramMuted?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  telegramSubscriptions?: Prisma.TelegramSubscriptionUpdateManyWithoutUserNestedInput
+  telegramDeliveries?: Prisma.TelegramDeliveryUpdateManyWithoutUserNestedInput
+  purchaseRequests?: Prisma.PurchaseRequestUpdateManyWithoutRequesterNestedInput
+  processedPurchaseRequests?: Prisma.PurchaseRequestUpdateManyWithoutProcessedByNestedInput
+}
+
+export type UserUncheckedUpdateWithoutTelegramLinksInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  fullName?: Prisma.StringFieldUpdateOperationsInput | string
+  username?: Prisma.StringFieldUpdateOperationsInput | string
+  email?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  phone?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  department?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  position?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  passwordHash?: Prisma.StringFieldUpdateOperationsInput | string
+  role?: Prisma.EnumUserRoleFieldUpdateOperationsInput | $Enums.UserRole
+  status?: Prisma.EnumUserStatusFieldUpdateOperationsInput | $Enums.UserStatus
+  telegramChatId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  telegramUsername?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  telegramMuted?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  telegramSubscriptions?: Prisma.TelegramSubscriptionUncheckedUpdateManyWithoutUserNestedInput
+  telegramDeliveries?: Prisma.TelegramDeliveryUncheckedUpdateManyWithoutUserNestedInput
+  purchaseRequests?: Prisma.PurchaseRequestUncheckedUpdateManyWithoutRequesterNestedInput
+  processedPurchaseRequests?: Prisma.PurchaseRequestUncheckedUpdateManyWithoutProcessedByNestedInput
+}
+
+export type UserCreateWithoutTelegramSubscriptionsInput = {
+  id?: string
+  fullName: string
+  username: string
+  email?: string | null
+  phone?: string | null
+  department?: string | null
+  position?: string | null
+  passwordHash: string
+  role?: $Enums.UserRole
+  status?: $Enums.UserStatus
+  telegramChatId?: string | null
+  telegramUsername?: string | null
+  telegramMuted?: boolean
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  telegramLinks?: Prisma.TelegramLinkCreateNestedManyWithoutUserInput
+  telegramDeliveries?: Prisma.TelegramDeliveryCreateNestedManyWithoutUserInput
+  purchaseRequests?: Prisma.PurchaseRequestCreateNestedManyWithoutRequesterInput
+  processedPurchaseRequests?: Prisma.PurchaseRequestCreateNestedManyWithoutProcessedByInput
+}
+
+export type UserUncheckedCreateWithoutTelegramSubscriptionsInput = {
+  id?: string
+  fullName: string
+  username: string
+  email?: string | null
+  phone?: string | null
+  department?: string | null
+  position?: string | null
+  passwordHash: string
+  role?: $Enums.UserRole
+  status?: $Enums.UserStatus
+  telegramChatId?: string | null
+  telegramUsername?: string | null
+  telegramMuted?: boolean
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  telegramLinks?: Prisma.TelegramLinkUncheckedCreateNestedManyWithoutUserInput
+  telegramDeliveries?: Prisma.TelegramDeliveryUncheckedCreateNestedManyWithoutUserInput
+  purchaseRequests?: Prisma.PurchaseRequestUncheckedCreateNestedManyWithoutRequesterInput
+  processedPurchaseRequests?: Prisma.PurchaseRequestUncheckedCreateNestedManyWithoutProcessedByInput
+}
+
+export type UserCreateOrConnectWithoutTelegramSubscriptionsInput = {
+  where: Prisma.UserWhereUniqueInput
+  create: Prisma.XOR<Prisma.UserCreateWithoutTelegramSubscriptionsInput, Prisma.UserUncheckedCreateWithoutTelegramSubscriptionsInput>
+}
+
+export type UserUpsertWithoutTelegramSubscriptionsInput = {
+  update: Prisma.XOR<Prisma.UserUpdateWithoutTelegramSubscriptionsInput, Prisma.UserUncheckedUpdateWithoutTelegramSubscriptionsInput>
+  create: Prisma.XOR<Prisma.UserCreateWithoutTelegramSubscriptionsInput, Prisma.UserUncheckedCreateWithoutTelegramSubscriptionsInput>
+  where?: Prisma.UserWhereInput
+}
+
+export type UserUpdateToOneWithWhereWithoutTelegramSubscriptionsInput = {
+  where?: Prisma.UserWhereInput
+  data: Prisma.XOR<Prisma.UserUpdateWithoutTelegramSubscriptionsInput, Prisma.UserUncheckedUpdateWithoutTelegramSubscriptionsInput>
+}
+
+export type UserUpdateWithoutTelegramSubscriptionsInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  fullName?: Prisma.StringFieldUpdateOperationsInput | string
+  username?: Prisma.StringFieldUpdateOperationsInput | string
+  email?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  phone?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  department?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  position?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  passwordHash?: Prisma.StringFieldUpdateOperationsInput | string
+  role?: Prisma.EnumUserRoleFieldUpdateOperationsInput | $Enums.UserRole
+  status?: Prisma.EnumUserStatusFieldUpdateOperationsInput | $Enums.UserStatus
+  telegramChatId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  telegramUsername?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  telegramMuted?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  telegramLinks?: Prisma.TelegramLinkUpdateManyWithoutUserNestedInput
+  telegramDeliveries?: Prisma.TelegramDeliveryUpdateManyWithoutUserNestedInput
+  purchaseRequests?: Prisma.PurchaseRequestUpdateManyWithoutRequesterNestedInput
+  processedPurchaseRequests?: Prisma.PurchaseRequestUpdateManyWithoutProcessedByNestedInput
+}
+
+export type UserUncheckedUpdateWithoutTelegramSubscriptionsInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  fullName?: Prisma.StringFieldUpdateOperationsInput | string
+  username?: Prisma.StringFieldUpdateOperationsInput | string
+  email?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  phone?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  department?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  position?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  passwordHash?: Prisma.StringFieldUpdateOperationsInput | string
+  role?: Prisma.EnumUserRoleFieldUpdateOperationsInput | $Enums.UserRole
+  status?: Prisma.EnumUserStatusFieldUpdateOperationsInput | $Enums.UserStatus
+  telegramChatId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  telegramUsername?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  telegramMuted?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  telegramLinks?: Prisma.TelegramLinkUncheckedUpdateManyWithoutUserNestedInput
+  telegramDeliveries?: Prisma.TelegramDeliveryUncheckedUpdateManyWithoutUserNestedInput
+  purchaseRequests?: Prisma.PurchaseRequestUncheckedUpdateManyWithoutRequesterNestedInput
+  processedPurchaseRequests?: Prisma.PurchaseRequestUncheckedUpdateManyWithoutProcessedByNestedInput
+}
+
+export type UserCreateWithoutTelegramDeliveriesInput = {
+  id?: string
+  fullName: string
+  username: string
+  email?: string | null
+  phone?: string | null
+  department?: string | null
+  position?: string | null
+  passwordHash: string
+  role?: $Enums.UserRole
+  status?: $Enums.UserStatus
+  telegramChatId?: string | null
+  telegramUsername?: string | null
+  telegramMuted?: boolean
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  telegramLinks?: Prisma.TelegramLinkCreateNestedManyWithoutUserInput
+  telegramSubscriptions?: Prisma.TelegramSubscriptionCreateNestedManyWithoutUserInput
+  purchaseRequests?: Prisma.PurchaseRequestCreateNestedManyWithoutRequesterInput
+  processedPurchaseRequests?: Prisma.PurchaseRequestCreateNestedManyWithoutProcessedByInput
+}
+
+export type UserUncheckedCreateWithoutTelegramDeliveriesInput = {
+  id?: string
+  fullName: string
+  username: string
+  email?: string | null
+  phone?: string | null
+  department?: string | null
+  position?: string | null
+  passwordHash: string
+  role?: $Enums.UserRole
+  status?: $Enums.UserStatus
+  telegramChatId?: string | null
+  telegramUsername?: string | null
+  telegramMuted?: boolean
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  telegramLinks?: Prisma.TelegramLinkUncheckedCreateNestedManyWithoutUserInput
+  telegramSubscriptions?: Prisma.TelegramSubscriptionUncheckedCreateNestedManyWithoutUserInput
+  purchaseRequests?: Prisma.PurchaseRequestUncheckedCreateNestedManyWithoutRequesterInput
+  processedPurchaseRequests?: Prisma.PurchaseRequestUncheckedCreateNestedManyWithoutProcessedByInput
+}
+
+export type UserCreateOrConnectWithoutTelegramDeliveriesInput = {
+  where: Prisma.UserWhereUniqueInput
+  create: Prisma.XOR<Prisma.UserCreateWithoutTelegramDeliveriesInput, Prisma.UserUncheckedCreateWithoutTelegramDeliveriesInput>
+}
+
+export type UserUpsertWithoutTelegramDeliveriesInput = {
+  update: Prisma.XOR<Prisma.UserUpdateWithoutTelegramDeliveriesInput, Prisma.UserUncheckedUpdateWithoutTelegramDeliveriesInput>
+  create: Prisma.XOR<Prisma.UserCreateWithoutTelegramDeliveriesInput, Prisma.UserUncheckedCreateWithoutTelegramDeliveriesInput>
+  where?: Prisma.UserWhereInput
+}
+
+export type UserUpdateToOneWithWhereWithoutTelegramDeliveriesInput = {
+  where?: Prisma.UserWhereInput
+  data: Prisma.XOR<Prisma.UserUpdateWithoutTelegramDeliveriesInput, Prisma.UserUncheckedUpdateWithoutTelegramDeliveriesInput>
+}
+
+export type UserUpdateWithoutTelegramDeliveriesInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  fullName?: Prisma.StringFieldUpdateOperationsInput | string
+  username?: Prisma.StringFieldUpdateOperationsInput | string
+  email?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  phone?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  department?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  position?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  passwordHash?: Prisma.StringFieldUpdateOperationsInput | string
+  role?: Prisma.EnumUserRoleFieldUpdateOperationsInput | $Enums.UserRole
+  status?: Prisma.EnumUserStatusFieldUpdateOperationsInput | $Enums.UserStatus
+  telegramChatId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  telegramUsername?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  telegramMuted?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  telegramLinks?: Prisma.TelegramLinkUpdateManyWithoutUserNestedInput
+  telegramSubscriptions?: Prisma.TelegramSubscriptionUpdateManyWithoutUserNestedInput
+  purchaseRequests?: Prisma.PurchaseRequestUpdateManyWithoutRequesterNestedInput
+  processedPurchaseRequests?: Prisma.PurchaseRequestUpdateManyWithoutProcessedByNestedInput
+}
+
+export type UserUncheckedUpdateWithoutTelegramDeliveriesInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  fullName?: Prisma.StringFieldUpdateOperationsInput | string
+  username?: Prisma.StringFieldUpdateOperationsInput | string
+  email?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  phone?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  department?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  position?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  passwordHash?: Prisma.StringFieldUpdateOperationsInput | string
+  role?: Prisma.EnumUserRoleFieldUpdateOperationsInput | $Enums.UserRole
+  status?: Prisma.EnumUserStatusFieldUpdateOperationsInput | $Enums.UserStatus
+  telegramChatId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  telegramUsername?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  telegramMuted?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  telegramLinks?: Prisma.TelegramLinkUncheckedUpdateManyWithoutUserNestedInput
+  telegramSubscriptions?: Prisma.TelegramSubscriptionUncheckedUpdateManyWithoutUserNestedInput
+  purchaseRequests?: Prisma.PurchaseRequestUncheckedUpdateManyWithoutRequesterNestedInput
+  processedPurchaseRequests?: Prisma.PurchaseRequestUncheckedUpdateManyWithoutProcessedByNestedInput
+}
+
 export type UserCreateWithoutPurchaseRequestsInput = {
   id?: string
   fullName: string
@@ -552,8 +982,13 @@ export type UserCreateWithoutPurchaseRequestsInput = {
   role?: $Enums.UserRole
   status?: $Enums.UserStatus
   telegramChatId?: string | null
+  telegramUsername?: string | null
+  telegramMuted?: boolean
   createdAt?: Date | string
   updatedAt?: Date | string
+  telegramLinks?: Prisma.TelegramLinkCreateNestedManyWithoutUserInput
+  telegramSubscriptions?: Prisma.TelegramSubscriptionCreateNestedManyWithoutUserInput
+  telegramDeliveries?: Prisma.TelegramDeliveryCreateNestedManyWithoutUserInput
   processedPurchaseRequests?: Prisma.PurchaseRequestCreateNestedManyWithoutProcessedByInput
 }
 
@@ -569,8 +1004,13 @@ export type UserUncheckedCreateWithoutPurchaseRequestsInput = {
   role?: $Enums.UserRole
   status?: $Enums.UserStatus
   telegramChatId?: string | null
+  telegramUsername?: string | null
+  telegramMuted?: boolean
   createdAt?: Date | string
   updatedAt?: Date | string
+  telegramLinks?: Prisma.TelegramLinkUncheckedCreateNestedManyWithoutUserInput
+  telegramSubscriptions?: Prisma.TelegramSubscriptionUncheckedCreateNestedManyWithoutUserInput
+  telegramDeliveries?: Prisma.TelegramDeliveryUncheckedCreateNestedManyWithoutUserInput
   processedPurchaseRequests?: Prisma.PurchaseRequestUncheckedCreateNestedManyWithoutProcessedByInput
 }
 
@@ -591,8 +1031,13 @@ export type UserCreateWithoutProcessedPurchaseRequestsInput = {
   role?: $Enums.UserRole
   status?: $Enums.UserStatus
   telegramChatId?: string | null
+  telegramUsername?: string | null
+  telegramMuted?: boolean
   createdAt?: Date | string
   updatedAt?: Date | string
+  telegramLinks?: Prisma.TelegramLinkCreateNestedManyWithoutUserInput
+  telegramSubscriptions?: Prisma.TelegramSubscriptionCreateNestedManyWithoutUserInput
+  telegramDeliveries?: Prisma.TelegramDeliveryCreateNestedManyWithoutUserInput
   purchaseRequests?: Prisma.PurchaseRequestCreateNestedManyWithoutRequesterInput
 }
 
@@ -608,8 +1053,13 @@ export type UserUncheckedCreateWithoutProcessedPurchaseRequestsInput = {
   role?: $Enums.UserRole
   status?: $Enums.UserStatus
   telegramChatId?: string | null
+  telegramUsername?: string | null
+  telegramMuted?: boolean
   createdAt?: Date | string
   updatedAt?: Date | string
+  telegramLinks?: Prisma.TelegramLinkUncheckedCreateNestedManyWithoutUserInput
+  telegramSubscriptions?: Prisma.TelegramSubscriptionUncheckedCreateNestedManyWithoutUserInput
+  telegramDeliveries?: Prisma.TelegramDeliveryUncheckedCreateNestedManyWithoutUserInput
   purchaseRequests?: Prisma.PurchaseRequestUncheckedCreateNestedManyWithoutRequesterInput
 }
 
@@ -641,8 +1091,13 @@ export type UserUpdateWithoutPurchaseRequestsInput = {
   role?: Prisma.EnumUserRoleFieldUpdateOperationsInput | $Enums.UserRole
   status?: Prisma.EnumUserStatusFieldUpdateOperationsInput | $Enums.UserStatus
   telegramChatId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  telegramUsername?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  telegramMuted?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  telegramLinks?: Prisma.TelegramLinkUpdateManyWithoutUserNestedInput
+  telegramSubscriptions?: Prisma.TelegramSubscriptionUpdateManyWithoutUserNestedInput
+  telegramDeliveries?: Prisma.TelegramDeliveryUpdateManyWithoutUserNestedInput
   processedPurchaseRequests?: Prisma.PurchaseRequestUpdateManyWithoutProcessedByNestedInput
 }
 
@@ -658,8 +1113,13 @@ export type UserUncheckedUpdateWithoutPurchaseRequestsInput = {
   role?: Prisma.EnumUserRoleFieldUpdateOperationsInput | $Enums.UserRole
   status?: Prisma.EnumUserStatusFieldUpdateOperationsInput | $Enums.UserStatus
   telegramChatId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  telegramUsername?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  telegramMuted?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  telegramLinks?: Prisma.TelegramLinkUncheckedUpdateManyWithoutUserNestedInput
+  telegramSubscriptions?: Prisma.TelegramSubscriptionUncheckedUpdateManyWithoutUserNestedInput
+  telegramDeliveries?: Prisma.TelegramDeliveryUncheckedUpdateManyWithoutUserNestedInput
   processedPurchaseRequests?: Prisma.PurchaseRequestUncheckedUpdateManyWithoutProcessedByNestedInput
 }
 
@@ -686,8 +1146,13 @@ export type UserUpdateWithoutProcessedPurchaseRequestsInput = {
   role?: Prisma.EnumUserRoleFieldUpdateOperationsInput | $Enums.UserRole
   status?: Prisma.EnumUserStatusFieldUpdateOperationsInput | $Enums.UserStatus
   telegramChatId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  telegramUsername?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  telegramMuted?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  telegramLinks?: Prisma.TelegramLinkUpdateManyWithoutUserNestedInput
+  telegramSubscriptions?: Prisma.TelegramSubscriptionUpdateManyWithoutUserNestedInput
+  telegramDeliveries?: Prisma.TelegramDeliveryUpdateManyWithoutUserNestedInput
   purchaseRequests?: Prisma.PurchaseRequestUpdateManyWithoutRequesterNestedInput
 }
 
@@ -703,8 +1168,13 @@ export type UserUncheckedUpdateWithoutProcessedPurchaseRequestsInput = {
   role?: Prisma.EnumUserRoleFieldUpdateOperationsInput | $Enums.UserRole
   status?: Prisma.EnumUserStatusFieldUpdateOperationsInput | $Enums.UserStatus
   telegramChatId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  telegramUsername?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  telegramMuted?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  telegramLinks?: Prisma.TelegramLinkUncheckedUpdateManyWithoutUserNestedInput
+  telegramSubscriptions?: Prisma.TelegramSubscriptionUncheckedUpdateManyWithoutUserNestedInput
+  telegramDeliveries?: Prisma.TelegramDeliveryUncheckedUpdateManyWithoutUserNestedInput
   purchaseRequests?: Prisma.PurchaseRequestUncheckedUpdateManyWithoutRequesterNestedInput
 }
 
@@ -714,11 +1184,17 @@ export type UserUncheckedUpdateWithoutProcessedPurchaseRequestsInput = {
  */
 
 export type UserCountOutputType = {
+  telegramLinks: number
+  telegramSubscriptions: number
+  telegramDeliveries: number
   purchaseRequests: number
   processedPurchaseRequests: number
 }
 
 export type UserCountOutputTypeSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  telegramLinks?: boolean | UserCountOutputTypeCountTelegramLinksArgs
+  telegramSubscriptions?: boolean | UserCountOutputTypeCountTelegramSubscriptionsArgs
+  telegramDeliveries?: boolean | UserCountOutputTypeCountTelegramDeliveriesArgs
   purchaseRequests?: boolean | UserCountOutputTypeCountPurchaseRequestsArgs
   processedPurchaseRequests?: boolean | UserCountOutputTypeCountProcessedPurchaseRequestsArgs
 }
@@ -731,6 +1207,27 @@ export type UserCountOutputTypeDefaultArgs<ExtArgs extends runtime.Types.Extensi
    * Select specific fields to fetch from the UserCountOutputType
    */
   select?: Prisma.UserCountOutputTypeSelect<ExtArgs> | null
+}
+
+/**
+ * UserCountOutputType without action
+ */
+export type UserCountOutputTypeCountTelegramLinksArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  where?: Prisma.TelegramLinkWhereInput
+}
+
+/**
+ * UserCountOutputType without action
+ */
+export type UserCountOutputTypeCountTelegramSubscriptionsArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  where?: Prisma.TelegramSubscriptionWhereInput
+}
+
+/**
+ * UserCountOutputType without action
+ */
+export type UserCountOutputTypeCountTelegramDeliveriesArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  where?: Prisma.TelegramDeliveryWhereInput
 }
 
 /**
@@ -760,8 +1257,13 @@ export type UserSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = r
   role?: boolean
   status?: boolean
   telegramChatId?: boolean
+  telegramUsername?: boolean
+  telegramMuted?: boolean
   createdAt?: boolean
   updatedAt?: boolean
+  telegramLinks?: boolean | Prisma.User$telegramLinksArgs<ExtArgs>
+  telegramSubscriptions?: boolean | Prisma.User$telegramSubscriptionsArgs<ExtArgs>
+  telegramDeliveries?: boolean | Prisma.User$telegramDeliveriesArgs<ExtArgs>
   purchaseRequests?: boolean | Prisma.User$purchaseRequestsArgs<ExtArgs>
   processedPurchaseRequests?: boolean | Prisma.User$processedPurchaseRequestsArgs<ExtArgs>
   _count?: boolean | Prisma.UserCountOutputTypeDefaultArgs<ExtArgs>
@@ -779,6 +1281,8 @@ export type UserSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extensio
   role?: boolean
   status?: boolean
   telegramChatId?: boolean
+  telegramUsername?: boolean
+  telegramMuted?: boolean
   createdAt?: boolean
   updatedAt?: boolean
 }, ExtArgs["result"]["user"]>
@@ -795,6 +1299,8 @@ export type UserSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Extensio
   role?: boolean
   status?: boolean
   telegramChatId?: boolean
+  telegramUsername?: boolean
+  telegramMuted?: boolean
   createdAt?: boolean
   updatedAt?: boolean
 }, ExtArgs["result"]["user"]>
@@ -811,12 +1317,17 @@ export type UserSelectScalar = {
   role?: boolean
   status?: boolean
   telegramChatId?: boolean
+  telegramUsername?: boolean
+  telegramMuted?: boolean
   createdAt?: boolean
   updatedAt?: boolean
 }
 
-export type UserOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "fullName" | "username" | "email" | "phone" | "department" | "position" | "passwordHash" | "role" | "status" | "telegramChatId" | "createdAt" | "updatedAt", ExtArgs["result"]["user"]>
+export type UserOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "fullName" | "username" | "email" | "phone" | "department" | "position" | "passwordHash" | "role" | "status" | "telegramChatId" | "telegramUsername" | "telegramMuted" | "createdAt" | "updatedAt", ExtArgs["result"]["user"]>
 export type UserInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  telegramLinks?: boolean | Prisma.User$telegramLinksArgs<ExtArgs>
+  telegramSubscriptions?: boolean | Prisma.User$telegramSubscriptionsArgs<ExtArgs>
+  telegramDeliveries?: boolean | Prisma.User$telegramDeliveriesArgs<ExtArgs>
   purchaseRequests?: boolean | Prisma.User$purchaseRequestsArgs<ExtArgs>
   processedPurchaseRequests?: boolean | Prisma.User$processedPurchaseRequestsArgs<ExtArgs>
   _count?: boolean | Prisma.UserCountOutputTypeDefaultArgs<ExtArgs>
@@ -827,6 +1338,9 @@ export type UserIncludeUpdateManyAndReturn<ExtArgs extends runtime.Types.Extensi
 export type $UserPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   name: "User"
   objects: {
+    telegramLinks: Prisma.$TelegramLinkPayload<ExtArgs>[]
+    telegramSubscriptions: Prisma.$TelegramSubscriptionPayload<ExtArgs>[]
+    telegramDeliveries: Prisma.$TelegramDeliveryPayload<ExtArgs>[]
     purchaseRequests: Prisma.$PurchaseRequestPayload<ExtArgs>[]
     processedPurchaseRequests: Prisma.$PurchaseRequestPayload<ExtArgs>[]
   }
@@ -842,6 +1356,8 @@ export type $UserPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs =
     role: $Enums.UserRole
     status: $Enums.UserStatus
     telegramChatId: string | null
+    telegramUsername: string | null
+    telegramMuted: boolean
     createdAt: Date
     updatedAt: Date
   }, ExtArgs["result"]["user"]>
@@ -1238,6 +1754,9 @@ readonly fields: UserFieldRefs;
  */
 export interface Prisma__UserClient<T, Null = never, ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs, GlobalOmitOptions = {}> extends Prisma.PrismaPromise<T> {
   readonly [Symbol.toStringTag]: "PrismaPromise"
+  telegramLinks<T extends Prisma.User$telegramLinksArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.User$telegramLinksArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$TelegramLinkPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
+  telegramSubscriptions<T extends Prisma.User$telegramSubscriptionsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.User$telegramSubscriptionsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$TelegramSubscriptionPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
+  telegramDeliveries<T extends Prisma.User$telegramDeliveriesArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.User$telegramDeliveriesArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$TelegramDeliveryPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   purchaseRequests<T extends Prisma.User$purchaseRequestsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.User$purchaseRequestsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$PurchaseRequestPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   processedPurchaseRequests<T extends Prisma.User$processedPurchaseRequestsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.User$processedPurchaseRequestsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$PurchaseRequestPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   /**
@@ -1280,6 +1799,8 @@ export interface UserFieldRefs {
   readonly role: Prisma.FieldRef<"User", 'UserRole'>
   readonly status: Prisma.FieldRef<"User", 'UserStatus'>
   readonly telegramChatId: Prisma.FieldRef<"User", 'String'>
+  readonly telegramUsername: Prisma.FieldRef<"User", 'String'>
+  readonly telegramMuted: Prisma.FieldRef<"User", 'Boolean'>
   readonly createdAt: Prisma.FieldRef<"User", 'DateTime'>
   readonly updatedAt: Prisma.FieldRef<"User", 'DateTime'>
 }
@@ -1672,6 +2193,78 @@ export type UserDeleteManyArgs<ExtArgs extends runtime.Types.Extensions.Internal
    * Limit how many Users to delete.
    */
   limit?: number
+}
+
+/**
+ * User.telegramLinks
+ */
+export type User$telegramLinksArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the TelegramLink
+   */
+  select?: Prisma.TelegramLinkSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the TelegramLink
+   */
+  omit?: Prisma.TelegramLinkOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.TelegramLinkInclude<ExtArgs> | null
+  where?: Prisma.TelegramLinkWhereInput
+  orderBy?: Prisma.TelegramLinkOrderByWithRelationInput | Prisma.TelegramLinkOrderByWithRelationInput[]
+  cursor?: Prisma.TelegramLinkWhereUniqueInput
+  take?: number
+  skip?: number
+  distinct?: Prisma.TelegramLinkScalarFieldEnum | Prisma.TelegramLinkScalarFieldEnum[]
+}
+
+/**
+ * User.telegramSubscriptions
+ */
+export type User$telegramSubscriptionsArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the TelegramSubscription
+   */
+  select?: Prisma.TelegramSubscriptionSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the TelegramSubscription
+   */
+  omit?: Prisma.TelegramSubscriptionOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.TelegramSubscriptionInclude<ExtArgs> | null
+  where?: Prisma.TelegramSubscriptionWhereInput
+  orderBy?: Prisma.TelegramSubscriptionOrderByWithRelationInput | Prisma.TelegramSubscriptionOrderByWithRelationInput[]
+  cursor?: Prisma.TelegramSubscriptionWhereUniqueInput
+  take?: number
+  skip?: number
+  distinct?: Prisma.TelegramSubscriptionScalarFieldEnum | Prisma.TelegramSubscriptionScalarFieldEnum[]
+}
+
+/**
+ * User.telegramDeliveries
+ */
+export type User$telegramDeliveriesArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the TelegramDelivery
+   */
+  select?: Prisma.TelegramDeliverySelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the TelegramDelivery
+   */
+  omit?: Prisma.TelegramDeliveryOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.TelegramDeliveryInclude<ExtArgs> | null
+  where?: Prisma.TelegramDeliveryWhereInput
+  orderBy?: Prisma.TelegramDeliveryOrderByWithRelationInput | Prisma.TelegramDeliveryOrderByWithRelationInput[]
+  cursor?: Prisma.TelegramDeliveryWhereUniqueInput
+  take?: number
+  skip?: number
+  distinct?: Prisma.TelegramDeliveryScalarFieldEnum | Prisma.TelegramDeliveryScalarFieldEnum[]
 }
 
 /**

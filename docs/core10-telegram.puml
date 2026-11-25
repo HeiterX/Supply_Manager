@@ -1,0 +1,32 @@
+@startuml
+title CORE-10 — secure binding and delivery
+actor User
+participant "Next.js settings" as Web
+participant "NestJS / TelegramModule" as API
+database PostgreSQL as DB
+participant "Telegram Bot API" as Telegram
+participant "Existing business services" as Business
+participant "CORE-09 (backend pending)" as Events
+User -> Web : authenticated cookie session
+Web -> API : POST link + Origin
+API -> DB : lock user, store SHA-256 token / 5 min
+API --> Web : deep link (raw token returned once)
+User -> Telegram : private /start token
+Telegram -> API : HTTPS webhook + secret header
+API -> DB : atomic receipt + token claim + outbox reply
+User -> Web : refresh; verify Telegram account ID
+Web -> API : confirm pending link
+API -> DB : verify owner/expiry; unique chat; delete token
+Business -> API : requestCreated / taskChanged(tx)
+API -> DB : minimal message + recipients in business transaction
+Events ..> API : publish(tx, stable event ID + authorized recipients)
+API -> DB : conditional UPDATE PENDING to SENDING
+API -> DB : recheck role, binding, subscription
+API -> Telegram : protected minimal message
+Telegram --> API : message_id / sanitized failure
+API -> DB : SENT / PENDING(backoff) / FAILED / UNKNOWN
+note over Events
+No independent reminder scheduler.
+Personal actions and overdue require CORE-09.
+end note
+@enduml
