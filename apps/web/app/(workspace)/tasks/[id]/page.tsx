@@ -8,13 +8,14 @@ import { Input, Textarea, Select } from '@/app/components/ui';
 
 import { apiFetch } from '@/lib/api-client';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
-import { useCallback, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useParams, useSearchParams } from 'next/navigation';
+import { Suspense, useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { useAbortableLoad } from '@/lib/use-abortable-load';
 import { Alert, Skeleton, TableRegion } from '@/app/components/ui';
 import LoadError from '@/app/components/LoadError';
 import PageLayout from '@/app/components/PageLayout';
 import { StatusBadge } from '@/app/components/StatusBadge';
+import { safeReturnPath } from '@/lib/discovery';
 
 type Activity = { id: string; taskId: string; text: string; createdAt: string };
 import ProcurementWorkspace, {
@@ -168,7 +169,17 @@ function TaskContent({ taskId }: { taskId: string }) {
   const { confirm, confirmation } = useConfirmation();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
-  const [activeTab, setActiveTab] = useState<Tab>('overview');
+  const search = useSearchParams();
+  const tab = search.get('tab');
+  const returnPath = safeReturnPath(search.get('back'));
+  const [activeTab, setActiveTab] = useState<Tab>(tab === 'order' || tab === 'items' ? tab : 'overview');
+  useEffect(() => {
+    if (!task || activeTab !== tab) return;
+    const id = window.location.hash.slice(1);
+    const desktop = document.getElementById(id);
+    const target = desktop?.getClientRects().length ? desktop : document.getElementById(`mobile-${id}`);
+    target?.scrollIntoView({ block: 'start' });
+  }, [activeTab, tab, task]);
   const [message, setMessage] = useState('');
   const [actionError, setActionError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -622,7 +633,7 @@ function TaskContent({ taskId }: { taskId: string }) {
     <PageLayout
       title={`№${task.number} · ${task.title}`}
       subtitle={task.description || 'Карточка закупки'}
-      action={<Link href="/" className="rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50">← К списку</Link>}
+      action={<Link href={returnPath} className="rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50">← К списку</Link>}
     >
       <div className="mb-5 flex flex-wrap items-center gap-2">
         <StatusBadge status={task.status} />
@@ -789,7 +800,7 @@ function TaskContent({ taskId }: { taskId: string }) {
                       {filteredItems.map((item) => {
                         const total = itemTotal(item);
                         return (
-                          <tr key={item.id} className="group transition hover:bg-slate-50/70">
+                          <tr key={item.id} id={`items-${item.id}`} className="scroll-mt-40 group transition hover:bg-slate-50/70">
                             <td className="px-5 py-4">
                               <div className="max-w-xl">
                                 <div className="font-semibold text-slate-900">{item.name}</div>
@@ -846,7 +857,7 @@ function TaskContent({ taskId }: { taskId: string }) {
                   {filteredItems.map((item) => {
                     const total = itemTotal(item);
                     return (
-                      <article key={item.id} className="p-4">
+                      <article key={item.id} id={`mobile-items-${item.id}`} className="scroll-mt-40 p-4">
                         <div className="flex items-start justify-between gap-4">
                           <div className="min-w-0">
                             <div className="font-semibold text-slate-900">{item.name}</div>
@@ -1139,7 +1150,7 @@ function TaskContent({ taskId }: { taskId: string }) {
       )}
 
       {activeTab === 'order' && legacyMode && (
-        <section className="space-y-5">
+        <section id={task.purchaseOrder ? `order-${task.purchaseOrder.id}` : undefined} className="scroll-mt-40 space-y-5">
           {!task.purchaseOrder ? (
             <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center">
               <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-blue-50 text-xl text-blue-600">▣</div>
@@ -1356,7 +1367,7 @@ function TaskContent({ taskId }: { taskId: string }) {
                         {task.purchaseOrders
                           .filter((order) => order.id !== task.purchaseOrder?.id)
                           .map((order) => (
-                            <div key={order.id} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between">
+                            <div key={order.id} id={`order-${order.id}`} className="scroll-mt-40 flex flex-col gap-2 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between">
                               <div>
                                 <div className="text-sm font-medium text-slate-800">{order.supplier.name}</div>
                                 <div className="mt-0.5 text-xs text-slate-400">
@@ -1986,6 +1997,6 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 export default function TaskPage() {
   const { id } = useParams<{ id: string }>();
   return (
-    <TaskContent key={id} taskId={id} />
+    <Suspense fallback={<Skeleton label="Загружаем закупку" />}><TaskContent key={id} taskId={id} /></Suspense>
   );
 }

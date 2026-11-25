@@ -1,10 +1,9 @@
 'use client';
 
-import { Input } from '@/app/components/ui';
-import { apiFetch } from '@/lib/api-client';
 import Link from 'next/link';
-import { useCallback, useMemo, useState } from 'react';
-import { useAbortableLoad } from '@/lib/use-abortable-load';
+import { Suspense } from 'react';
+import { taskLink, useDiscoveryList } from '@/lib/discovery';
+import { DiscoveryControls, Pagination } from '@/app/components/DiscoveryControls';
 import { StatusBadge } from '@/app/components/StatusBadge';
 import { EmptyState, Skeleton, TableRegion } from '@/app/components/ui';
 import PageLayout from '@/app/components/PageLayout';
@@ -92,62 +91,10 @@ function itemSupplier(item: RegistryItem) {
   );
 }
 
-export default function RegistryPage() {
-  const [registryItems, setRegistryItems] = useState<RegistryItem[]>([]);
-  const [registrySearch, setRegistrySearch] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState('');
-
-  const fetchRegistry = useCallback(async (signal: AbortSignal) => {
-    try {
-      const response = await apiFetch('/tasks/items/registry', {
-        cache: 'no-store',
-        signal,
-      });
-
-      if (!response.ok) {
-        throw new Error('API error');
-      }
-
-      const data = (await response.json()) as RegistryItem[];
-      if (signal.aborted) return;
-      setRegistryItems(data);
-      setLoadError('');
-    } catch (error) {
-      if (signal.aborted) return;
-      console.error(error);
-      setLoadError(
-        'Не удалось загрузить реестр. Проверьте, что API запущен на порту 3000.',
-      );
-    } finally {
-      if (!signal.aborted) setLoading(false);
-    }
-  }, []);
-
-  const reloadRegistry = useAbortableLoad(fetchRegistry);
-
-  function loadRegistry() {
-    setLoading(true);
-    setLoadError('');
-    return reloadRegistry();
-  }
-
-  const filteredRegistry = useMemo(() => {
-    const query = registrySearch.trim().toLocaleLowerCase('ru-RU');
-
-    return registryItems.filter(
-      (item) =>
-        !query ||
-        item.name.toLocaleLowerCase('ru-RU').includes(query) ||
-        (item.partNumber ?? '')
-          .toLocaleLowerCase('ru-RU')
-          .includes(query) ||
-        item.task.title.toLocaleLowerCase('ru-RU').includes(query) ||
-        itemSupplier(item).toLocaleLowerCase('ru-RU').includes(query) ||
-        String(item.task.number).includes(query),
-    );
-  }, [registryItems, registrySearch]);
-
+function RegistryContent() {
+  const list = useDiscoveryList<RegistryItem>('items');
+  const { data, loading, error: loadError, reload } = list;
+  const filteredRegistry = data?.items ?? [];
   return (
     <PageLayout
       title="Реестр позиций"
@@ -166,7 +113,7 @@ export default function RegistryPage() {
           <span>{loadError}</span>
           <button
             type="button"
-            onClick={() => void loadRegistry()}
+            onClick={() => void reload()}
             className="self-start rounded-lg bg-white px-3 py-2 text-xs font-semibold text-rose-700 shadow-sm ring-1 ring-rose-200 sm:self-auto"
           >
             Повторить
@@ -175,39 +122,11 @@ export default function RegistryPage() {
       )}
 
       <section className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm">
-        <div className="flex flex-col gap-4 border-b border-slate-100 p-5 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-lg font-semibold text-slate-950">
-                Реестр закупаемых позиций
-              </h2>
-              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500">
-                {filteredRegistry.length}
-              </span>
-            </div>
-            <p className="mt-1 text-sm text-slate-500">
-              Номенклатура, количество, стоимость и связанная закупка
-            </p>
-          </div>
-
-          <div className="relative w-full sm:w-[380px]">
-            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
-              ⌕
-            </span>
-            <Input
-              type="search"
-              aria-label="Поиск по реестру"
-              value={registrySearch}
-              onChange={(event) => setRegistrySearch(event.target.value)}
-              placeholder="Позиция, артикул, поставщик..."
-              className="pl-9"
-            />
-          </div>
-        </div>
+        <DiscoveryControls entity="items" {...list} total={data?.total} />
 
         {loading ? (
           <Skeleton label="Загружаем реестр" />
-        ) : filteredRegistry.length === 0 ? (
+        ) : loadError ? null : filteredRegistry.length === 0 ? (
           <EmptyState title="Позиции не найдены" />
         ) : (
           <>
@@ -257,7 +176,7 @@ export default function RegistryPage() {
 
                         <td className="px-5 py-4">
                           <Link
-                            href={`/tasks/${item.task.id}`}
+                            href={taskLink(item.task.id, '/registry', list.query, 'items', item.id)}
                             className="font-medium text-slate-700 transition hover:text-blue-700"
                           >
                             №{item.task.number} · {item.task.title}
@@ -285,7 +204,7 @@ export default function RegistryPage() {
                 return (
                   <Link
                     key={item.id}
-                    href={`/tasks/${item.task.id}`}
+                    href={taskLink(item.task.id, '/registry', list.query, 'items', item.id)}
                     className="block p-4 transition active:bg-slate-50"
                   >
                     <div className="flex items-start justify-between gap-3">
@@ -327,7 +246,12 @@ export default function RegistryPage() {
             </div>
           </>
         )}
+        <Pagination page={data} onChange={list.setPage} />
       </section>
     </PageLayout>
   );
+}
+
+export default function RegistryPage() {
+  return <Suspense fallback={<Skeleton label="Загружаем реестр" />}><RegistryContent /></Suspense>;
 }

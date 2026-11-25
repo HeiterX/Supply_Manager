@@ -5,11 +5,12 @@ import { Modal } from '@/app/components/Modal';
 import { Input, Textarea, Select } from '@/app/components/ui';
 import { apiFetch } from '@/lib/api-client';
 import Link from 'next/link';
-import { useCallback, useMemo, useState, type FormEvent } from 'react';
-import { useAbortableLoad } from '@/lib/use-abortable-load';
+import { Suspense, useState, type FormEvent } from 'react';
 import { StatusBadge, taskStatusLabels as statusLabels } from '@/app/components/StatusBadge';
 import { Alert, Button, EmptyState, Skeleton, TableRegion, Toast } from '@/app/components/ui';
 import PageLayout from '@/app/components/PageLayout';
+import { reportTimeZone, taskLink, useCoreResource, useDiscoveryList } from '@/lib/discovery';
+import { DiscoveryControls, Pagination } from '@/app/components/DiscoveryControls';
 
 type Task = {
   id: string;
@@ -24,7 +25,7 @@ type Task = {
   createdAt: string;
   updatedAt: string;
   closedAt: string | null;
-  items?: Array<{ id: string }>;
+  _count: { items: number };
 };
 
 type AttentionReason = {
@@ -52,23 +53,11 @@ const attentionTone: Record<AttentionReason['tone'], string> = {
   violet: 'bg-violet-50 text-violet-700 ring-violet-100',
 };
 
-const exactStatuses = [
-  'NEW',
-  'SEARCHING',
-  'NEGOTIATION',
-  'ORDERED',
-  'WAITING_PAYMENT',
-  'WAITING_SHIPMENT',
-  'IN_TRANSIT',
-  'READY_FOR_PICKUP',
-  'RECEIVED',
-  'HANDED_OVER',
-] as const;
-
 function formatDate(value: string | null) {
   if (!value) return '—';
 
   return new Intl.DateTimeFormat('ru-RU', {
+    timeZone: reportTimeZone,
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
@@ -79,30 +68,13 @@ function formatDateTime(value: string | null) {
   if (!value) return '—';
 
   return new Intl.DateTimeFormat('ru-RU', {
+    timeZone: reportTimeZone,
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(value));
-}
-
-function startOfToday() {
-  const value = new Date();
-  value.setHours(0, 0, 0, 0);
-  return value;
-}
-
-function endOfToday() {
-  const value = new Date();
-  value.setHours(23, 59, 59, 999);
-  return value;
-}
-
-function endOfNextSevenDays() {
-  const value = endOfToday();
-  value.setDate(value.getDate() + 7);
-  return value;
 }
 
 function isActive(task: Task) {
@@ -202,12 +174,7 @@ function deadlineLabel(task: Task) {
     };
   }
 
-  const deadline = new Date(task.deadline);
-
-  if (
-    deadline.getTime() >= startOfToday().getTime() &&
-    deadline.getTime() <= endOfToday().getTime()
-  ) {
+  if (formatDate(task.deadline) === formatDate(new Date().toISOString())) {
     return {
       text: `Сегодня · ${formatDate(task.deadline)}`,
       className: 'font-semibold text-amber-600',
@@ -287,17 +254,18 @@ function StatIcon({
   );
 }
 
-export default function PurchasesPage() {
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState('');
-
-  const [taskSearch, setTaskSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('ACTIVE');
-  const [stageFilter, setStageFilter] = useState('ALL');
-  const [priorityFilter, setPriorityFilter] = useState('ALL');
-  const [deadlineFilter, setDeadlineFilter] = useState('ALL');
-  const [sortMode, setSortMode] = useState('ATTENTION');
+function HomeContent() {
+  const list = useDiscoveryList<Task>('tasks');
+  const { data, loading, error: loadError } = list;
+  const filteredTasks = data?.items ?? [];
+  const overview = useCoreResource<{
+    active: number; attention: number; overdue: number; inTransit: number; attentionTasks: Task[];
+  }>('/discovery/task-overview');
+  const counts = overview.data;
+  const attentionTasks = (counts?.attentionTasks ?? []).flatMap((task) => {
+    const reason = getAttentionReason(task);
+    return reason ? [{ task, reason }] : [];
+  });
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
@@ -308,208 +276,12 @@ export default function PurchasesPage() {
   const [priority, setPriority] = useState('NORMAL');
   const [deadline, setDeadline] = useState('');
 
-  const fetchData = useCallback(async (signal: AbortSignal) => {
-    try {
-      const tasksResponse = await apiFetch('/tasks', {
-        cache: 'no-store',
-        signal,
-      });
-
-      if (!tasksResponse.ok) {
-        throw new Error('API error');
-      }
-
-      const data = (await tasksResponse.json()) as Task[];
-      if (signal.aborted) return;
-      setTasks(data);
-      setLoadError('');
-    } catch (error) {
-      if (signal.aborted) return;
-      console.error(error);
-      setLoadError(
-        'Не удалось загрузить данные. Проверьте, что API запущен на порту 3000.',
-      );
-    } finally {
-      if (!signal.aborted) setLoading(false);
-    }
-  }, []);
-
-  const reloadData = useAbortableLoad(fetchData);
-
   function loadData() {
-    setLoading(true);
-    setLoadError('');
-    return reloadData();
+    return Promise.all([list.reload(), overview.reload()]);
   }
 
-  const counts = useMemo(() => {
-    const active = tasks.filter(isActive);
-    const attention = active.filter((task) => getAttentionReason(task) !== null);
-    const overdue = active.filter(isOverdue);
-    const inTransit = active.filter((task) =>
-      ['IN_TRANSIT', 'READY_FOR_PICKUP'].includes(task.status),
-    );
-
-    return {
-      all: tasks.length,
-      active: active.length,
-      attention: attention.length,
-      overdue: overdue.length,
-      inTransit: inTransit.length,
-      closed: tasks.filter((task) => task.status === 'CLOSED').length,
-      cancelled: tasks.filter((task) => task.status === 'CANCELLED').length,
-    };
-  }, [tasks]);
-
-  const attentionTasks = useMemo(() => {
-    return tasks
-      .map((task) => ({
-        task,
-        reason: getAttentionReason(task),
-      }))
-      .filter(
-        (
-          entry,
-        ): entry is {
-          task: Task;
-          reason: AttentionReason;
-        } => entry.reason !== null,
-      )
-      .sort((a, b) => {
-        if (b.reason.score !== a.reason.score) {
-          return b.reason.score - a.reason.score;
-        }
-
-        const aDeadline = a.task.deadline
-          ? new Date(a.task.deadline).getTime()
-          : Number.POSITIVE_INFINITY;
-        const bDeadline = b.task.deadline
-          ? new Date(b.task.deadline).getTime()
-          : Number.POSITIVE_INFINITY;
-
-        return aDeadline - bDeadline;
-      })
-      .slice(0, 6);
-  }, [tasks]);
-
-  const filteredTasks = useMemo(() => {
-    const query = taskSearch.trim().toLocaleLowerCase('ru-RU');
-
-    const result = tasks.filter((task) => {
-      const matchesSearch =
-        !query ||
-        task.title.toLocaleLowerCase('ru-RU').includes(query) ||
-        (task.description ?? '')
-          .toLocaleLowerCase('ru-RU')
-          .includes(query) ||
-        String(task.number).includes(query) ||
-        (task.nextAction ?? '')
-          .toLocaleLowerCase('ru-RU')
-          .includes(query);
-
-      const matchesStatus =
-        statusFilter === 'ALL' ||
-        (statusFilter === 'ACTIVE' && isActive(task)) ||
-        (statusFilter === 'CLOSED' && task.status === 'CLOSED') ||
-        (statusFilter === 'CANCELLED' && task.status === 'CANCELLED') ||
-        (statusFilter === 'ATTENTION' &&
-          getAttentionReason(task) !== null);
-
-      const matchesStage =
-        stageFilter === 'ALL' ||
-        (stageFilter === 'LOGISTICS' &&
-          ['IN_TRANSIT', 'READY_FOR_PICKUP'].includes(task.status)) ||
-        task.status === stageFilter;
-
-      const matchesPriority =
-        priorityFilter === 'ALL' || task.priority === priorityFilter;
-
-      let matchesDeadline = true;
-
-      if (deadlineFilter === 'OVERDUE') {
-        matchesDeadline = isOverdue(task);
-      } else if (deadlineFilter === 'TODAY') {
-        matchesDeadline =
-          Boolean(task.deadline) &&
-          new Date(task.deadline as string).getTime() >=
-            startOfToday().getTime() &&
-          new Date(task.deadline as string).getTime() <=
-            endOfToday().getTime();
-      } else if (deadlineFilter === 'WEEK') {
-        matchesDeadline =
-          Boolean(task.deadline) &&
-          new Date(task.deadline as string).getTime() >=
-            startOfToday().getTime() &&
-          new Date(task.deadline as string).getTime() <=
-            endOfNextSevenDays().getTime();
-      } else if (deadlineFilter === 'NONE') {
-        matchesDeadline = !task.deadline;
-      }
-
-      return (
-        matchesSearch &&
-        matchesStatus &&
-        matchesStage &&
-        matchesPriority &&
-        matchesDeadline
-      );
-    });
-
-    return [...result].sort((a, b) => {
-      if (sortMode === 'NUMBER') {
-        return b.number - a.number;
-      }
-
-      if (sortMode === 'DEADLINE') {
-        const aDeadline = a.deadline
-          ? new Date(a.deadline).getTime()
-          : Number.POSITIVE_INFINITY;
-        const bDeadline = b.deadline
-          ? new Date(b.deadline).getTime()
-          : Number.POSITIVE_INFINITY;
-
-        return aDeadline - bDeadline;
-      }
-
-      if (sortMode === 'UPDATED') {
-        return (
-          new Date(b.updatedAt).getTime() -
-          new Date(a.updatedAt).getTime()
-        );
-      }
-
-      const aScore = getAttentionReason(a)?.score ?? 0;
-      const bScore = getAttentionReason(b)?.score ?? 0;
-
-      if (aScore !== bScore) {
-        return bScore - aScore;
-      }
-
-      return (
-        new Date(b.updatedAt).getTime() -
-        new Date(a.updatedAt).getTime()
-      );
-    });
-  }, [
-    tasks,
-    taskSearch,
-    statusFilter,
-    stageFilter,
-    priorityFilter,
-    deadlineFilter,
-    sortMode,
-  ]);
-
-  const activeFilterCount = [
-    stageFilter !== 'ALL',
-    priorityFilter !== 'ALL',
-    deadlineFilter !== 'ALL',
-  ].filter(Boolean).length;
-
-  function clearAdvancedFilters() {
-    setStageFilter('ALL');
-    setPriorityFilter('ALL');
-    setDeadlineFilter('ALL');
+  function quickFilter(params: Record<string, string>) {
+    list.change(new URLSearchParams(params));
   }
 
   function resetCreateForm() {
@@ -583,9 +355,9 @@ export default function PurchasesPage() {
       subtitle="Контроль сроков, следующих действий и движения закупок"
       action={newButton}
     >
-      {loadError && (
+      {(loadError || overview.error) && (
         <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 sm:flex-row sm:items-center sm:justify-between">
-          <span>{loadError}</span>
+          <span>{loadError || overview.error}</span>
           <button
             type="button"
             onClick={() => void loadData()}
@@ -599,7 +371,7 @@ export default function PurchasesPage() {
       <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <button
           type="button"
-          onClick={() => setStatusFilter('ACTIVE')}
+          onClick={() => quickFilter({ view: 'active' })}
           className="group rounded-2xl border border-slate-200/80 bg-white p-4 text-left shadow-sm transition hover:border-blue-200 hover:shadow-md"
         >
           <div className="flex items-center justify-between gap-3">
@@ -609,7 +381,7 @@ export default function PurchasesPage() {
             <span className="text-xs font-medium text-slate-400">В работе</span>
           </div>
           <div className="mt-4 text-2xl font-semibold text-slate-950">
-            {counts.active}
+            {counts?.active ?? '—'}
           </div>
           <div className="mt-1 text-xs text-slate-500">
             активных закупок
@@ -618,7 +390,7 @@ export default function PurchasesPage() {
 
         <button
           type="button"
-          onClick={() => setStatusFilter('ATTENTION')}
+          onClick={() => quickFilter({ view: 'attention' })}
           className="group rounded-2xl border border-amber-100 bg-amber-50/60 p-4 text-left shadow-sm transition hover:border-amber-200 hover:shadow-md"
         >
           <div className="flex items-center justify-between gap-3">
@@ -630,7 +402,7 @@ export default function PurchasesPage() {
             </span>
           </div>
           <div className="mt-4 text-2xl font-semibold text-amber-800">
-            {counts.attention}
+            {counts?.attention ?? '—'}
           </div>
           <div className="mt-1 text-xs text-amber-700/70">
             требуют действия
@@ -640,8 +412,7 @@ export default function PurchasesPage() {
         <button
           type="button"
           onClick={() => {
-            setStatusFilter('ACTIVE');
-            setDeadlineFilter('OVERDUE');
+            quickFilter({ overdue: 'true' });
           }}
           className="group rounded-2xl border border-rose-100 bg-rose-50/60 p-4 text-left shadow-sm transition hover:border-rose-200 hover:shadow-md"
         >
@@ -654,7 +425,7 @@ export default function PurchasesPage() {
             </span>
           </div>
           <div className="mt-4 text-2xl font-semibold text-rose-800">
-            {counts.overdue}
+            {counts?.overdue ?? '—'}
           </div>
           <div className="mt-1 text-xs text-rose-700/70">
             просрочено
@@ -664,8 +435,7 @@ export default function PurchasesPage() {
         <button
           type="button"
           onClick={() => {
-            setStatusFilter('ACTIVE');
-            setStageFilter('LOGISTICS');
+            quickFilter({ view: 'logistics' });
           }}
           className="group rounded-2xl border border-cyan-100 bg-cyan-50/60 p-4 text-left shadow-sm transition hover:border-cyan-200 hover:shadow-md"
         >
@@ -678,7 +448,7 @@ export default function PurchasesPage() {
             </span>
           </div>
           <div className="mt-4 text-2xl font-semibold text-cyan-800">
-            {counts.inTransit}
+            {counts?.inTransit ?? '—'}
           </div>
           <div className="mt-1 text-xs text-cyan-700/70">
             в пути / к получению
@@ -695,7 +465,7 @@ export default function PurchasesPage() {
                   Требуют внимания
                 </h2>
                 <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700">
-                  {counts.attention}
+                  {counts?.attention ?? '—'}
                 </span>
               </div>
               <p className="mt-1 text-sm text-slate-500">
@@ -703,10 +473,10 @@ export default function PurchasesPage() {
               </p>
             </div>
 
-            {counts.attention > attentionTasks.length && (
+            {(counts?.attention ?? 0) > attentionTasks.length && (
               <button
                 type="button"
-                onClick={() => setStatusFilter('ATTENTION')}
+                onClick={() => quickFilter({ view: 'attention' })}
                 className="self-start text-sm font-semibold text-blue-600 hover:text-blue-700 sm:self-auto"
               >
                 Показать все →
@@ -721,7 +491,7 @@ export default function PurchasesPage() {
               return (
                 <Link
                   key={task.id}
-                  href={`/tasks/${task.id}`}
+                  href={taskLink(task.id, '/', list.query)}
                   className={`group flex min-w-0 gap-4 p-4 transition hover:bg-slate-50/80 sm:p-5 ${
                     index >= 2 ? 'hidden xl:flex' : ''
                   }`}
@@ -782,140 +552,13 @@ export default function PurchasesPage() {
       )}
 
       <section className="mt-6 overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm">
-        <div className="border-b border-slate-100 p-4 sm:p-5">
-          <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h2 className="text-lg font-semibold text-slate-950">
-                    Реестр закупок
-                  </h2>
-                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500">
-                    {filteredTasks.length}
-                  </span>
-                </div>
-                <p className="mt-1 text-sm text-slate-500">
-                  Все закупки, этапы и следующие действия
-                </p>
-              </div>
-
-              <div className="relative min-w-0 xl:w-[380px]">
-                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
-                  ⌕
-                </span>
-                <Input
-                  type="search"
-                  aria-label="Поиск закупок"
-                  value={taskSearch}
-                  onChange={(event) => setTaskSearch(event.target.value)}
-                  placeholder="Номер, закупка или следующее действие..."
-                  className="pl-9"
-                />
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-              <div className="flex max-w-full gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1">
-                {[
-                  ['ACTIVE', 'Активные', counts.active],
-                  ['ATTENTION', 'Требуют внимания', counts.attention],
-                  ['ALL', 'Все', counts.all],
-                  ['CLOSED', 'Закрытые', counts.closed],
-                  ['CANCELLED', 'Отменённые', counts.cancelled],
-                ].map(([value, label, count]) => (
-                  <button
-                    key={String(value)}
-                    type="button"
-                    onClick={() => setStatusFilter(String(value))}
-                    className={`shrink-0 rounded-lg px-3 py-2 text-xs font-semibold transition sm:text-sm ${
-                      statusFilter === value
-                        ? 'bg-white text-slate-950 shadow-sm'
-                        : 'text-slate-500 hover:text-slate-900'
-                    }`}
-                  >
-                    {label}
-                    <span className="ml-1 text-slate-400">{count}</span>
-                  </button>
-                ))}
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                <Select
-                  value={stageFilter}
-                  onChange={(event) => setStageFilter(event.target.value)}
-                  className="min-w-[150px] flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-600 outline-none focus:border-blue-300 sm:flex-none"
-                >
-                  <option value="ALL">Все этапы</option>
-                  <option value="LOGISTICS">Логистика</option>
-                  {exactStatuses.map((status) => (
-                    <option key={status} value={status}>
-                      {statusLabels[status]}
-                    </option>
-                  ))}
-                </Select>
-
-                <Select
-                  value={priorityFilter}
-                  onChange={(event) =>
-                    setPriorityFilter(event.target.value)
-                  }
-                  className="min-w-[150px] flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-600 outline-none focus:border-blue-300 sm:flex-none"
-                >
-                  <option value="ALL">Все приоритеты</option>
-                  <option value="URGENT">Срочный</option>
-                  <option value="HIGH">Высокий</option>
-                  <option value="NORMAL">Обычный</option>
-                  <option value="LOW">Низкий</option>
-                </Select>
-
-                <Select
-                  value={deadlineFilter}
-                  onChange={(event) =>
-                    setDeadlineFilter(event.target.value)
-                  }
-                  className="min-w-[150px] flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-600 outline-none focus:border-blue-300 sm:flex-none"
-                >
-                  <option value="ALL">Любой срок</option>
-                  <option value="OVERDUE">Просроченные</option>
-                  <option value="TODAY">На сегодня</option>
-                  <option value="WEEK">На 7 дней</option>
-                  <option value="NONE">Без срока</option>
-                </Select>
-
-                <Select
-                  value={sortMode}
-                  onChange={(event) => setSortMode(event.target.value)}
-                  className="min-w-[150px] flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-600 outline-none focus:border-blue-300 sm:flex-none"
-                >
-                  <option value="ATTENTION">Сначала важные</option>
-                  <option value="DEADLINE">По сроку</option>
-                  <option value="UPDATED">По обновлению</option>
-                  <option value="NUMBER">Сначала новые</option>
-                </Select>
-
-                {activeFilterCount > 0 && (
-                  <button
-                    type="button"
-                    onClick={clearAdvancedFilters}
-                    className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
-                  >
-                    Сбросить · {activeFilterCount}
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
+        <DiscoveryControls entity="tasks" {...list} total={data?.total} />
 
         {loading ? (
           <Skeleton label="Загружаем закупки" />
-        ) : filteredTasks.length === 0 ? (
+        ) : loadError ? null : filteredTasks.length === 0 ? (
           <EmptyState title="Закупки не найдены" description="Измените поиск или параметры фильтрации."
-            action={<Button variant="outline" onClick={() => {
-              setTaskSearch('');
-              setStatusFilter('ACTIVE');
-              clearAdvancedFilters();
-            }}>Сбросить фильтры</Button>} />
+            action={<Button variant="outline" onClick={() => quickFilter({})}>Сбросить фильтры</Button>} />
         ) : (
           <>
             <TableRegion label="Закупки" className="hidden md:block">
@@ -950,7 +593,7 @@ export default function PurchasesPage() {
                             <div className="min-w-0">
                               <div className="flex flex-wrap items-center gap-2">
                                 <Link
-                                  href={`/tasks/${task.id}`}
+                                  href={taskLink(task.id, '/', list.query)}
                                   className="max-w-[300px] truncate font-semibold text-slate-950 transition group-hover:text-blue-700"
                                 >
                                   {task.title}
@@ -1019,12 +662,12 @@ export default function PurchasesPage() {
                         </td>
 
                         <td className="px-5 py-4 text-slate-500">
-                          {task.items?.length ?? 0}
+                          {task._count.items}
                         </td>
 
                         <td className="px-5 py-4 text-right">
                           <Link
-                            href={`/tasks/${task.id}`}
+                            href={taskLink(task.id, '/', list.query)}
                             aria-label={`Открыть закупку №${task.number}`}
                             className="inline-grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition hover:bg-white hover:text-blue-600 hover:shadow-sm"
                           >
@@ -1046,7 +689,7 @@ export default function PurchasesPage() {
                 return (
                   <Link
                     key={task.id}
-                    href={`/tasks/${task.id}`}
+                    href={taskLink(task.id, '/', list.query)}
                     className="block p-4 transition active:bg-slate-50"
                   >
                     <div className="flex items-start justify-between gap-3">
@@ -1100,6 +743,7 @@ export default function PurchasesPage() {
             </div>
           </>
         )}
+        <Pagination page={data} onChange={list.setPage} />
       </section>
 
       {createdNotice && <Toast onDismiss={() => setCreatedNotice(false)}>Закупка создана</Toast>}
@@ -1180,4 +824,8 @@ export default function PurchasesPage() {
       )}
     </PageLayout>
   );
+}
+
+export default function PurchasesPage() {
+  return <Suspense fallback={<Skeleton label="Загружаем закупки" />}><HomeContent /></Suspense>;
 }

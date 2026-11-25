@@ -6,6 +6,7 @@ import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react
 import { AUTH_EVENTS } from '@/lib/api-client';
 import { useSession } from './AuthGate';
 import { Dialog } from './Dialog';
+import GlobalSearch from './GlobalSearch';
 import { getCurrentSection, navigation, roleLabels } from './navigation';
 import PageLayout from './PageLayout';
 import { Alert, Avatar, Button, EmptyState, Input } from './ui';
@@ -32,6 +33,8 @@ const icons = {
   purchases: 'M3 4h2l3 11h11l2-8H6m3 13h.01m9 0h.01',
   requests: 'M6 3h8l4 4v14H6zm3 9h6m-6 4h6M14 3v5h4',
   registry: 'M3 7l9-4 9 4-9 4zm0 5 9 4 9-4M3 17l9 4 9-4',
+  suppliers: 'M3 21V7l9-4 9 4v14H3zm5 0v-8h8v8',
+  analytics: 'M4 4v16h16M8 16v-4m5 4V8m5 8V5',
   plus: 'M12 5v14M5 12h14',
   menu: 'M4 6h16M4 12h16M4 18h16',
   panel: 'M3 4h18v16H3zm6 0v16',
@@ -70,12 +73,14 @@ function NavLinks({ entries, current, pathname, onNavigate }: {
 
 function Breadcrumbs({ current, pathname, canSeeSection }: { current: Current; pathname: string; canSeeSection: boolean }) {
   if (!current || current.href === '/dashboard') return <span className="text-sm font-semibold">Главная</span>;
-  const nested = current.href !== pathname;
+  const details = pathname.startsWith('/tasks/') ? 'Карточка закупки' :
+    pathname.startsWith('/requests/') ? 'Карточка заявки' :
+    pathname.startsWith('/suppliers/') ? 'Карточка поставщика' : undefined;
   return <nav aria-label="Хлебные крошки" className="app-crumbs">
     <Link href="/dashboard">Главная</Link><span aria-hidden="true">›</span>
-    {nested && canSeeSection ? <Link href={current.href}>{current.label}</Link> :
-      <span aria-current={nested ? undefined : 'page'}>{current.label}</span>}
-    {nested && <><span aria-hidden="true">›</span><span aria-current="page">Карточка закупки</span></>}
+    {details && canSeeSection ? <Link href={current.href}>{current.label}</Link> :
+      <span aria-current={details ? undefined : 'page'}>{current.label}</span>}
+    {details && <><span aria-hidden="true">›</span><span aria-current="page">{details}</span></>}
   </nav>;
 }
 
@@ -135,7 +140,7 @@ export default function AppShell({ children, tools }: { children: ReactNode; too
   const [fallbackCollapsed, setFallbackCollapsed] = useState(false);
   const stored = useSyncExternalStore(subscribeSidebar, readCollapsed, () => false);
   const collapsed = stored || fallbackCollapsed;
-  const current = getCurrentSection(pathname);
+  const current = getCurrentSection(pathname, user.role);
   const entries = navigation.filter((entry) => entry.roles.includes(user.role));
   const allowed = !current || entries.includes(current);
 
@@ -168,6 +173,9 @@ export default function AppShell({ children, tools }: { children: ReactNode; too
             {(close) => <NavLinks entries={entries} current={current} pathname={pathname} onNavigate={close} />}
           </Dialog>
           <Breadcrumbs current={current} pathname={pathname} canSeeSection={allowed} />
+        </div>
+        <div className="app-header-search">
+          <GlobalSearch key={pathname} />
         </div>
         <div className="app-header-tools" key={pathname}>
           <SectionSearch entries={entries} />

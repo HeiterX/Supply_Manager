@@ -1,0 +1,27 @@
+@startuml
+title CORE-11 — Поиск и операционная аналитика
+
+actor "Сотрудник / снабжение / администратор" as User
+component "Next.js\nAppShell, списки, аналитика" as Web
+component "NestJS\n/api/v1/discovery" as Api
+component "Cookie JWT и существующий RBAC" as Auth
+component "Фильтры, сортировка и владение" as Selection
+component "Агрегаты по событиям и состояниям" as Analytics
+component "CSV / XLSX\nОграничение строк, размера и параллельности" as Export
+database "PostgreSQL 17\nTask, TaskItem, Supplier,\nPurchaseOrder, PurchaseRequest" as DB
+
+User --> Web
+Web --> Api : GET, cookie
+Api --> Auth
+Api --> Selection : поиск, список, экспорт списка
+Api --> Analytics : отчёт, экспорт отчёта
+Selection --> DB : Prisma, REPEATABLE READ
+Analytics --> DB : Prisma и параметризованный SQL
+Api --> Export : разрешённые строки
+
+note right of Analytics
+  Next Action, ответственные,
+  частичные оплаты и приёмки
+  ожидают серверных контрактов.
+end note
+@enduml

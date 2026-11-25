@@ -18,6 +18,7 @@ const SAFE_METHODS = new Set([
 function isProtectedResource(path: string): boolean {
   return (
     path.startsWith('/telegram/') ||
+    path.startsWith('/discovery/') ||
     path === '/tasks' ||
     path.startsWith('/tasks/') ||
     path === '/purchase-requests' ||

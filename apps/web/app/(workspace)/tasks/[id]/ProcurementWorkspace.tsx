@@ -304,7 +304,7 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
         {!isClosed && !allAllocated && <button onClick={() => onNavigate('offers')} className={primaryClass}>＋ Оформить ещё заказ</button>}
       </div>
       {!orders.length ? <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500">Заказов пока нет. Перейдите к КП и оформите первый заказ.</div> :
-        <div className="space-y-4">{orders.map(order => <article key={order.id} className={`rounded-2xl border bg-white p-5 shadow-sm ${order.cancelledAt ? 'border-rose-100 opacity-75' : 'border-slate-200'}`}>
+        <div className="space-y-4">{orders.map(order => <article key={order.id} id={`order-${order.id}`} className={`scroll-mt-40 rounded-2xl border bg-white p-5 shadow-sm ${order.cancelledAt ? 'border-rose-100 opacity-75' : 'border-slate-200'}`}>
           <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-semibold text-slate-950">{order.supplier.name}</h3>
             <p className="mt-1 text-xs text-slate-500">Счёт № {order.invoiceNumber ?? 'не указан'} · {date(order.invoiceDate)} · {qty(order.items?.length ?? 0)} поз.</p></div>
             <span className={`rounded-full px-3 py-1.5 text-xs font-semibold ${orderColors[order.status] ?? 'bg-slate-100 text-slate-700'}`}>{orderLabels[order.status] ?? order.status}</span></div>
