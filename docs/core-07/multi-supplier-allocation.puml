@@ -41,4 +41,6 @@ A -> API : PATCH .../cancel до оплаты, reason
 API -> DB : SELECT Task FOR UPDATE
 API -> H : CANCELLED, до/после
 API -> DB : cancelledAt, остаток освобождён
+note over API,DB : CORE-08 использует ту же блокировку Task
+для оплаты, приёмки и закрытия закупки.
 @enduml

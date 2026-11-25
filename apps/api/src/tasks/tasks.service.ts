@@ -19,6 +19,7 @@ import type { Prisma } from '../generated/prisma/client.js';
 import { normalizeCatalogText, validateTechnicalParameters } from './catalog.service.js';
 import { SuppliersService } from './suppliers.service.js';
 import { quotePrice, offerSnapshot } from './quote-utils.js';
+import { quantityBalance, sum, zero } from './fulfillment-balances.js';
 
 @Injectable()
 export class TasksService {
@@ -84,8 +85,9 @@ export class TasksService {
             },
             purchaseOrderItems: {
               include: {
+                fulfillmentEvents: true,
                 purchaseOrder: {
-                  select: { status: true, cancelledAt: true },
+                  select: { status: true, cancelledAt: true, ledgerEnabled: true, paidAt: true },
                 },
               },
             },
@@ -177,19 +179,19 @@ export class TasksService {
         );
         const ordered = activeLines.reduce((sum, line) => sum + line.quantity.toNumber(), 0);
         const reserved = activeLines
-          .filter(line => ['ORDERED', 'WAITING_PAYMENT'].includes(line.purchaseOrder.status))
+          .filter(line => line.purchaseOrder.ledgerEnabled ? !line.purchaseOrder.paidAt : ['ORDERED', 'WAITING_PAYMENT'].includes(line.purchaseOrder.status))
           .reduce((sum, line) => sum + line.quantity.toNumber(), 0);
         const cancelled = item.purchaseOrderItems
           .filter(line => line.purchaseOrder.cancelledAt || line.purchaseOrder.status === 'CANCELLED')
           .reduce((sum, line) => sum + line.quantity.toNumber(), 0);
         const required = item.quantity.toNumber();
         const available = Math.max(0, Math.round(required * 1000) - Math.round(ordered * 1000)) / 1000;
-        const received = activeLines
-          .filter((line) => ['RECEIVED', 'HANDED_OVER'].includes(line.purchaseOrder.status))
-          .reduce((sum, line) => sum + line.quantity.toNumber(), 0);
-        const handedOver = activeLines
-          .filter((line) => line.purchaseOrder.status === 'HANDED_OVER')
-          .reduce((sum, line) => sum + line.quantity.toNumber(), 0);
+        const received = sum(activeLines.map(line => line.purchaseOrder.ledgerEnabled
+          ? quantityBalance(line.fulfillmentEvents).received
+          : ['RECEIVED', 'HANDED_OVER'].includes(line.purchaseOrder.status) ? line.quantity : zero)).toNumber();
+        const handedOver = sum(activeLines.map(line => line.purchaseOrder.ledgerEnabled
+          ? quantityBalance(line.fulfillmentEvents).handedOver
+          : line.purchaseOrder.status === 'HANDED_OVER' ? line.quantity : zero)).toNumber();
         const { supplierOfferItems: _offers, purchaseOrderItems: _orders, ...result } = item;
         void _offers;
         void _orders;
@@ -211,82 +213,83 @@ export class TasksService {
   }
 
   async update(id: string, dto: UpdateTaskDto) {
-    const currentTask = await this.prisma.task.findUnique({
-      where: { id },
-    });
-
-    if (!currentTask) {
-      throw new NotFoundException('Задача не найдена');
-    }
-
-    if (dto.status === 'CLOSED') {
-      throw new BadRequestException(
-        'Закупку нельзя закрыть вручную. Используйте действие «Закрыть закупку» после передачи товара',
-      );
-    }
-
-    if (dto.status !== undefined) {
-      const hasMultiOrders = await this.prisma.purchaseOrder.findFirst({
-        where: { taskId: id, items: { some: {} } }, select: { id: true },
-      });
-      if (hasMultiOrders) throw new ConflictException('Этап многопоставочной закупки меняется через действия с заказами');
-    }
-
-    if (currentTask.status === 'CLOSED' && dto.status !== undefined) {
-      throw new ConflictException('Закрытую закупку нельзя повторно открыть вручную');
-    }
-
-    const nextStatus = dto.status ?? currentTask.status;
-    const nextPriority = dto.priority ?? currentTask.priority;
-
-    const nextAction =
-      dto.nextAction !== undefined
-        ? dto.nextAction.trim() || null
-        : currentTask.nextAction;
-
-    const nextReminderAt =
-      dto.reminderAt !== undefined
-        ? new Date(dto.reminderAt)
-        : currentTask.reminderAt;
-
-    const changes: string[] = [];
-
-    if (dto.status !== undefined && dto.status !== currentTask.status) {
-      changes.push(
-        `Этап изменён: «${this.getStatusLabel(currentTask.status)}» → «${this.getStatusLabel(dto.status)}»`,
-      );
-    }
-
-    if (
-      dto.priority !== undefined &&
-      dto.priority !== currentTask.priority
-    ) {
-      changes.push(
-        `Приоритет изменён: «${this.getPriorityLabel(currentTask.priority)}» → «${this.getPriorityLabel(dto.priority)}»`,
-      );
-    }
-
-    if (
-      dto.nextAction !== undefined &&
-      nextAction !== currentTask.nextAction
-    ) {
-      if (nextAction) {
-        changes.push(`Следующее действие: ${nextAction}`);
-      } else {
-        changes.push('Следующее действие очищено');
-      }
-    }
-
-    if (
-      dto.reminderAt !== undefined &&
-      nextReminderAt?.getTime() !== currentTask.reminderAt?.getTime()
-    ) {
-      changes.push(
-        `Напоминание изменено: ${this.formatDateTime(nextReminderAt)}`,
-      );
-    }
-
     return this.prisma.$transaction(async (tx) => {
+      await this.lockTaskItemTransaction(tx, id, true);
+      const currentTask = await tx.task.findUnique({
+        where: { id },
+      });
+
+      if (!currentTask) {
+        throw new NotFoundException('Задача не найдена');
+      }
+
+      if (dto.status === 'CLOSED') {
+        throw new BadRequestException(
+          'Закупку нельзя закрыть вручную. Используйте действие «Закрыть закупку» после передачи товара',
+        );
+      }
+
+      if (dto.status !== undefined) {
+        const hasMultiOrders = await tx.purchaseOrder.findFirst({
+          where: { taskId: id, items: { some: {} } }, select: { id: true },
+        });
+        if (hasMultiOrders) throw new ConflictException('Этап многопоставочной закупки меняется через действия с заказами');
+      }
+
+      if (currentTask.status === 'CLOSED') {
+        throw new ConflictException('Закрытую закупку нельзя повторно открыть вручную');
+      }
+
+      const nextStatus = dto.status ?? currentTask.status;
+      const nextPriority = dto.priority ?? currentTask.priority;
+
+      const nextAction =
+        dto.nextAction !== undefined
+          ? dto.nextAction.trim() || null
+          : currentTask.nextAction;
+
+      const nextReminderAt =
+        dto.reminderAt !== undefined
+          ? new Date(dto.reminderAt)
+          : currentTask.reminderAt;
+
+      const changes: string[] = [];
+
+      if (dto.status !== undefined && dto.status !== currentTask.status) {
+        changes.push(
+          `Этап изменён: «${this.getStatusLabel(currentTask.status)}» → «${this.getStatusLabel(dto.status)}»`,
+        );
+      }
+
+      if (
+        dto.priority !== undefined &&
+        dto.priority !== currentTask.priority
+      ) {
+        changes.push(
+          `Приоритет изменён: «${this.getPriorityLabel(currentTask.priority)}» → «${this.getPriorityLabel(dto.priority)}»`,
+        );
+      }
+
+      if (
+        dto.nextAction !== undefined &&
+        nextAction !== currentTask.nextAction
+      ) {
+        if (nextAction) {
+          changes.push(`Следующее действие: ${nextAction}`);
+        } else {
+          changes.push('Следующее действие очищено');
+        }
+      }
+
+      if (
+        dto.reminderAt !== undefined &&
+        nextReminderAt?.getTime() !== currentTask.reminderAt?.getTime()
+      ) {
+        changes.push(
+          `Напоминание изменено: ${this.formatDateTime(nextReminderAt)}`,
+        );
+      }
+
       await tx.task.update({
         where: { id },
         data: {
@@ -298,12 +301,7 @@ export class TasksService {
             dto.reminderAt !== undefined
               ? nextReminderAt
               : undefined,
-          closedAt:
-            dto.status === 'CLOSED'
-              ? new Date()
-              : dto.status !== undefined
-                ? null
-                : undefined,
+          closedAt: dto.status !== undefined ? null : undefined,
         },
       });
 
@@ -370,7 +368,7 @@ export class TasksService {
   }
 
   // Serialize item edits with order creation. Both paths lock Task first.
-  private async lockTaskItemTransaction(tx: Prisma.TransactionClient, taskId: string) {
+  private async lockTaskItemTransaction(tx: Prisma.TransactionClient, taskId: string, allowTerminal = false) {
     const databaseUrl = process.env.DATABASE_URL;
     if (!databaseUrl) throw new Error('DATABASE_URL is not defined');
     const schema = new URL(databaseUrl).searchParams.get('schema') ?? 'public';
@@ -379,7 +377,7 @@ export class TasksService {
     await tx.$queryRaw`SELECT "id" FROM "Task" WHERE "id" = ${taskId} FOR UPDATE`;
     const task = await tx.task.findUnique({ where: { id: taskId }, select: { status: true } });
     if (!task) throw new NotFoundException('Закупка не найдена');
-    if (task.status === 'CLOSED' || task.status === 'CANCELLED') {
+    if (!allowTerminal && (task.status === 'CLOSED' || task.status === 'CANCELLED')) {
       throw new ConflictException('Закрытую или отменённую закупку нельзя изменять');
     }
   }

@@ -98,6 +98,7 @@ describe('Multi-supplier procurement (e2e)', () => {
     const resB = await order(taskId, b, { [bearing]: 4 }, 'B-1').expect(201);
     const idA = resA.body.id as string;
     const idB = resB.body.id as string;
+    await prisma.purchaseOrder.updateMany({ where: { id: { in: [idA, idB] } }, data: { ledgerEnabled: false } });
     expect(resA.body.items).toHaveLength(2);
     expect(resB.body.items).toHaveLength(1);
     await order(taskId, c, { [bearing]: 1 }, 'C-1').expect(409);
@@ -142,6 +143,7 @@ describe('Multi-supplier procurement (e2e)', () => {
     const state = await client.get(`${api}/${taskId}`).expect(200);
     expect(state.body.purchaseOrders).toHaveLength(2);
     expect(state.body.purchaseOrders.filter((o: { cancelledAt: string | null }) => !o.cancelledAt)).toHaveLength(1);
+    await prisma.purchaseOrder.update({ where: { id: replacement.body.id as string }, data: { ledgerEnabled: false } });
     await action(taskId, replacement.body.id, 'send-to-payment').expect(200);
     await action(taskId, replacement.body.id, 'confirm-payment').expect(200);
     await action(taskId, replacement.body.id, 'cancel', { reason: 'Поздно' }).expect(409);

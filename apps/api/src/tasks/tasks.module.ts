@@ -11,9 +11,12 @@ import { SuppliersService } from './suppliers.service.js';
 import { SuppliersController } from './suppliers.controller.js';
 import { OfferDocumentsService } from './offer-documents.service.js';
 
+import { FulfillmentController } from './fulfillment.controller.js';
+import { FulfillmentService } from './fulfillment.service.js';
+
 @Module({
   imports: [PrismaModule, AuthModule],
-  controllers: [TasksController, CatalogController, SuppliersController],
-  providers: [TasksService, MultiOrdersService, CatalogService, SuppliersService, OfferDocumentsService],
+  controllers: [TasksController, CatalogController, SuppliersController, FulfillmentController],
+  providers: [TasksService, MultiOrdersService, CatalogService, SuppliersService, OfferDocumentsService, FulfillmentService],
 })
 export class TasksModule {}
