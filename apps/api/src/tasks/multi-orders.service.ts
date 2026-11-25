@@ -10,6 +10,8 @@ import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto.js';
 import { CreateSupplierOfferDto } from './dto/create-supplier-offer.dto.js';
 import { SuppliersService } from './suppliers.service.js';
 import { offerSnapshot, quotePrice } from './quote-utils.js';
+import { orderCreateFingerprint, orderSnapshot } from './order-utils.js';
+import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto.js';
 
 const milli = (value: number) => Math.round(value * 1000);
 const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
@@ -196,7 +198,7 @@ export class MultiOrdersService {
     }, { timeout: 15000 });
   }
 
-  async createOrder(taskId: string, offerId: string, dto: CreatePurchaseOrderDto) {
+  async createOrder(taskId: string, offerId: string, dto: CreatePurchaseOrderDto, actorId?: string) {
     const requestedItems = dto.items;
     if (!requestedItems?.length) {
       throw new BadRequestException('Выберите хотя бы одну позицию для заказа');
@@ -207,8 +209,35 @@ export class MultiOrdersService {
     if (new Set(requestedItems.map(item => item.supplierOfferItemId)).size !== requestedItems.length) {
       throw new BadRequestException('Позиции заказа не должны повторяться');
     }
+    const fingerprint = dto.idempotencyKey ? orderCreateFingerprint(offerId, dto) : null;
+    const assertReplay = (order: { requestFingerprint: string | null }) => {
+      if (order.requestFingerprint !== fingerprint) {
+        throw new ConflictException('Ключ повтора уже применён для другого состава заказа');
+      }
+    };
+    if (dto.idempotencyKey) {
+      const earlier = await this.prisma.purchaseOrder.findFirst({
+        where: { taskId, idempotencyKey: dto.idempotencyKey },
+        include: { items: true, supplier: true },
+      });
+      if (earlier) {
+        assertReplay(earlier);
+        return earlier;
+      }
+    }
     return this.prisma.$transaction(async tx => {
       await this.lockTask(tx, taskId);
+      if (dto.idempotencyKey) {
+        // Второй concurrent request ждёт блокировки закупки и видит первый заказ.
+        const earlier = await tx.purchaseOrder.findFirst({
+          where: { taskId, idempotencyKey: dto.idempotencyKey },
+          include: { items: true, supplier: true },
+        });
+        if (earlier) {
+          assertReplay(earlier);
+          return earlier;
+        }
+      }
       const offer = await tx.supplierOffer.findFirst({
         where: { id: offerId, taskId },
         include: { supplier: true, items: { include: { taskItem: true } } },
@@ -268,6 +297,8 @@ export class MultiOrdersService {
       const order = await tx.purchaseOrder.create({
         data: {
           taskId, supplierId: offer.supplierId, supplierOfferId: offer.id,
+          idempotencyKey: dto.idempotencyKey ?? null,
+          requestFingerprint: fingerprint,
           status: 'ORDERED', invoiceNumber: dto.invoiceNumber.trim(), invoiceDate: new Date(dto.invoiceDate),
           notes: dto.notes?.trim() || null, price, deliveryPrice, totalPrice, deliveryDays: offer.deliveryDays,
           items: { create: lines.map(({ offerItem, quantity }) => ({
@@ -284,14 +315,199 @@ export class MultiOrdersService {
         selectedOfferId: offer.id, currentPurchaseOrderId: order.id,
       } });
       await this.refreshTask(tx, taskId);
+      await tx.purchaseOrderRevision.create({ data: {
+        purchaseOrderId: order.id, action: 'CREATED', version: order.version,
+        actorId: actorId ?? null, after: orderSnapshot(order),
+      } });
       await tx.taskActivity.create({ data: { taskId, text: `Оформлен заказ у «${offer.supplier.name}», счёт № ${order.invoiceNumber}, ${lines.length} поз.` } });
       return order;
+    }, { timeout: 15000 });
+  }
+
+  async allocation(taskId: string) {
+    const [task, orders] = await Promise.all([
+      this.prisma.task.findUnique({
+        where: { id: taskId }, include: { items: { orderBy: { sortOrder: 'asc' } } },
+      }),
+      this.prisma.purchaseOrder.findMany({
+        where: { taskId }, include: { items: true, supplier: { select: { id: true, name: true } } },
+      }),
+    ]);
+    if (!task) throw new NotFoundException('Закупка не найдена');
+    return task.items.map(item => {
+      const required = milli(item.quantity.toNumber());
+      let ordered = 0;
+      let reserved = 0;
+      let cancelled = 0;
+      let paidOrLater = 0;
+      const bySupplier: Array<{
+        orderId: string; supplierId: string; supplierName: string;
+        status: string; quantity: number; active: boolean;
+      }> = [];
+      for (const order of orders) {
+        for (const line of order.items) {
+          if (line.taskItemId !== item.id) continue;
+          const quantity = milli(line.quantity.toNumber());
+          const isCancelled = order.cancelledAt !== null || order.status === 'CANCELLED';
+          if (isCancelled) cancelled += quantity;
+          else {
+            ordered += quantity;
+            if (['ORDERED', 'WAITING_PAYMENT'].includes(order.status)) reserved += quantity;
+            else paidOrLater += quantity;
+          }
+          bySupplier.push({
+            orderId: order.id, supplierId: order.supplierId,
+            supplierName: order.supplier.name, status: order.status,
+            quantity: quantity / 1000, active: !isCancelled,
+          });
+        }
+      }
+      return {
+        taskItemId: item.id, name: item.name, unit: item.unit,
+        required: required / 1000, reserved: reserved / 1000,
+        ordered: ordered / 1000, paidOrLater: paidOrLater / 1000,
+        cancelled: cancelled / 1000, available: Math.max(0, required - ordered) / 1000,
+        bySupplier,
+      };
+    });
+  }
+
+  async updateOrder(
+    taskId: string,
+    orderId: string,
+    dto: UpdatePurchaseOrderDto,
+    actorId?: string,
+  ) {
+    if (new Set(dto.items.map(item => item.supplierOfferItemId)).size !== dto.items.length) {
+      throw new BadRequestException('Повторяющиеся позиции заказа');
+    }
+    return this.prisma.$transaction(async tx => {
+      await this.lockTask(tx, taskId);
+      const existing = await tx.purchaseOrder.findFirst({
+        where: { id: orderId, taskId },
+        include: { items: true, supplier: true },
+      });
+      if (!existing) throw new NotFoundException('Заказ не найден в закупке');
+      if (!existing.items.length) throw new ConflictException('Заказы старого формата изменяются в прежнем сценарии');
+      if (existing.cancelledAt || existing.paidAt || existing.shippedAt ||
+          !['ORDERED', 'WAITING_PAYMENT'].includes(existing.status)) {
+        throw new ConflictException('Редактирование возможно только до оплаты и отгрузки');
+      }
+      if (dto.expectedVersion !== existing.version) {
+        throw new ConflictException('Заказ уже изменён другим пользователем. Обновите страницу');
+      }
+      const offer = await tx.supplierOffer.findFirst({
+        where: { id: existing.supplierOfferId, taskId },
+        include: { items: { include: { taskItem: true } }, supplier: true },
+      });
+      if (!offer || offer.supplier.status !== 'ACTIVE') {
+        throw new ConflictException('КП или поставщик больше не доступны');
+      }
+      const currentOrders = await tx.purchaseOrder.findMany({
+        where: { taskId, cancelledAt: null, id: { not: orderId } },
+        include: { items: true },
+      });
+      if (currentOrders.some(order => !order.items.length)) {
+        throw new ConflictException('В закупке есть заказ старого формата');
+      }
+      const allocated = new Map<string, number>();
+      for (const order of currentOrders) for (const line of order.items) {
+        if (!line.taskItemId) continue;
+        allocated.set(line.taskItemId,
+          (allocated.get(line.taskItemId) ?? 0) + milli(line.quantity.toNumber()));
+      }
+      const offered = new Map(offer.items.map(item => [item.id, item]));
+      const lines = dto.items.map(line => {
+        const source = offered.get(line.supplierOfferItemId);
+        if (!source) throw new BadRequestException('Позиция не относится к исходному КП');
+        const quantity = Number(line.quantity);
+        if (!Number.isFinite(quantity) || quantity <= 0 || milli(quantity) !== quantity * 1000) {
+          throw new BadRequestException('Количество должно быть положительным, до 3 знаков после запятой');
+        }
+        const requested = milli(quantity);
+        const available = milli(source.taskItem.quantity.toNumber()) -
+          (allocated.get(source.taskItemId) ?? 0);
+        if (requested > milli(source.quantity.toNumber()) || requested > available) {
+          throw new ConflictException(`«${source.taskItem.name}»: недостаточно остатка для изменения заказа`);
+        }
+        allocated.set(source.taskItemId, (allocated.get(source.taskItemId) ?? 0) + requested);
+        if (source.currency !== 'RUB') {
+          throw new ConflictException('Изменение заказа в валюте, отличной от RUB, запрещено');
+        }
+        return { source, quantity };
+      });
+      const invoiceNumber = dto.invoiceNumber === undefined
+        ? existing.invoiceNumber : dto.invoiceNumber.trim();
+      const invoiceDate = dto.invoiceDate === undefined
+        ? existing.invoiceDate : new Date(dto.invoiceDate);
+      if (!invoiceNumber || !invoiceDate) {
+        throw new BadRequestException('Номер и дата счёта обязательны');
+      }
+      const hasPrices = lines.every(line => line.source.unitPrice !== null);
+      const price = hasPrices
+        ? money(lines.reduce((sum, line) =>
+            sum + line.quantity * line.source.unitPrice!.toNumber(), 0))
+        : null;
+      const totalPrice = price === null ? null
+        : money(price + (existing.deliveryPrice?.toNumber() ?? 0));
+      const before = orderSnapshot(existing);
+      const existingRevisions = await tx.purchaseOrderRevision.count({
+        where: { purchaseOrderId: orderId },
+      });
+      if (!existingRevisions) {
+        await tx.purchaseOrderRevision.create({
+          data: {
+            purchaseOrderId: orderId, action: 'BASELINE', version: existing.version,
+            actorId: actorId ?? null, after: before,
+          },
+        });
+      }
+      const updated = await tx.purchaseOrder.update({
+        where: { id: orderId },
+        data: {
+          version: { increment: 1 },
+          status: 'ORDERED',
+          sentToPaymentAt: null,
+          invoiceNumber,
+          invoiceDate,
+          notes: dto.notes === undefined ? existing.notes : dto.notes.trim() || null,
+          price, totalPrice,
+          items: {
+            deleteMany: {},
+            create: lines.map(({ source, quantity }) => ({
+              taskItemId: source.taskItemId,
+              supplierOfferItemId: source.id,
+              name: source.taskItem.name,
+              partNumber: source.taskItem.partNumber,
+              quantity, unit: source.taskItem.unit,
+              unitPrice: source.unitPrice,
+              currency: source.currency,
+              notes: source.notes,
+            })),
+          },
+        },
+        include: { supplier: true, items: true },
+      });
+      await tx.purchaseOrderRevision.create({
+        data: {
+          purchaseOrderId: orderId, action: 'UPDATED', version: updated.version,
+          actorId: actorId ?? null, before, after: orderSnapshot(updated),
+        },
+      });
+      await this.refreshTask(tx, taskId);
+      await tx.taskActivity.create({
+        data: { taskId,
+          text: `Заказ у «${updated.supplier.name}», счёт № ${updated.invoiceNumber} отредактирован; версия ${updated.version}; статус оплаты сброшен к оформлению`,
+        },
+      });
+      return updated;
     }, { timeout: 15000 });
   }
 
   async action(
     taskId: string, orderId: string, action: string,
     body: { reason?: string; handedOverTo?: string; shippedAt?: string; carrier?: string; trackingNumber?: string; expectedDeliveryAt?: string } = {},
+    actorId?: string,
   ) {
     const transitions: Record<string, [string, string]> = {
       'send-to-payment': ['ORDERED', 'WAITING_PAYMENT'],
@@ -356,7 +572,28 @@ export class MultiOrdersService {
         }
         data.status = next as 'ORDERED' | 'WAITING_PAYMENT' | 'WAITING_SHIPMENT' | 'IN_TRANSIT' | 'READY_FOR_PICKUP' | 'RECEIVED' | 'HANDED_OVER';
       }
-      const updated = await tx.purchaseOrder.update({ where: { id: orderId }, data, include: { supplier: true, items: true } });
+      const before = orderSnapshot(order);
+      const revisionCount = await tx.purchaseOrderRevision.count({ where: { purchaseOrderId: orderId } });
+      if (!revisionCount) {
+        await tx.purchaseOrderRevision.create({
+          data: {
+            purchaseOrderId: orderId, action: 'BASELINE', version: order.version,
+            actorId: actorId ?? null, after: before,
+          },
+        });
+      }
+      data.version = { increment: 1 };
+      const updated = await tx.purchaseOrder.update({
+        where: { id: orderId }, data, include: { supplier: true, items: true },
+      });
+      await tx.purchaseOrderRevision.create({
+        data: {
+          purchaseOrderId: orderId,
+          action: action === 'cancel' ? 'CANCELLED' : action.toUpperCase().replaceAll('-', '_'),
+          version: updated.version, actorId: actorId ?? null,
+          before, after: orderSnapshot(updated),
+        },
+      });
       if (action === 'cancel') {
         const other = await tx.purchaseOrder.count({ where: { taskId, supplierOfferId: order.supplierOfferId, cancelledAt: null } });
         if (!other) await tx.supplierOffer.update({ where: { id: order.supplierOfferId }, data: { status: 'OFFER_RECEIVED' } });

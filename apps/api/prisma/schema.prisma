@@ -383,6 +383,12 @@ model PurchaseOrder {
   totalPrice    Decimal? @db.Decimal(14, 2)
   deliveryDays  Int?
 
+  // CORE-07: версия и идемпотентный ключ создания заказа.
+  version Int @default(1)
+  idempotencyKey String?
+  requestFingerprint String?
+  revisions PurchaseOrderRevision[]
+
   // Данные счёта
   invoiceNumber String?
   invoiceDate   DateTime?
@@ -441,6 +447,22 @@ model PurchaseOrder {
   @@index([status])
   @@index([orderedAt])
   @@index([cancelledAt])
+  @@unique([taskId, idempotencyKey])
+}
+
+model PurchaseOrderRevision {
+  id String @id @default(uuid())
+  purchaseOrderId String
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  action String
+  version Int
+  actorId String?
+  before Json?
+  after Json
+  createdAt DateTime @default(now())
+
+  @@index([purchaseOrderId, version])
+  @@index([createdAt])
 }
 
 model User {

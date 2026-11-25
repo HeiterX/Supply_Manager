@@ -22,6 +22,12 @@ export class CreatePurchaseOrderItemDto {
 }
 
 export class CreatePurchaseOrderDto {
+  // Стабильный ключ одного пользовательского действия. Повтор после
+  // таймаута должен возвращать прежний заказ, а не резервировать снова.
+  @IsOptional()
+  @IsUUID('4')
+  idempotencyKey?: string;
+
   @IsString()
   @MinLength(1, {
     message: 'Необходимо указать номер счёта',

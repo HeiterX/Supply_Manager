@@ -22,6 +22,7 @@ import type { AuthUser } from '../auth/auth.types.js';
 
 import { HandOverPurchaseOrderDto } from './dto/hand-over-purchase-order.dto.js';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto.js';
+import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto.js';
 import { CreateSupplierOfferDto } from './dto/create-supplier-offer.dto.js';
 import { CreateTaskActivityDto } from './dto/create-task-activity.dto.js';
 import { CreateTaskDto } from './dto/create-task.dto.js';
@@ -62,6 +63,11 @@ export class TasksController {
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.tasksService.findOne(id);
+  }
+
+  @Get(':id/allocation')
+  getAllocation(@Param('id') id: string) {
+    return this.multiOrders.allocation(id);
   }
 
   @Patch(':id')
@@ -187,11 +193,12 @@ export class TasksController {
     ':taskId/supplier-offers/:offerId/purchase-order',
   )
   createPurchaseOrderForOffer(
+    @CurrentUser() user: AuthUser,
     @Param('taskId') taskId: string,
     @Param('offerId') offerId: string,
     @Body() dto: CreatePurchaseOrderDto,
   ) {
-    return this.multiOrders.createOrder(taskId, offerId, dto);
+    return this.multiOrders.createOrder(taskId, offerId, dto, user.id);
   }
 
   @Patch(':taskId/orders/close')
@@ -199,14 +206,25 @@ export class TasksController {
     return this.multiOrders.closeTask(taskId);
   }
 
+  @Patch(':taskId/orders/:orderId')
+  updateMultiSupplierOrder(
+    @CurrentUser() user: AuthUser,
+    @Param('taskId') taskId: string,
+    @Param('orderId') orderId: string,
+    @Body() dto: UpdatePurchaseOrderDto,
+  ) {
+    return this.multiOrders.updateOrder(taskId, orderId, dto, user.id);
+  }
+
   @Patch(':taskId/orders/:orderId/:action')
   changeSupplierOrder(
+    @CurrentUser() user: AuthUser,
     @Param('taskId') taskId: string,
     @Param('orderId') orderId: string,
     @Param('action') action: string,
     @Body() body: Record<string, string>,
   ) {
-    return this.multiOrders.action(taskId, orderId, action, body);
+    return this.multiOrders.action(taskId, orderId, action, body, user.id);
   }
 
   @Post(':id/purchase-order')

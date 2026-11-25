@@ -147,6 +147,7 @@ export class TasksService {
           include: {
             supplier: true,
             supplierOffer: true,
+            revisions: { orderBy: { createdAt: 'asc' } },
             items: {
               orderBy: {
                 createdAt: 'asc',
@@ -175,6 +176,14 @@ export class TasksService {
           (line) => !line.purchaseOrder.cancelledAt && line.purchaseOrder.status !== 'CANCELLED',
         );
         const ordered = activeLines.reduce((sum, line) => sum + line.quantity.toNumber(), 0);
+        const reserved = activeLines
+          .filter(line => ['ORDERED', 'WAITING_PAYMENT'].includes(line.purchaseOrder.status))
+          .reduce((sum, line) => sum + line.quantity.toNumber(), 0);
+        const cancelled = item.purchaseOrderItems
+          .filter(line => line.purchaseOrder.cancelledAt || line.purchaseOrder.status === 'CANCELLED')
+          .reduce((sum, line) => sum + line.quantity.toNumber(), 0);
+        const required = item.quantity.toNumber();
+        const available = Math.max(0, Math.round(required * 1000) - Math.round(ordered * 1000)) / 1000;
         const received = activeLines
           .filter((line) => ['RECEIVED', 'HANDED_OVER'].includes(line.purchaseOrder.status))
           .reduce((sum, line) => sum + line.quantity.toNumber(), 0);
@@ -187,9 +196,12 @@ export class TasksService {
         return {
           ...result,
           progress: {
-            required: item.quantity.toNumber(),
+            required,
             offered,
+            reserved,
             ordered,
+            cancelled,
+            available,
             received,
             handedOver,
           },

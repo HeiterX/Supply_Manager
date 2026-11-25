@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { apiFetch, API_BASE_URL } from '../../../lib/api-client';
 
 export type Supplier = {
@@ -19,7 +19,7 @@ export type TaskItem = {
   requiredAt?: string | null;
   sourceRequestItemId?: string | null;
   originalSnapshot?: unknown;
-  progress?: { required: number; offered: number; ordered: number; received: number; handedOver: number };
+  progress?: { required: number; offered: number; ordered: number; reserved?: number; cancelled?: number; available?: number; received: number; handedOver: number };
   createdAt: string; updatedAt: string;
 };
 export type SupplierOfferItem = {
@@ -54,6 +54,8 @@ export type PurchaseOrder = {
   readyForPickupAt: string | null; receivedAt: string | null;
   handedOverAt: string | null; handedOverTo: string | null;
   cancelledAt: string | null; cancelReason: string | null;
+  version?: number;
+  revisions?: Array<{ id: string; action: string; version: number; actorId: string | null; before: unknown; after: unknown; createdAt: string }>;
   createdAt: string; updatedAt: string; supplier: Supplier;
   supplierOffer: SupplierOffer; items: PurchaseOrderItem[];
 };
@@ -129,6 +131,8 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
   const [offerNotes, setOfferNotes] = useState('');
   const [draft, setDraft] = useState<Record<string, Draft>>({});
   const [orderOffer, setOrderOffer] = useState<SupplierOffer | null>(null);
+  const [editingOrder, setEditingOrder] = useState<PurchaseOrder | null>(null);
+  const orderRequestKey = useRef<string | null>(null);
   const [orderDraft, setOrderDraft] = useState<Record<string, OrderDraft>>({});
   const [invoice, setInvoice] = useState('');
   const [invoiceDate, setInvoiceDate] = useState(localDate());
@@ -238,15 +242,42 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
     })));
     setOfferOpen(true);
   }
+  function remainingForOrder(taskItemId: string) {
+    const currently = editingOrder?.items
+      .filter(line => line.taskItemId === taskItemId)
+      .reduce((sum, line) => sum + milli(line.quantity), 0) ?? 0;
+    return available(taskItemId) + currently / 1000;
+  }
   function openOrder(offer: SupplierOffer) {
+    setEditingOrder(null);
+    orderRequestKey.current = crypto.randomUUID();
     setLocalError(''); setOrderOffer(offer); setInvoice(''); setInvoiceDate(localDate()); setOrderNotes('');
     setOrderDraft(Object.fromEntries(offer.items.map(i => {
       const amount = Math.min(Number(i.quantity), available(i.taskItemId));
       return [i.id, { selected: amount > 0, quantity: amount > 0 ? String(amount) : '0' }];
     })));
   }
+  function openEditOrder(order: PurchaseOrder) {
+    const offer = task.supplierOffers.find(entry => entry.id === order.supplierOfferId);
+    if (!offer) { setLocalError('Исходное КП не найдено. Редактирование невозможно.'); return; }
+    if (!order.items.length || !['ORDERED', 'WAITING_PAYMENT'].includes(order.status)) return;
+    setLocalError('');
+    setEditingOrder(order); setOrderOffer(offer); orderRequestKey.current = null;
+    setInvoice(order.invoiceNumber ?? '');
+    const invoiceDateValue = order.invoiceDate ? new Date(order.invoiceDate) : new Date();
+    setInvoiceDate(new Date(invoiceDateValue.getTime() - invoiceDateValue.getTimezoneOffset() * 60000).toISOString().slice(0, 16));
+    setOrderNotes(order.notes ?? '');
+    const previous = new Map(order.items.map(line => [line.supplierOfferItemId, line]));
+    setOrderDraft(Object.fromEntries(offer.items.map(line => {
+      const existing = previous.get(line.id);
+      return [line.id, { selected: Boolean(existing), quantity: existing ? String(existing.quantity) : '0' }];
+    })));
+  }
   function updateDraft(id: string, patch: Partial<Draft>) { setDraft(prev => ({ ...prev, [id]: { ...prev[id], ...patch } })); }
-  function updateOrderDraft(id: string, patch: Partial<OrderDraft>) { setOrderDraft(prev => ({ ...prev, [id]: { ...prev[id], ...patch } })); }
+  function updateOrderDraft(id: string, patch: Partial<OrderDraft>) {
+    if (!editingOrder) orderRequestKey.current = crypto.randomUUID();
+    setOrderDraft(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }));
+  }
 
   async function saveOffer(event: FormEvent) {
     event.preventDefault(); setLocalError('');
@@ -283,25 +314,33 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
   }
 
   async function saveOrder(event: FormEvent) {
-    event.preventDefault(); if (!orderOffer) return;
+    event.preventDefault(); if (!orderOffer || busy) return;
     setLocalError('');
     const selected = orderOffer.items.filter(i => orderDraft[i.id]?.selected);
     if (!selected.length) { setLocalError('Выберите позиции для заказа'); return; }
     for (const item of selected) {
       const amount = Number(orderDraft[item.id].quantity);
-      if (!Number.isFinite(amount) || amount <= 0 || milli(amount) > milli(item.quantity) || milli(amount) > milli(available(item.taskItemId)) || Math.abs(amount * 1000 - milli(amount)) > 1e-6) {
-        setLocalError(`Проверьте количество «${item.taskItem.name}». Доступно ${qty(available(item.taskItemId))} ${item.taskItem.unit}`); return;
+      if (!Number.isFinite(amount) || amount <= 0 || milli(amount) > milli(item.quantity) || milli(amount) > milli(remainingForOrder(item.taskItemId)) || Math.abs(amount * 1000 - milli(amount)) > 1e-6) {
+        setLocalError(`Проверьте количество «${item.taskItem.name}». Доступно ${qty(remainingForOrder(item.taskItemId))} ${item.taskItem.unit}`); return;
       }
     }
     if (!invoice.trim() || !invoiceDate) { setLocalError('Укажите номер и дату счёта'); return; }
-    const ok = await onAction(`/supplier-offers/${orderOffer.id}/purchase-order`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ invoiceNumber: invoice.trim(), invoiceDate: new Date(invoiceDate).toISOString(),
+    if (!editingOrder && !orderRequestKey.current) {
+      orderRequestKey.current = crypto.randomUUID();
+    }
+    const ok = await onAction(editingOrder ? `/orders/${editingOrder.id}` : `/supplier-offers/${orderOffer.id}/purchase-order`, {
+      method: editingOrder ? 'PATCH' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        invoiceNumber: invoice.trim(), invoiceDate: new Date(invoiceDate).toISOString(),
         notes: orderNotes.trim() || undefined,
+        expectedVersion: editingOrder?.version,
+        idempotencyKey: editingOrder ? undefined : orderRequestKey.current,
         items: selected.map(i => ({ supplierOfferItemId: i.id, quantity: Number(orderDraft[i.id].quantity) })),
       }),
-    }, `Заказ у «${orderOffer.supplier.name}» оформлен`, setLocalError);
-    if (ok) { setOrderOffer(null); onNavigate('orders'); }
+    }, editingOrder ? 'Заказ изменён. Если счёт отправлялся на оплату, передайте его повторно.' :
+      `Заказ у «${orderOffer.supplier.name}» оформлен`, setLocalError);
+    if (ok) { setOrderOffer(null); setEditingOrder(null); orderRequestKey.current = null; onNavigate('orders'); }
   }
 
   function beginAction(order: PurchaseOrder, action: ActionName) {
@@ -341,11 +380,35 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
         const ordered = (allocation.get(item.id)?.ordered ?? 0) / 1000;
         const handed = (allocation.get(item.id)?.handed ?? 0) / 1000;
         const required = Number(item.quantity);
+        const reserved = item.progress?.reserved ?? active
+          .filter(o => ['ORDERED', 'WAITING_PAYMENT'].includes(o.status))
+          .flatMap(o => o.items).filter(line => line.taskItemId === item.id)
+          .reduce((sum, line) => sum + Number(line.quantity), 0);
+        const cancelled = item.progress?.cancelled ?? orders
+          .filter(o => o.cancelledAt || o.status === 'CANCELLED')
+          .flatMap(o => o.items).filter(line => line.taskItemId === item.id)
+          .reduce((sum, line) => sum + Number(line.quantity), 0);
         return <div key={item.id}>
           <div className="flex flex-wrap items-baseline justify-between gap-2 text-sm"><div className="font-medium text-slate-800">{item.name} <span className="text-xs font-normal text-slate-400">{item.partNumber ?? ''}</span></div>
             <div className="text-xs text-slate-500">Заказано {qty(ordered)} / {qty(required)} {item.unit} · Передано {qty(handed)}</div></div>
           <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-blue-500" style={{ width: `${Math.min(100, (ordered / required) * 100)}%` }} /></div>
-          <div className="mt-1 text-xs text-slate-400">Осталось заказать: {qty(available(item.id))} {item.unit}</div>
+          <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-600">
+            <span className="rounded-lg bg-indigo-50 px-2 py-1">Резерв до оплаты: {qty(reserved)} {item.unit}</span>
+            <span className="rounded-lg bg-blue-50 px-2 py-1">Заказано всего (включая резерв): {qty(ordered)} {item.unit}</span>
+            <span className="rounded-lg bg-rose-50 px-2 py-1">Отменено за историю: {qty(cancelled)} {item.unit}</span>
+            <span className="rounded-lg bg-emerald-50 px-2 py-1 font-semibold">Доступно: {qty(available(item.id))} {item.unit}</span>
+          </div>
+          {orders.some(o => o.items.some(line => line.taskItemId === item.id)) && (
+            <div className="mt-2 space-y-1 text-xs text-slate-500">
+              {orders.filter(o => o.items.some(line => line.taskItemId === item.id)).map(o => (
+                <p key={o.id}>
+                  {o.supplier.name} · {o.invoiceNumber ?? 'счёт не указан'} ·
+                  {' '}{qty(o.items.filter(line => line.taskItemId === item.id).reduce((sum, line) => sum + Number(line.quantity), 0))} {item.unit} ·
+                  {' '}{orderLabels[o.status] ?? o.status}
+                </p>
+              ))}
+            </div>
+          )}
         </div>;
       })}</div>}
   </section>;
@@ -481,6 +544,7 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
       {!orders.length ? <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500">Заказов пока нет. Перейдите к КП и оформите первый заказ.</div> :
         <div className="space-y-4">{orders.map(order => <article key={order.id} className={`rounded-2xl border bg-white p-5 shadow-sm ${order.cancelledAt ? 'border-rose-100 opacity-75' : 'border-slate-200'}`}>
           <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-semibold text-slate-950">{order.supplier.name}</h3>
+            <p className="mt-1 text-xs text-slate-500">Закупка → КП v{order.supplierOffer?.version ?? '—'} → Заказ v{order.version ?? 1}</p>
             <p className="mt-1 text-xs text-slate-500">Счёт № {order.invoiceNumber ?? 'не указан'} · {date(order.invoiceDate)} · {qty(order.items?.length ?? 0)} поз.</p></div>
             <span className={`rounded-full px-3 py-1.5 text-xs font-semibold ${orderColors[order.status] ?? 'bg-slate-100 text-slate-700'}`}>{orderLabels[order.status] ?? order.status}</span></div>
           <div className="mt-4 space-y-2">{order.items?.length ? order.items.map(line => <div key={line.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 p-3 text-sm">
@@ -493,7 +557,33 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
           {order.handedOverAt && <p className="mt-2 text-xs text-emerald-700">Передано: {order.handedOverTo} · {date(order.handedOverAt)}</p>}
           {order.cancelledAt && <p className="mt-2 text-xs text-rose-600">Отменён: {order.cancelReason ?? 'причина не указана'}</p>}
           {order.notes && <p className="mt-3 rounded-xl bg-slate-50 p-3 text-xs text-slate-600">{order.notes}</p>}
+          {(order.revisions?.length ?? 0) > 0 && (
+            <details className="mt-3 rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs">
+              <summary className="cursor-pointer font-semibold text-slate-700">
+                История заказа: {order.revisions?.length} событий
+              </summary>
+              <div className="mt-3 space-y-2">
+                {order.revisions?.map(rev => (
+                  <details key={rev.id} className="rounded-lg bg-white p-2">
+                    <summary className="cursor-pointer">
+                      v{rev.version} · {rev.action} · {date(rev.createdAt)}
+                    </summary>
+                    {rev.before !== null && <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-slate-500">
+                      До: {JSON.stringify(rev.before, null, 2)}
+                    </pre>}
+                    <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-slate-700">
+                      После: {JSON.stringify(rev.after, null, 2)}
+                    </pre>
+                  </details>
+                ))}
+              </div>
+            </details>
+          )}
           {!order.cancelledAt && !isClosed && <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
+            {['ORDERED', 'WAITING_PAYMENT'].includes(order.status) && order.items.length > 0 &&
+              <button disabled={busy} onClick={() => openEditOrder(order)} className={secondaryClass}>
+                Изменить до оплаты
+              </button>}
             {order.status === 'ORDERED' && <button disabled={busy} onClick={() => beginAction(order, 'send-to-payment')} className={primaryClass}>Передать счёт на оплату</button>}
             {order.status === 'WAITING_PAYMENT' && <button disabled={busy} onClick={() => beginAction(order, 'confirm-payment')} className={primaryClass}>Подтвердить оплату</button>}
             {order.status === 'WAITING_SHIPMENT' && <button disabled={busy} onClick={() => beginAction(order, 'ship')} className={primaryClass}>Подтвердить отгрузку</button>}
@@ -603,11 +693,12 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
       </form>
     </Dialog>}
 
-    {orderOffer && <Dialog title={`Оформить заказ у «${orderOffer.supplier.name}»`} onClose={() => setOrderOffer(null)}>
+    {orderOffer && <Dialog title={editingOrder ? `Изменить заказ у «${orderOffer.supplier.name}»` : `Оформить заказ у «${orderOffer.supplier.name}»`}
+      onClose={() => { setOrderOffer(null); setEditingOrder(null); }}>
       <form onSubmit={saveOrder} className="space-y-5"><p className="text-sm text-slate-500">Укажите, сколько из предложенного количества заказываем сейчас. Система не позволит превысить остаток закупки.</p>
         <div className="space-y-3">{orderOffer.items.map(item => {
           const row = orderDraft[item.id]; if (!row) return null;
-          const remaining = available(item.taskItemId);
+          const remaining = remainingForOrder(item.taskItemId);
           return <div key={item.id} className="rounded-xl border border-slate-200 p-3">
             <label className="flex items-center gap-2 text-sm font-semibold"><input type="checkbox" disabled={remaining <= 0} checked={row.selected} onChange={e => updateOrderDraft(item.id, { selected: e.target.checked })} />{item.taskItem.name}</label>
             <p className="mt-1 text-xs text-slate-500">Предложено {qty(item.quantity)} · осталось заказать {qty(remaining)} {item.taskItem.unit} · цена {money(item.unitPrice)} / {item.taskItem.unit}</p>
@@ -615,14 +706,16 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
               <div className="text-sm font-semibold">Сумма: {item.unitPrice === null ? '—' : money(Number(row.quantity) * Number(item.unitPrice))}</div></div>}
           </div>;
         })}</div>
-        <div className="grid gap-3 sm:grid-cols-2"><Field label="Номер счёта *"><input required className={inputClass} value={invoice} onChange={e => setInvoice(e.target.value)} /></Field>
-          <Field label="Дата счёта *"><input required type="datetime-local" className={inputClass} value={invoiceDate} onChange={e => setInvoiceDate(e.target.value)} /></Field></div>
-        <Field label="Примечание"><textarea rows={2} className={inputClass} value={orderNotes} onChange={e => setOrderNotes(e.target.value)} /></Field>
+        <div className="grid gap-3 sm:grid-cols-2"><Field label="Номер счёта *"><input required className={inputClass} value={invoice} onChange={e => { setInvoice(e.target.value); if (!editingOrder) orderRequestKey.current = crypto.randomUUID(); }} /></Field>
+          <Field label="Дата счёта *"><input required type="datetime-local" className={inputClass} value={invoiceDate} onChange={e => { setInvoiceDate(e.target.value); if (!editingOrder) orderRequestKey.current = crypto.randomUUID(); }} /></Field></div>
+        <Field label="Примечание"><textarea rows={2} className={inputClass} value={orderNotes} onChange={e => { setOrderNotes(e.target.value); if (!editingOrder) orderRequestKey.current = crypto.randomUUID(); }} /></Field>
         <div className="rounded-xl bg-blue-50 p-4 text-sm"><div className="flex justify-between"><span>Товары по заказу</span><b>{money(orderPrice)}</b></div>
           <div className="mt-2 flex justify-between"><span>Доставка по КП</span><b>{money(orderOffer.deliveryPrice)}</b></div>
           <div className="mt-2 flex justify-between font-semibold"><span>Итого</span><span>{orderOffer.items.filter(i => orderDraft[i.id]?.selected).some(i => i.unitPrice === null) ? 'Не все цены известны' : money(orderPrice + Number(orderOffer.deliveryPrice ?? 0))}</span></div></div>
         {localError && <p className="text-sm text-rose-600">{localError}</p>}
-        <div className="flex justify-end gap-2"><button type="button" onClick={() => setOrderOffer(null)} className={secondaryClass}>Отмена</button><button disabled={busy || !orderOffer.items.some(i => orderDraft[i.id]?.selected)} className={primaryClass}>Оформить заказ</button></div>
+        <div className="flex justify-end gap-2"><button type="button" onClick={() => setOrderOffer(null)} className={secondaryClass}>Отмена</button><button disabled={busy || !orderOffer.items.some(i => orderDraft[i.id]?.selected)} className={primaryClass}>
+          {editingOrder ? 'Сохранить изменения' : 'Оформить заказ'}
+        </button></div>
       </form>
     </Dialog>}
 
