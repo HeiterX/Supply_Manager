@@ -430,7 +430,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "task" | "taskItem" | "taskActivity" | "supplier" | "supplierOffer" | "purchaseOrder" | "user" | "telegramLink" | "telegramSubscription" | "telegramUpdateReceipt" | "telegramRate" | "telegramButton" | "telegramDelivery" | "purchaseRequest" | "purchaseRequestItem" | "supplierOfferItem" | "purchaseOrderItem"
+    modelProps: "task" | "taskItem" | "taskActivity" | "supplier" | "supplierOffer" | "purchaseOrder" | "user" | "telegramLink" | "telegramSubscription" | "telegramUpdateReceipt" | "telegramRate" | "telegramButton" | "telegramDelivery" | "purchaseRequest" | "purchaseRequestItem" | "supplierOfferItem" | "purchaseOrderItem" | "securityAuditEvent"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
