@@ -5,6 +5,9 @@ import {
   IsOptional,
   IsPositive,
   IsString,
+  IsISO8601,
+  IsObject,
+  IsUUID,
   MaxLength,
   Min,
 } from 'class-validator';
@@ -43,6 +46,18 @@ export class CreateTaskItemDto {
   @IsString()
   @MaxLength(2000)
   notes?: string;
+
+  @IsOptional()
+  @IsUUID()
+  catalogItemId?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  requiredAt?: string;
+
+  @IsOptional()
+  @IsObject()
+  technicalParameters?: Record<string, string>;
 
   @IsOptional()
   @IsInt()

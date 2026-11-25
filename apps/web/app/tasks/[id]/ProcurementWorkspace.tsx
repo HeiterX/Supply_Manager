@@ -10,6 +10,13 @@ export type TaskItem = {
   id: string; taskId: string; name: string; partNumber: string | null;
   quantity: string | number; unit: string; unitPrice: string | number | null;
   currency: string; notes: string | null; sortOrder: number;
+  catalogItemId?: string | null;
+  catalogItem?: { id: string; name: string; category: string; partNumber: string | null } | null;
+  technicalParameters?: Record<string, string> | null;
+  requiredAt?: string | null;
+  sourceRequestItemId?: string | null;
+  originalSnapshot?: unknown;
+  progress?: { required: number; offered: number; ordered: number; received: number; handedOver: number };
   createdAt: string; updatedAt: string;
 };
 export type SupplierOfferItem = {

@@ -15,6 +15,8 @@ import { CreateTaskItemDto } from './dto/create-task-item.dto.js';
 import { ShipPurchaseOrderDto } from './dto/ship-purchase-order.dto.js';
 import { UpdateTaskDto } from './dto/update-task.dto.js';
 import { UpdateTaskItemDto } from './dto/update-task-item.dto.js';
+import type { Prisma } from '../generated/prisma/client.js';
+import { normalizeCatalogText, validateTechnicalParameters } from './catalog.service.js';
 
 @Injectable()
 export class TasksService {
@@ -71,6 +73,24 @@ export class TasksService {
         },
         items: {
           orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+          include: {
+            catalogItem: true,
+            supplierOfferItems: {
+              include: {
+                supplierOffer: { select: { status: true } },
+              },
+            },
+            purchaseOrderItems: {
+              include: {
+                purchaseOrder: {
+                  select: { status: true, cancelledAt: true },
+                },
+              },
+            },
+          },
+        },
+        itemChanges: {
+          orderBy: { createdAt: 'asc' },
         },
         activities: {
           orderBy: {
@@ -138,7 +158,38 @@ export class TasksService {
       throw new NotFoundException('Задача не найдена');
     }
 
-    return task;
+    return {
+      ...task,
+      items: task.items.map((item) => {
+        // Предложено = максимальное актуальное КП, а не сумма альтернатив.
+        const offered = item.supplierOfferItems
+          .filter((line) => ['OFFER_RECEIVED', 'SELECTED', 'NEGOTIATION'].includes(line.supplierOffer.status))
+          .reduce((max, line) => Math.max(max, line.quantity.toNumber()), 0);
+        const activeLines = item.purchaseOrderItems.filter(
+          (line) => !line.purchaseOrder.cancelledAt && line.purchaseOrder.status !== 'CANCELLED',
+        );
+        const ordered = activeLines.reduce((sum, line) => sum + line.quantity.toNumber(), 0);
+        const received = activeLines
+          .filter((line) => ['RECEIVED', 'HANDED_OVER'].includes(line.purchaseOrder.status))
+          .reduce((sum, line) => sum + line.quantity.toNumber(), 0);
+        const handedOver = activeLines
+          .filter((line) => line.purchaseOrder.status === 'HANDED_OVER')
+          .reduce((sum, line) => sum + line.quantity.toNumber(), 0);
+        const { supplierOfferItems: _offers, purchaseOrderItems: _orders, ...result } = item;
+        void _offers;
+        void _orders;
+        return {
+          ...result,
+          progress: {
+            required: item.quantity.toNumber(),
+            offered,
+            ordered,
+            received,
+            handedOver,
+          },
+        };
+      }),
+    };
   }
 
   async update(id: string, dto: UpdateTaskDto) {
@@ -300,42 +351,116 @@ export class TasksService {
     });
   }
 
+  // Serialize item edits with order creation. Both paths lock Task first.
+  private async lockTaskItemTransaction(tx: Prisma.TransactionClient, taskId: string) {
+    const databaseUrl = process.env.DATABASE_URL;
+    if (!databaseUrl) throw new Error('DATABASE_URL is not defined');
+    const schema = new URL(databaseUrl).searchParams.get('schema') ?? 'public';
+    const searchPath = '"' + schema.replaceAll('"', '""') + '", public';
+    await tx.$queryRaw`SELECT pg_catalog.set_config('search_path', ${searchPath}, true)`;
+    await tx.$queryRaw`SELECT "id" FROM "Task" WHERE "id" = ${taskId} FOR UPDATE`;
+    const task = await tx.task.findUnique({ where: { id: taskId }, select: { status: true } });
+    if (!task) throw new NotFoundException('Закупка не найдена');
+    if (task.status === 'CLOSED' || task.status === 'CANCELLED') {
+      throw new ConflictException('Закрытую или отменённую закупку нельзя изменять');
+    }
+  }
+
+  private snapshotItem(item: {
+    name: string;
+    partNumber: string | null;
+    quantity: { toString(): string };
+    unit: string;
+    unitPrice: { toString(): string } | null;
+    currency: string;
+    notes: string | null;
+    catalogItemId: string | null;
+    sourceRequestItemId: string | null;
+    technicalParameters: Prisma.JsonValue | null;
+    requiredAt: Date | null;
+  }): Prisma.InputJsonValue {
+    return {
+      name: item.name,
+      partNumber: item.partNumber,
+      quantity: item.quantity.toString(),
+      unit: item.unit,
+      unitPrice: item.unitPrice?.toString() ?? null,
+      currency: item.currency,
+      notes: item.notes,
+      catalogItemId: item.catalogItemId,
+      sourceRequestItemId: item.sourceRequestItemId,
+      technicalParameters: item.technicalParameters ?? {},
+      requiredAt: item.requiredAt?.toISOString() ?? null,
+    } as Prisma.InputJsonValue;
+  }
+
+  private async assertCatalogMatch(
+    tx: Prisma.TransactionClient,
+    catalogItemId: string | null | undefined,
+    data: {
+      name: string;
+      partNumber: string | null;
+      unit: string;
+      technicalParameters: Record<string, string>;
+    },
+  ) {
+    if (!catalogItemId) return;
+    const catalog = await tx.catalogItem.findUnique({
+      where: { id: catalogItemId },
+    });
+    if (!catalog || !catalog.active) {
+      throw new NotFoundException('Карточка номенклатуры недоступна');
+    }
+    const referenceMatch = catalog.partNumber
+      ? normalizeCatalogText(catalog.partNumber) === normalizeCatalogText(data.partNumber ?? '')
+      : !data.partNumber && normalizeCatalogText(catalog.name) === normalizeCatalogText(data.name);
+    const unitMatch = normalizeCatalogText(catalog.unit) === normalizeCatalogText(data.unit);
+    const catalogSpecs = validateTechnicalParameters(catalog.attributes as Record<string, string>);
+    const sourceSpecs = validateTechnicalParameters(data.technicalParameters);
+    const canonical = (value: Record<string, string>) => JSON.stringify(
+      Object.entries(value)
+        .map(([key, val]) => [normalizeCatalogText(key), normalizeCatalogText(val)])
+        .sort(([a], [b]) => a.localeCompare(b)),
+    );
+    if (!referenceMatch || !unitMatch || canonical(catalogSpecs) !== canonical(sourceSpecs)) {
+      throw new ConflictException(
+        'Каталожная карточка не совпадает со спецификацией позиции. Подмена аналогом без технического согласования запрещена',
+      );
+    }
+  }
+
   async findTaskItems(taskId: string) {
     await this.ensureTaskExists(taskId);
-
     return this.prisma.taskItem.findMany({
       where: { taskId },
+      include: { catalogItem: true },
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
     });
   }
 
-  async addTaskItem(taskId: string, dto: CreateTaskItemDto) {
+  async findTaskItemHistory(taskId: string, itemId: string) {
     await this.ensureTaskExists(taskId);
-    await this.ensureTaskOpen(taskId);
+    return this.prisma.taskItemChange.findMany({
+      where: { taskId, taskItemId: itemId },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
 
+  async addTaskItem(taskId: string, dto: CreateTaskItemDto, actorId?: string) {
     const name = dto.name.trim();
     const unit = dto.unit.trim();
-
-    if (!name) {
-      throw new BadRequestException('Укажите наименование позиции');
-    }
-
-    if (!unit) {
-      throw new BadRequestException('Укажите единицу измерения');
-    }
-
+    if (!name || !unit) throw new BadRequestException('Укажите наименование и единицу измерения');
+    const params = validateTechnicalParameters(dto.technicalParameters);
     return this.prisma.$transaction(async (tx) => {
-      let sortOrder = dto.sortOrder;
-
-      if (sortOrder === undefined) {
-        const lastItem = await tx.taskItem.findFirst({
-          where: { taskId },
-          orderBy: [{ sortOrder: 'desc' }, { createdAt: 'desc' }],
-          select: { sortOrder: true },
-        });
-        sortOrder = (lastItem?.sortOrder ?? -1) + 1;
-      }
-
+      await this.lockTaskItemTransaction(tx, taskId);
+      await this.assertCatalogMatch(tx, dto.catalogItemId, {
+        name, partNumber: dto.partNumber?.trim() || null, unit, technicalParameters: params,
+      });
+      const lastItem = dto.sortOrder === undefined ? await tx.taskItem.findFirst({
+        where: { taskId },
+        orderBy: [{ sortOrder: 'desc' }, { createdAt: 'desc' }],
+        select: { sortOrder: true },
+      }) : null;
       const item = await tx.taskItem.create({
         data: {
           taskId,
@@ -346,18 +471,31 @@ export class TasksService {
           unitPrice: dto.unitPrice,
           currency: dto.currency?.trim().toUpperCase() || 'RUB',
           notes: dto.notes?.trim() || null,
-          sortOrder,
+          sortOrder: dto.sortOrder ?? ((lastItem?.sortOrder ?? -1) + 1),
+          catalogItemId: dto.catalogItemId ?? null,
+          requiredAt: dto.requiredAt ? new Date(dto.requiredAt) : null,
+          technicalParameters: params,
         },
       });
-
+      const snapshot = this.snapshotItem(item);
+      await tx.taskItem.update({
+        where: { id: item.id },
+        data: { originalSnapshot: snapshot },
+      });
+      await tx.taskItemChange.create({
+        data: {
+          taskId, taskItemId: item.id, itemLabel: item.name,
+          actorId: actorId ?? null, action: 'CREATED',
+          newValue: snapshot,
+        },
+      });
       await tx.taskActivity.create({
         data: {
           taskId,
           text: `Добавлена позиция «${item.name}» — ${item.quantity.toString()} ${item.unit}`,
         },
       });
-
-      return item;
+      return tx.taskItem.findUniqueOrThrow({ where: { id: item.id } });
     });
   }
 
@@ -365,99 +503,95 @@ export class TasksService {
     taskId: string,
     itemId: string,
     dto: UpdateTaskItemDto,
+    actorId?: string,
   ) {
-    await this.ensureTaskExists(taskId);
-    await this.ensureTaskOpen(taskId);
-
-    const currentItem = await this.prisma.taskItem.findFirst({
-      where: { id: itemId, taskId },
-    });
-
-    if (!currentItem) {
-      throw new NotFoundException('Позиция закупки не найдена');
-    }
-
-    const activeLine = await this.prisma.purchaseOrderItem.findFirst({
-      where: { taskItemId: itemId, purchaseOrder: { taskId, cancelledAt: null } },
-      select: { id: true },
-    });
-    if (activeLine) throw new ConflictException('Позицию с действующим заказом нельзя изменить или удалить. Сначала отмените неоплаченный заказ');
-
-    const name = dto.name !== undefined ? dto.name.trim() : undefined;
-    const unit = dto.unit !== undefined ? dto.unit.trim() : undefined;
-
-    if (name !== undefined && !name) {
-      throw new BadRequestException('Укажите наименование позиции');
-    }
-
-    if (unit !== undefined && !unit) {
-      throw new BadRequestException('Укажите единицу измерения');
-    }
-
     return this.prisma.$transaction(async (tx) => {
-      const item = await tx.taskItem.update({
+      await this.lockTaskItemTransaction(tx, taskId);
+      const current = await tx.taskItem.findFirst({ where: { id: itemId, taskId } });
+      if (!current) throw new NotFoundException('Позиция закупки не найдена');
+      const referenced = await Promise.all([
+        tx.supplierOfferItem.count({ where: { taskItemId: itemId } }),
+        tx.purchaseOrderItem.count({ where: { taskItemId: itemId } }),
+      ]);
+      if (referenced.some((count) => count > 0)) {
+        throw new ConflictException('Позиция используется в КП или заказах. Изменение запрещено для сохранения учёта');
+      }
+      const name = dto.name === undefined ? current.name : dto.name.trim();
+      const partNumber = dto.partNumber === undefined ? current.partNumber : dto.partNumber.trim() || null;
+      const unit = dto.unit === undefined ? current.unit : dto.unit.trim();
+      const params = dto.technicalParameters === undefined
+        ? validateTechnicalParameters((current.technicalParameters ?? {}) as Record<string, string>)
+        : validateTechnicalParameters(dto.technicalParameters);
+      const catalogItemId = dto.catalogItemId ?? current.catalogItemId;
+      if (!name || !unit) throw new BadRequestException('Укажите наименование и единицу');
+      await this.assertCatalogMatch(tx, catalogItemId, {
+        name, partNumber, unit, technicalParameters: params,
+      });
+      const before = this.snapshotItem(current);
+      const updated = await tx.taskItem.update({
         where: { id: itemId },
         data: {
           name,
-          partNumber:
-            dto.partNumber !== undefined
-              ? dto.partNumber.trim() || null
-              : undefined,
+          partNumber,
           quantity: dto.quantity,
           unit,
           unitPrice: dto.unitPrice,
-          currency:
-            dto.currency !== undefined
-              ? dto.currency.trim().toUpperCase() || 'RUB'
-              : undefined,
-          notes:
-            dto.notes !== undefined ? dto.notes.trim() || null : undefined,
+          currency: dto.currency?.trim().toUpperCase(),
+          notes: dto.notes === undefined ? undefined : dto.notes.trim() || null,
           sortOrder: dto.sortOrder,
+          catalogItemId,
+          technicalParameters: params,
+          requiredAt: dto.requiredAt ? new Date(dto.requiredAt) : undefined,
+          originalSnapshot: current.originalSnapshot
+            ? undefined
+            : before,
         },
       });
-
-      await tx.taskActivity.create({
-        data: {
-          taskId,
-          text: `Изменена позиция «${item.name}»`,
-        },
-      });
-
-      return item;
+      const after = this.snapshotItem(updated);
+      if (JSON.stringify(before) !== JSON.stringify(after)) {
+        await tx.taskItemChange.create({
+          data: {
+            taskId, taskItemId: itemId, itemLabel: updated.name,
+            actorId: actorId ?? null, action: 'UPDATED',
+            oldValue: before, newValue: after,
+          },
+        });
+        await tx.taskActivity.create({
+          data: { taskId, text: `Изменена позиция «${updated.name}»` },
+        });
+      }
+      return updated;
     });
   }
 
-  async deleteTaskItem(taskId: string, itemId: string) {
-    await this.ensureTaskExists(taskId);
-    await this.ensureTaskOpen(taskId);
-
-    const item = await this.prisma.taskItem.findFirst({
-      where: { id: itemId, taskId },
-    });
-
-    if (!item) {
-      throw new NotFoundException('Позиция закупки не найдена');
-    }
-
-    const activeLine = await this.prisma.purchaseOrderItem.findFirst({
-      where: { taskItemId: itemId, purchaseOrder: { taskId, cancelledAt: null } },
-      select: { id: true },
-    });
-    if (activeLine) throw new ConflictException('Позицию с действующим заказом нельзя изменить или удалить. Сначала отмените неоплаченный заказ');
-
+  async deleteTaskItem(taskId: string, itemId: string, actorId?: string) {
     return this.prisma.$transaction(async (tx) => {
-      const deletedItem = await tx.taskItem.delete({
-        where: { id: itemId },
+      await this.lockTaskItemTransaction(tx, taskId);
+      const current = await tx.taskItem.findFirst({ where: { id: itemId, taskId } });
+      if (!current) throw new NotFoundException('Позиция закупки не найдена');
+      const referenced = await Promise.all([
+        tx.supplierOfferItem.count({ where: { taskItemId: itemId } }),
+        tx.purchaseOrderItem.count({ where: { taskItemId: itemId } }),
+      ]);
+      if (referenced.some((count) => count > 0)) {
+        throw new ConflictException('Нельзя удалить позицию с КП или заказами, в том числе историческими');
+      }
+      const snapshot = this.snapshotItem(current);
+      await tx.taskItemChange.create({
+        data: {
+          taskId, taskItemId: itemId, itemLabel: current.name,
+          actorId: actorId ?? null, action: 'DELETED',
+          oldValue: snapshot,
+        },
       });
-
+      await tx.taskItem.delete({ where: { id: itemId } });
       await tx.taskActivity.create({
         data: {
           taskId,
-          text: `Удалена позиция «${item.name}»`,
+          text: `Удалена позиция «${current.name}»`,
         },
       });
-
-      return deletedItem;
+      return current;
     });
   }
 
@@ -553,6 +687,25 @@ export class TasksService {
 
     return this.prisma.$transaction(
       async (tx) => {
+        // Повторяем проверку после блокировки Task: никакая позиция не может
+        // быть изменена или удалена параллельно с созданием КП.
+        await this.lockTaskItemTransaction(tx, taskId);
+        if (offerItems.length) {
+          const currentItems = await tx.taskItem.findMany({
+            where: { taskId, id: { in: taskItemIds } },
+            select: { id: true, name: true, quantity: true },
+          });
+          if (currentItems.length !== taskItemIds.length) {
+            throw new ConflictException('Состав закупки изменился: обновите позиции КП');
+          }
+          const itemMap = new Map(currentItems.map((item) => [item.id, item]));
+          for (const line of offerItems) {
+            const item = itemMap.get(line.taskItemId);
+            if (!item || Math.round(line.quantity * 1000) > Math.round(item.quantity.toNumber() * 1000)) {
+              throw new ConflictException('Количество или позиция изменились: обновите КП');
+            }
+          }
+        }
         const supplier =
           await tx.supplier.create({
             data: {

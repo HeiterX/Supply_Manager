@@ -109,6 +109,11 @@ export default function AppShell({
             Реестр позиций
           </Link>
 
+          <Link href="/catalog" className={desktopLinkClass('/catalog')}>
+            <BoxIcon type="registry" />
+            Номенклатура
+          </Link>
+
           <div className="flex items-center justify-between rounded-xl px-3.5 py-3 text-slate-400">
             <span className="flex items-center gap-3">
               <BoxIcon type="suppliers" />
@@ -168,7 +173,7 @@ export default function AppShell({
         </main>
       </div>
 
-      <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-3 border-t border-slate-200 bg-white/95 px-2 py-2 backdrop-blur lg:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-4 border-t border-slate-200 bg-white/95 px-2 py-2 backdrop-blur lg:hidden">
         <Link href="/requests" className={mobileLinkClass('/requests')}>
           <BoxIcon type="requests" />
           Заявки
@@ -182,6 +187,11 @@ export default function AppShell({
         <Link href="/registry" className={mobileLinkClass('/registry')}>
           <BoxIcon type="registry" />
           Реестр
+        </Link>
+
+        <Link href="/catalog" className={mobileLinkClass('/catalog')}>
+          <BoxIcon type="registry" />
+          Каталог
         </Link>
       </nav>
     </div>
