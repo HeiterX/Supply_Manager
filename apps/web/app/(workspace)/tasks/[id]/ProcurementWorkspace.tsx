@@ -5,6 +5,7 @@ import OrderWizard from './OrderWizard';
 import { milli, orderAllocation } from './allocation';
 import { useConfirmation } from '@/app/components/use-confirmation';
 import { Modal as Dialog } from '@/app/components/Modal';
+import { Alert } from '@/app/components/ui';
 
 import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { apiFetch, API_BASE_URL } from '@/lib/api-client';
@@ -68,7 +69,7 @@ export type PurchaseOrder = {
   supplierOffer: SupplierOffer; items: PurchaseOrderItem[];
 };
 export type ProcurementTask = {
-  id: string; status: string; items: TaskItem[];
+  id: string; title: string; status: string; items: TaskItem[];
   supplierOffers: SupplierOffer[]; purchaseOrders?: PurchaseOrder[];
 };
 
@@ -208,6 +209,10 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
     setOfferCurrency('RUB'); setValidUntil(''); setPaymentTerms(''); setDeliveryTerms('');
     setDeliveryPrice(''); setDeliveryDays(''); setOfferNotes('');
     setLocalError('');
+    setSupplier({ name: '', contact: '', phone: '', email: '', website: '' });
+    setDeliveryPrice('');
+    setDeliveryDays('');
+    setOfferNotes('');
     setDraft(Object.fromEntries(task.items.map(i => [i.id, { selected: true, quantity: String(i.quantity), price: '', inStock: true, notes: '' }])));
     setOfferOpen(true);
   }
@@ -345,7 +350,7 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
     if (ok) setActionForm(null);
   }
   async function closeTask() {
-    if (!await confirm('Все позиции переданы получателям. Закрыть закупку?')) return;
+    if (!await confirm(`Закупка «${task.title}» перейдёт в завершённые. Повторно открыть её нельзя.`, 'Закрыть закупку')) return;
     await onAction('/orders/close', { method: 'PATCH' }, 'Закупка закрыта');
   }
 
@@ -370,7 +375,7 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
           .flatMap(o => o.items).filter(line => line.taskItemId === item.id)
           .reduce((sum, line) => sum + Number(line.quantity), 0);
         return <div key={item.id}>
-          <div className="flex flex-wrap items-baseline justify-between gap-2 text-sm"><div className="font-medium text-slate-800">{item.name} <span className="text-xs font-normal text-slate-400">{item.partNumber ?? ''}</span></div>
+          <div className="flex flex-wrap items-baseline justify-between gap-2 text-sm"><div className="font-medium text-slate-800">{item.name} <span className="text-xs font-normal text-muted">{item.partNumber ?? ''}</span></div>
             <div className="text-xs text-slate-500">Заказано {qty(ordered)} / {qty(required)} {item.unit} · Передано {qty(handed)}</div></div>
           <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-blue-500" style={{ width: `${Math.min(100, (ordered / required) * 100)}%` }} /></div>
           <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-600">
@@ -399,7 +404,7 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
     {mode === 'offers' ? <>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div><h2 className="text-lg font-semibold text-slate-950">Коммерческие предложения</h2>
-          <p className="mt-1 text-sm text-slate-500">Каждый поставщик предлагает конкретные позиции, цены и количество. Разные наборы позиций нельзя сравнивать только по общей сумме.</p></div>
+          <p className="mt-1 text-sm text-muted">Сравнивайте цены и количество по совпадающим позициям.</p></div>
         <button disabled={busy || isClosed || !task.items.length} onClick={openOffer} className={primaryClass}>＋ Добавить КП</button>
       </div>
       {!task.supplierOffers.length ? <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500">Пока нет предложений поставщиков. Добавьте первое КП.</div> :
@@ -431,7 +436,7 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
                 <div className="mt-1 text-xs text-slate-500">Оплата: {offer.paymentTerms || 'не указана'}</div>
                 <div className="text-xs text-slate-500">Доставка: {offer.deliveryTerms || 'условия не указаны'}</div>
               </div>
-              <div className="text-right"><span className="text-xs text-slate-400">Итого по КП</span>
+              <div className="text-right"><span className="text-xs text-muted">Итого по КП</span>
                 <div className="font-bold">{known && offer.currency && offer.deliveryPrice !== null
                   ? quoteMoney(Number(offer.price) + Number(offer.deliveryPrice), offer.currency)
                   : 'Не рассчитано'}</div>
@@ -480,7 +485,7 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
         })}</div></>}
     </> : <>
       <div className="flex flex-wrap items-end justify-between gap-3"><div><h2 className="text-lg font-semibold text-slate-950">Заказы поставщикам</h2>
-        <p className="mt-1 text-sm text-slate-500">Счета, партии, приёмка и передача по каждому поставщику.</p></div>
+        <p className="mt-1 text-sm text-muted">Счета, партии, приёмка и передача по каждому поставщику.</p></div>
         {!isClosed && !allAllocated && <button onClick={() => onNavigate('offers')} className={primaryClass}>＋ Оформить ещё заказ</button>}
       </div>
       {!orders.length ? <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500">Заказов пока нет. Перейдите к КП и оформите первый заказ.</div> :
@@ -492,9 +497,9 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
           <div className="mt-4 space-y-2">{order.items?.length ? order.items.map(line => <div key={line.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 p-3 text-sm">
             <span>{line.name} <span className="text-xs text-slate-500">· {qty(line.quantity)} {line.unit}</span></span><b>{line.unitPrice === null ? '—' : money(Number(line.quantity) * Number(line.unitPrice), line.currency)}</b>
           </div>) : <p className="text-xs text-amber-700">Заказ старого формата без детализации по позициям</p>}</div>
-          <div className="mt-3 grid gap-3 text-sm sm:grid-cols-3"><div><span className="text-slate-400">Товары</span><div className="font-semibold">{money(order.price)}</div></div>
-            <div><span className="text-slate-400">Доставка</span><div className="font-semibold">{money(order.deliveryPrice)}</div></div>
-            <div><span className="text-slate-400">Итого</span><div className="font-bold">{money(order.totalPrice)}</div></div></div>
+          <div className="mt-3 grid gap-3 text-sm sm:grid-cols-3"><div><span className="text-muted">Товары</span><div className="font-semibold">{money(order.price)}</div></div>
+            <div><span className="text-muted">Доставка</span><div className="font-semibold">{money(order.deliveryPrice)}</div></div>
+            <div><span className="text-muted">Итого</span><div className="font-bold">{money(order.totalPrice)}</div></div></div>
           {!order.ledgerEnabled && order.shippedAt && <p className="mt-3 text-xs text-slate-500">Отгружено {date(order.shippedAt)} · {order.carrier ?? '—'}{order.trackingNumber ? ` · ТТН ${order.trackingNumber}` : ''}{order.expectedDeliveryAt ? ` · Ожидается ${date(order.expectedDeliveryAt)}` : ''}</p>}
           {!order.ledgerEnabled && order.handedOverAt && <p className="mt-2 text-xs text-emerald-700">Передано: {order.handedOverTo} · {date(order.handedOverAt)}</p>}
           {order.cancelledAt && <p className="mt-2 text-xs text-rose-600">Отменён: {order.cancelReason ?? 'причина не указана'}</p>}
@@ -543,7 +548,7 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
     {offerOpen && <Dialog busy={busy} title={editingOffer ? "Редактировать КП" : "Новое коммерческое предложение"} onClose={() => setOfferOpen(false)}>
       <form onSubmit={saveOffer} className="space-y-5"><div className="grid gap-3 sm:grid-cols-2">
         <Field label="Поставщик *">
-          <input autoFocus required readOnly={Boolean(supplierId)} className={inputClass} value={supplier.name}
+          <input data-initial-focus required readOnly={Boolean(supplierId)} className={inputClass} value={supplier.name}
             onChange={e => setSupplier(s => ({ ...s, name: e.target.value }))}
             placeholder="ООО «ПромСнаб»" />
           {supplierId && <button type="button" className="mt-2 text-xs text-blue-600" onClick={() => {
@@ -595,12 +600,14 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
         <div className="mt-3 space-y-3">{task.items.map(item => {
           const row = draft[item.id]; if (!row) return null;
           return <div key={item.id} className="rounded-xl border border-slate-200 p-3">
-            <label className="flex items-center gap-3 text-sm font-semibold"><input type="checkbox" className="ui-choice" checked={row.selected} onChange={e => updateDraft(item.id, { selected: e.target.checked })} />{item.name} <span className="font-normal text-slate-400">нужно {qty(item.quantity)} {item.unit}</span></label>
+            <label className="flex items-center gap-3 text-sm font-semibold"><input type="checkbox" className="ui-choice" checked={row.selected} onChange={e => updateDraft(item.id, { selected: e.target.checked })} />{item.name} <span className="font-normal text-muted">нужно {qty(item.quantity)} {item.unit}</span></label>
             {row.selected && <div className="mt-3 grid gap-3 sm:grid-cols-2"><Field label={`Количество, ${item.unit} *`}><input required type="number" min="0.001" max={Number(item.quantity)} step="0.001" className={inputClass} value={row.quantity} onChange={e => updateDraft(item.id, { quantity: e.target.value })} /></Field>
               <Field label={`Цена за единицу, ${offerCurrency || 'валюта не указана'}`}><input type="number" min="0" step="0.01" className={inputClass} value={row.price} onChange={e => updateDraft(item.id, { price: e.target.value })} placeholder="Можно оставить пустым" /></Field>
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="ui-choice" checked={row.inStock} onChange={e => updateDraft(item.id, { inStock: e.target.checked })} />В наличии</label>
               <div className="text-right text-sm font-semibold">Сумма: {row.price === '' ? 'не указана' : quoteMoney(Number(row.price) * Number(row.quantity), offerCurrency || null)}</div>
-              <div className="sm:col-span-2"><input className={inputClass} value={row.notes} onChange={e => updateDraft(item.id, { notes: e.target.value })} placeholder="Комментарий по позиции" /></div>
+              <div className="sm:col-span-2"><Field label="Комментарий по позиции">
+                <input className={inputClass} value={row.notes} onChange={e => updateDraft(item.id, { notes: e.target.value })} />
+              </Field></div>
             </div>}
           </div>;
         })}</div></div>
@@ -614,7 +621,7 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
         <p className="mt-2 text-xs text-blue-800">Если цена, валюта или доставка неизвестны — итог не рассчитывается.</p>
       </div>
       <Field label="Комментарий к КП"><textarea rows={3} className={inputClass} value={offerNotes} onChange={e => setOfferNotes(e.target.value)} /></Field>
-      {localError && <p className="text-sm text-rose-600">{localError}</p>}
+      {localError && <Alert tone="danger">{localError}</Alert>}
       <div className="flex flex-wrap justify-end gap-2"><button type="button" onClick={() => setOfferOpen(false)} className={secondaryClass}>Отмена</button><button disabled={busy || !task.items.some(i => draft[i.id]?.selected)} className={primaryClass}>{editingOffer ? "Сохранить изменения" : "Сохранить КП"}</button></div>
       </form>
     </Dialog>}
@@ -673,12 +680,12 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
           <Field label="Ожидаемая дата прибытия"><input type="datetime-local" className={inputClass} value={expectedAt} onChange={e => setExpectedAt(e.target.value)} /></Field></div>
           <Field label="Перевозчик *"><input required className={inputClass} value={carrier} onChange={e => setCarrier(e.target.value)} /></Field>
           <Field label="Трек / ТТН"><input className={inputClass} value={tracking} onChange={e => setTracking(e.target.value)} /></Field></>}
-        {actionForm.action === 'hand-over' && <Field label="Кому передан товар *"><input required autoFocus className={inputClass} value={handedTo} onChange={e => setHandedTo(e.target.value)} /></Field>}
+        {actionForm.action === 'hand-over' && <Field label="Кому передан товар *"><input required data-initial-focus className={inputClass} value={handedTo} onChange={e => setHandedTo(e.target.value)} /></Field>}
         {actionForm.action === 'cancel' && <><p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">Отмена освободит количество для других поставщиков. Отменить оплаченный заказ нельзя.</p>
           <Field label="Причина отмены *"><textarea required rows={3} className={inputClass} value={cancelReason} onChange={e => setCancelReason(e.target.value)} /></Field></>}
         {['send-to-payment', 'confirm-payment', 'ready-for-pickup', 'receive'].includes(actionForm.action) && <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-600">Подтвердите действие. Оно будет сохранено в истории закупки.</p>}
-        {localError && <p className="text-sm text-rose-600">{localError}</p>}
-        <div className="flex justify-end gap-2"><button type="button" onClick={() => setActionForm(null)} className={secondaryClass}>Назад</button>
+        {localError && <Alert tone="danger">{localError}</Alert>}
+        <div className="flex flex-wrap justify-end gap-2"><button type="button" data-initial-focus={actionForm.action === 'cancel' ? true : undefined} onClick={() => setActionForm(null)} className={secondaryClass}>Назад</button>
           <button disabled={busy} className={actionForm.action === 'cancel' ? 'rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40' : primaryClass}>
             {actionForm.action === 'cancel' ? 'Отменить заказ' : 'Подтвердить'}</button></div>
       </form>

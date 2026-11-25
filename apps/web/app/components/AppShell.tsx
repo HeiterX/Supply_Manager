@@ -2,8 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { AUTH_EVENTS } from '@/lib/api-client';
+import { useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useSession } from './AuthGate';
 import { Dialog } from './Dialog';
 import GlobalSearch from './GlobalSearch';
@@ -48,7 +47,7 @@ function Icon({ name }: { name: keyof typeof icons }) {
 }
 
 function Brand() {
-  return <Link href="/dashboard" className="app-brand" aria-label="Supply Manager — главная">
+  return <Link href="/dashboard" className="app-brand">
     <span className="brand-mark" aria-hidden="true">SM</span>
     <span className="brand-text"><strong>Supply Manager</strong><small>Снабжение и закупки</small></span>
   </Link>;
@@ -89,7 +88,7 @@ function SectionSearch({ entries }: { entries: Entries }) {
   const [query, setQuery] = useState('');
   const matches = entries.filter(({ label }) => label.toLowerCase().includes(query.trim().toLowerCase()));
   return <Dialog title="Поиск по разделам" trigger={(open) =>
-    <Button variant="outline" className="app-search" onClick={() => { setQuery(''); open(); }} aria-label="Поиск по разделам">
+    <Button variant="outline" className="app-search" onClick={() => { setQuery(''); open(); }} aria-label="Поиск по разделам" aria-haspopup="dialog">
       <Icon name="search" /><span>Поиск по разделам</span>
     </Button>}>
     {(close) => <>
@@ -104,9 +103,10 @@ function SectionSearch({ entries }: { entries: Entries }) {
 function UserMenu() {
   const { user, signingOut, logoutError, logout } = useSession();
   return <div className="relative">
-    <Button variant="ghost" className="app-user-button" popoverTarget="app-user-menu" aria-label={`Меню пользователя: ${user.fullName}`}>
+    <Button variant="ghost" className="app-user-button" popoverTarget="app-user-menu">
       <Avatar name={user.fullName} />
       <span className="app-user-label"><strong>{user.fullName}</strong><small>{roleLabels[user.role]}</small></span>
+      <span className="sr-only">Меню пользователя</span>
       <Icon name="chevron" />
     </Button>
     <div popover="auto" id="app-user-menu" className="ui-popover" aria-label="Меню пользователя">
@@ -120,14 +120,7 @@ function UserMenu() {
 }
 
 function WorkspaceContent({ children, allowed }: { children: ReactNode; allowed: boolean }) {
-  const [forbidden, setForbidden] = useState(false);
-  useEffect(() => {
-    const deny = () => setForbidden(true);
-    window.addEventListener(AUTH_EVENTS.forbidden, deny);
-    return () => window.removeEventListener(AUTH_EVENTS.forbidden, deny);
-  }, []);
-
-  if (allowed && !forbidden) return children;
+  if (allowed) return children;
 
   return <PageLayout title="Недостаточно прав">
     <EmptyState title="403 · Доступ ограничен" description="Для этого раздела требуются дополнительные права."
@@ -168,7 +161,7 @@ export default function AppShell({ children, tools }: { children: ReactNode; too
             <Icon name="panel" />
           </Button>
           <Dialog key={pathname} title="Навигация" className="app-drawer"
-            trigger={(open) => <Button variant="ghost" icon className="app-mobile-toggle" aria-label="Открыть навигацию" onClick={open}>
+            trigger={(open) => <Button variant="ghost" icon className="app-mobile-toggle" aria-label="Открыть навигацию" aria-haspopup="dialog" onClick={open}>
               <Icon name="menu" />
             </Button>}>
             {(close) => <NavLinks entries={entries} current={current} pathname={pathname} onNavigate={close} />}

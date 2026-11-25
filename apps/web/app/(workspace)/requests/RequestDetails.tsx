@@ -8,8 +8,10 @@ import LoadError from '@/app/components/LoadError';
 import { StatusBadge } from '@/app/components/StatusBadge';
 import { Alert, Badge, Button, Card, EmptyState, Skeleton, Spinner, Field, Textarea } from '@/app/components/ui';
 import { apiFetch } from '@/lib/api-client';
+import { apiError, apiMessage, apiProblem, ApiError, couldHaveSaved } from '@/lib/api-error';
 import { useAbortableLoad } from '@/lib/use-abortable-load';
-import { priorityLabels, workingDate, workingError, workingLink } from '@/lib/working-list';
+import { useRetryDelay } from '@/lib/use-retry-delay';
+import { priorityLabels, workingDate, workingLink } from '@/lib/working-list';
 
 type Person = { id?: string; fullName: string; department?: string | null };
 type RequestItem = {
@@ -33,7 +35,7 @@ export function requester(request: RequestRow) {
 }
 
 function RequestPhoto({ item }: { item: RequestItem }) {
-  const [result, setResult] = useState<{ url?: string; error?: string }>();
+  const [result, setResult] = useState<{ url?: string; error?: string | ApiError }>();
   const [attempt, setAttempt] = useState(0);
   const name = item.photoOriginalName || 'Фото позиции';
   useEffect(() => {
@@ -44,16 +46,14 @@ function RequestPhoto({ item }: { item: RequestItem }) {
       try {
         const response = await apiFetch(`/purchase-requests/public/items/${encodeURIComponent(item.id)}/photo`,
           { signal: controller.signal, cache: 'no-store' });
-        if (!response.ok) throw new Error(await workingError(response,
-          response.status === 404 ? 'Фото отсутствует.' : 'Не удалось открыть фото.'));
+        if (!response.ok) throw await apiError(response, 'Не удалось открыть фото.');
         const blob = await response.blob();
         if (!/^image\/(jpeg|png|webp)$/i.test(blob.type)) throw new Error('Сервер вернул неподдерживаемый формат фото.');
         if (controller.signal.aborted) return;
         url = URL.createObjectURL(blob);
         setResult({ url });
       } catch (error) {
-        if (!controller.signal.aborted) setResult({ error: error instanceof TypeError
-          ? 'Проверьте подключение и повторите загрузку.' : error instanceof Error ? error.message : 'Не удалось открыть фото.' });
+        if (!controller.signal.aborted) setResult({ error: apiProblem(error, 'Не удалось открыть фото.') });
       }
     }
     void load();
@@ -65,12 +65,11 @@ function RequestPhoto({ item }: { item: RequestItem }) {
       className="max-h-96 w-full rounded-lg bg-surface-subtle object-contain" />
     <a className="ui-button ui-button--outline whitespace-normal [overflow-wrap:anywhere]" href={result.url} download={name}>{name} · Скачать</a>
   </div>;
-  return <div className="mt-3">
-    {result?.error && <p role="alert" className="mb-2 text-sm text-danger">{result.error}</p>}
-    <Button variant="outline" loading={attempt > 0 && !result} onClick={() => {
+  function retry() {
       setResult(undefined); setAttempt((value) => value + 1);
-    }}>{result?.error ? 'Повторить загрузку фото' : 'Показать фото'}</Button>
-  </div>;
+  }
+  return <div className="mt-3">{result?.error ? <LoadError message={result.error} retry={retry} retryLabel="Повторить загрузку фото" />
+    : <Button variant="outline" loading={attempt > 0 && !result} onClick={retry}>Показать фото</Button>}</div>;
 }
 
 export default function RequestDetails({ id, back, onChanged }: { id: string; back: string; onChanged?: () => void }) {
@@ -78,26 +77,28 @@ export default function RequestDetails({ id, back, onChanged }: { id: string; ba
   const [reason, setReason] = useState('');
   const [rejecting, setRejecting] = useState(false);
   const [request, setRequest] = useState<Request>();
-  const [error, setError] = useState('');
+  const [error, setError] = useState<string | ApiError>('');
   const [action, setAction] = useState('');
   const [accepted, setAccepted] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [retryAt, setRetryAt] = useState<number | null>(null);
+  const waiting = useRetryDelay(retryAt);
   const lock = useRef(false);
   const load = useCallback(async (signal: AbortSignal) => {
     try {
       const response = await apiFetch(`/purchase-requests/${encodeURIComponent(id)}`, { signal, cache: 'no-store' });
-      if (!response.ok) throw new Error(await workingError(response, 'Не удалось открыть заявку.'));
+      if (!response.ok) throw await apiError(response, 'Не удалось открыть заявку.');
       const value = await response.json() as Request;
       if (!signal.aborted) { setRequest(value); setError(''); }
     } catch (error) {
-      if (!signal.aborted) setError(error instanceof Error ? error.message : 'Не удалось открыть заявку.');
+      if (!signal.aborted) setError(apiProblem(error, 'Не удалось открыть заявку.'));
     }
   }, [id]);
   const reload = useAbortableLoad(load);
 
   async function process(operation: 'review' | 'accept' | 'reject') {
     if (operation === 'reject' && reason.trim().length < 5) return;
-    if (lock.current) return;
+    if (lock.current || waiting) return;
     lock.current = true;
     setBusy(true);
     setAction('');
@@ -112,20 +113,22 @@ export default function RequestDetails({ id, back, onChanged }: { id: string; ba
         setAction('Заявка изменилась. Данные обновлены.');
         return;
       }
-      if (!response.ok) throw new Error(await workingError(response, 'Не удалось обработать заявку.'));
+      if (!response.ok) throw await apiError(response, 'Не удалось обработать заявку.');
       setRequest(await response.json() as Request);
       setAccepted(operation === 'accept');
       setRejecting(false);
       setReason('');
       onChanged?.();
     } catch (error) {
-      setAction(error instanceof TypeError ? 'Подтверждение не получено. Проверяем состояние заявки.' :
-        error instanceof Error ? error.message : 'Не удалось обработать заявку.');
-      await reload();
+      if (error instanceof ApiError) setRetryAt(error.retryAt);
+      if (couldHaveSaved(error)) {
+        setAction('Подтверждение не получено. Проверьте актуальное состояние заявки.');
+        await reload();
+      } else setAction(apiMessage(error, 'Не удалось обработать заявку.'));
     } finally { lock.current = false; setBusy(false); }
   }
 
-  if (error) return <LoadError message={error} retry={() => void reload()} />;
+  if (error) return <LoadError message={error} retry={() => void reload()} back={back} />;
   if (!request) return <Skeleton label="Загрузка заявки" />;
   const canManage = user.role !== 'EMPLOYEE';
   const canProcess = canManage && (!request.assignedTo || request.assignedTo.id === user.id || user.role === 'ADMIN');
@@ -148,16 +151,16 @@ export default function RequestDetails({ id, back, onChanged }: { id: string; ba
         href={workingLink(`/tasks/${request.task.id}`, back)}>Закупка №{request.task.number}</Link>}
       {canProcess && !request.task && (pending || request.status === 'APPROVED') && <>
         <div className="flex flex-wrap gap-2">
-          {request.status === 'NEW' && <Button variant="outline" disabled={busy} onClick={() => void process('review')}>Взять на рассмотрение</Button>}
-          <Button loading={busy} onClick={() => void process('accept')}>Принять в работу</Button>
-          {pending && <Button variant="outline" disabled={busy} onClick={() => setRejecting(value => !value)}>Отклонить</Button>}
+          {request.status === 'NEW' && <Button variant="outline" disabled={busy || waiting} onClick={() => void process('review')}>Взять на рассмотрение</Button>}
+          <Button loading={busy} disabled={waiting} onClick={() => void process('accept')}>Принять в работу</Button>
+          {pending && <Button variant="outline" disabled={busy || waiting} onClick={() => setRejecting(value => !value)}>Отклонить</Button>}
         </div>
         {pending && rejecting && <div className="space-y-2">
           <Field id={`reject-reason-${id}`} label="Причина отклонения заявки">
             <Textarea id={`reject-reason-${id}`} value={reason} rows={3} maxLength={1500}
               onChange={event => setReason(event.target.value)} />
           </Field>
-          <Button disabled={busy || reason.trim().length < 5} onClick={() => void process('reject')}>Подтвердить отклонение</Button>
+          <Button disabled={busy || waiting || reason.trim().length < 5} onClick={() => void process('reject')}>Подтвердить отклонение</Button>
         </div>}
       </>}
       {accepted && <Alert tone="success">Заявка принята в работу.</Alert>}

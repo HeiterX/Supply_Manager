@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useState } from 'react';
 import { apiFetch } from '@/lib/api-client';
+import { apiError, apiProblem, type ApiError } from '@/lib/api-error';
 import { useAbortableLoad } from '@/lib/use-abortable-load';
 import { useSession } from '@/app/components/AuthGate';
 import LoadError from '@/app/components/LoadError';
@@ -46,19 +47,19 @@ export default function DashboardPage() {
 function PurchaseSummary() {
   const [purchases, setPurchases] = useState<Purchase[]>();
   const [loadedAt, setLoadedAt] = useState(0);
-  const [error, setError] = useState('');
+  const [error, setError] = useState<string | ApiError>('');
   const load = useCallback(async (signal: AbortSignal) => {
     setError('');
     try {
       const response = await apiFetch('/tasks', { signal });
-      if (!response.ok) throw new Error('Не удалось загрузить обзор закупок.');
+      if (!response.ok) throw await apiError(response, 'Не удалось загрузить обзор закупок.');
       const data: Purchase[] = await response.json();
       if (!signal.aborted) {
         setLoadedAt(Date.now());
         setPurchases(data);
       }
-    } catch {
-      if (!signal.aborted) setError('Не удалось загрузить обзор закупок.');
+    } catch (error) {
+      if (!signal.aborted) setError(apiProblem(error, 'Не удалось загрузить обзор закупок.'));
     }
   }, []);
   const reload = useAbortableLoad(load);

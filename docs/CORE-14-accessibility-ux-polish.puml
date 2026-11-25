@@ -1,0 +1,30 @@
+@startuml
+skinparam componentStyle rectangle
+actor "Пользователь" as User
+
+package "Next.js" {
+  component "AuthGate" as Gate
+  component "Формы, диалоги и таблицы CORE-12/13" as UI
+  component "API-клиент" as Client
+  component "Сообщения по статусу и полям" as Errors
+}
+
+package "NestJS" {
+  component "Cookie-JWT и RBAC" as Auth
+  component "Заявки, закупки, заказы и фото" as Work
+  component "Discovery CORE-11" as Discovery
+  component "Next Action CORE-09" as NextAction
+}
+
+User --> Gate
+User --> UI : публичная заявка и регистрация
+Gate --> UI : разрешённые рабочие разделы
+UI --> Client : запрос и отмена устаревшего чтения
+Client --> Gate : 401 на защищённом маршруте
+Client --> Auth : cookie
+Client --> Work
+Client ..> Discovery : списки серверными страницами
+Client ..> NextAction : действие закупки
+UI --> Errors : статус, Retry-After, разрешённые поля
+Errors --> UI : сообщение, фокус, задержка повторения
+@enduml

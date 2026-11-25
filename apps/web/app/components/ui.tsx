@@ -1,4 +1,4 @@
-import type { ComponentProps, ReactNode } from 'react';
+import { cloneElement, isValidElement, type ComponentProps, type ReactNode } from 'react';
 
 type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'destructive';
 type Tone = 'neutral' | 'info' | 'success' | 'warning' | 'danger';
@@ -23,15 +23,27 @@ export function Select({ className = '', ...props }: ComponentProps<'select'>) {
   return <select {...props} className={`ui-input ${className}`} />;
 }
 
-export function Field({ id, label, error, children }: {
+export function Field({ id, label, error, hint, children }: {
   id: string;
   label: ReactNode;
   error?: string;
+  hint?: string;
   children: ReactNode;
 }) {
+  const control = isValidElement<ComponentProps<'input'>>(children) ? children : null;
+  const describedBy = new Set([
+    ...(control?.props['aria-describedby']?.split(/\s+/) ?? []),
+    ...(hint ? [`${id}-hint`] : []),
+    ...(error ? [`${id}-error`] : []),
+  ]);
   return <div className="ui-field">
     <label htmlFor={id}>{label}</label>
-    {children}
+    {control ? cloneElement(control, {
+      id,
+      'aria-invalid': error ? true : control.props['aria-invalid'],
+      'aria-describedby': [...describedBy].join(' ') || undefined,
+    }) : children}
+    {hint && <p id={`${id}-hint`} className="text-muted">{hint}</p>}
     {error && <p id={`${id}-error`} className="ui-error" role="alert">{error}</p>}
   </div>;
 }

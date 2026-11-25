@@ -128,7 +128,7 @@ jobs:
           npm --prefix apps/web run test:browser
 
   web:
-    name: Web — lint and Next.js build
+    name: Web — lint, build, unit and Chromium
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -156,6 +156,17 @@ jobs:
       - name: Web build and TypeScript check
         if: ${{ always() && steps.web-install.outcome == 'success' }}
         run: npm run build
+      - name: Web unit tests
+        run: npm test
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Browser regression and accessibility
+        run: |
+          npm run start -- --hostname 127.0.0.1 --port 3391 &
+          app_pid=$!
+          trap 'kill "$app_pid" 2>/dev/null || true' EXIT
+          curl --fail --silent --retry 15 --retry-connrefused --retry-delay 1 http://127.0.0.1:3391/request > /dev/null
+          npm run test:working
 
   audit:
     name: npm audit (${{ matrix.app }}, informational)
