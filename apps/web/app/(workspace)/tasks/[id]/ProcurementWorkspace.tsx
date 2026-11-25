@@ -73,6 +73,7 @@ export type ProcurementTask = {
 };
 
 type Draft = { selected: boolean; quantity: string; price: string; inStock: boolean; notes: string };
+type OrderDraft = { selected: boolean; quantity: string };
 type ActionName = 'send-to-payment' | 'confirm-payment' | 'ship' | 'ready-for-pickup' | 'receive' | 'hand-over' | 'cancel';
 type ActionForm = { order: PurchaseOrder; action: ActionName };
 

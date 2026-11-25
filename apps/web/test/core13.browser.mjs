@@ -14,7 +14,7 @@ const date = '2026-11-20T12:00:00.000Z';
 const user = { id: 'staff-1', username: 'fixture', fullName: 'Тестовый снабженец', role: 'PROCUREMENT' };
 const part = { id: 'part-1', name: 'Комплект уплотнений для стенда', quantity: '4.5', unit: 'компл.', partNumber: 'QA-10', unitPrice: '1200', currency: 'RUB', notes: 'Синтетическая позиция' };
 const supplier = { id: 'supplier-1', name: 'Тестовая верфь' };
-const offer = { id: 'offer-1', status: 'RECEIVED', price: '5400', deliveryPrice: '100', deliveryDays: 5, requestedAt: date, supplier,
+const offer = { id: 'offer-1', status: 'RECEIVED', currency: 'RUB', decisionReason: 'Проверено тестом', version: 1, price: '5400', deliveryPrice: '100', deliveryDays: 5, requestedAt: date, supplier,
   items: [{ id: 'line-1', taskItemId: part.id, taskItem: part, quantity: '4.5', unitPrice: '1200', currency: 'RUB', inStock: true }] };
 const task = { id: 'fixture-task', number: 314, title: 'Уплотнения испытательного стенда', status: 'SEARCHING', priority: 'HIGH',
   createdAt: date, updatedAt: date, deadline: date, nextAction: 'Уточнить наличие', reminderAt: null, items: [part], supplierOffers: [offer],
@@ -40,9 +40,10 @@ async function setup(browser, role = 'PROCUREMENT') {
     const path = url.pathname.slice('/api/v1'.length);
     const method = route.request().method();
     const headers = { 'access-control-allow-origin': web.origin, 'access-control-allow-credentials': 'true',
-      'access-control-allow-methods': 'GET,POST,PATCH,OPTIONS', 'access-control-allow-headers': 'content-type,x-upload-token' };
+      'access-control-allow-methods': 'GET,POST,PATCH,OPTIONS', 'access-control-allow-headers': 'content-type,x-upload-token,x-csrf-token' };
     const respond = (json, status = 200) => route.fulfill({ json, status, headers });
     if (method === 'OPTIONS') return route.fulfill({ headers, status: 204 });
+    if (path === '/auth/csrf') return respond({ csrfToken: 'a'.repeat(64) });
     if (path === '/auth/me') return respond({ ...user, role });
     if (path.startsWith('/discovery/lists/')) {
       calls.list.push(url.searchParams);
@@ -274,7 +275,9 @@ test('CORE-13 on real NestJS, cookies and the isolated PostgreSQL fixture', {
   const api = 'http://127.0.0.1:3390/api/v1';
   const { Client } = require('../../api/node_modules/pg');
   const sharp = require('../../api/node_modules/sharp');
-  const db = new Client({ connectionString: 'postgresql://core13_local:core13_local@127.0.0.1:55433/core13_local?schema=e2e' });
+  const database = new URL(process.env.DATABASE_URL || 'postgresql://core13_local:core13_local@127.0.0.1:55433/core13_local?schema=e2e');
+  assert(['localhost', '127.0.0.1'].includes(database.hostname) && database.searchParams.get('schema') === 'e2e');
+  const db = new Client({ connectionString: database.href });
   await db.connect();
   suite.after(() => db.end());
   const browser = await chromium.launch({ channel: process.env.CORE13_BROWSER_CHANNEL || undefined });
@@ -319,11 +322,18 @@ test('CORE-13 on real NestJS, cookies and the isolated PostgreSQL fixture', {
   const taskPath = new URL(page.url()).pathname;
   const details = await (await page.request.get(api + taskPath)).json();
   assert.equal(details.items.length, 1);
+  const csrf = await (await page.request.get(api + '/auth/csrf')).json();
+  const headers = { 'X-CSRF-Token': csrf.csrfToken };
   for (const [supplierName, unitPrice] of [['Поставщик QA 1', 1200], ['Поставщик QA 2', 1300]]) {
-    const offer = await page.request.post(api + taskPath + '/supplier-offers', { data: {
-      supplierName, deliveryDays: 3, items: [{ taskItemId: details.items[0].id, quantity: 4, unitPrice, currency: 'RUB', inStock: true }],
+    const offer = await page.request.post(api + taskPath + '/supplier-offers', { headers, data: {
+      supplierName: supplierName + ' ' + username, currency: 'RUB', deliveryDays: 3, items: [{ taskItemId: details.items[0].id, quantity: 4, unitPrice, currency: 'RUB', inStock: true }],
     } });
     assert(offer.ok(), await offer.text());
+    const { id } = await offer.json();
+    const decision = await page.request.patch(api + taskPath + '/supplier-offers/' + id + '/decision', {
+      headers, data: { reason: 'Синтетическая проверка выбора предложения' },
+    });
+    assert(decision.ok(), await decision.text());
   }
   await goto(page, taskPath + '?tab=offers');
   await page.getByRole('region', { name: 'Сравнение коммерческих предложений' }).waitFor();

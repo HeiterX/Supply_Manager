@@ -25,6 +25,7 @@ export function WorkingTableControls({ list, statuses, purchases = false, entity
 }) {
   const { query, change } = list;
   const [feedback, setFeedback] = useState('');
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   function update(values: Record<string, string>, reset: string[] = []) {
     const next = new URLSearchParams(query);
@@ -100,10 +101,10 @@ export function WorkingTableControls({ list, statuses, purchases = false, entity
       </>}
       {feedback && <span role="status" className="text-sm text-muted">{feedback}</span>}
     </div>
-    {entity && <details>
+    {entity && <details onToggle={event => setAdvancedOpen(event.currentTarget.open)}>
       <summary className="cursor-pointer font-medium">Расширенные фильтры и экспорт</summary>
-      <DiscoveryControls entity={entity} query={query} change={change} total={list.page?.total}
-        exportUrl={`/discovery/lists/${entity}/export?${query}`} />
+      {advancedOpen && <DiscoveryControls entity={entity} query={query} change={change} total={list.page?.total}
+        exportUrl={`/discovery/lists/${entity}/export?${query}`} />}
     </details>}
   </Card>;
 }

@@ -155,7 +155,7 @@ test('CORE-11 against the production Web build and isolated API', { timeout: 900
       await employee.getByRole('heading', { name: 'Вход в Supply Manager' }).waitFor();
       await login(employee, fixture.employee, '/requests');
       await employee.getByRole('heading', { name: 'Мои заявки' }).waitFor();
-      await employee.getByText(fixture.own.title, { exact: true }).waitFor();
+      await employee.getByRole('link', { name: new RegExp(fixture.own.title) }).waitFor();
       assert.equal(await employee.getByText('Чужая заявка', { exact: false }).count(), 0);
       const forbidden = await employee.request.get(`${api}/discovery/lists/orders`);
       assert.equal(forbidden.status(), 403);
