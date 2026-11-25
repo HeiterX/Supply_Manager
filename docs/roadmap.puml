@@ -823,4 +823,17 @@ legend bottom
 |<#A5D6A7>| Конечный результат |
 endlegend
 
+package "CORE-11. ПОИСК И ОПЕРАЦИОННАЯ АНАЛИТИКА" #E3F2FD {
+    rectangle "Поиск и списки\nФильтры, пагинация и RBAC" as CORE11SEARCH #BBDEFB
+    rectangle "Серверные агрегаты\nСроки, оплаты, поставки" as CORE11REPORT #BBDEFB
+    rectangle "Экспорт разрешённой выборки\nCSV / XLSX" as CORE11EXPORT #BBDEFB
+    CORE11SEARCH --> CORE11EXPORT
+    CORE11REPORT --> CORE11EXPORT
+}
+
+TASK ..> CORE11SEARCH
+ITEM ..> CORE11SEARCH
+SUPPLIER ..> CORE11REPORT
+PO ..> CORE11REPORT
+
 @enduml

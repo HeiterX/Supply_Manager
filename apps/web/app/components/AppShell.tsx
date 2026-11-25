@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
+import { useCurrentUser } from './AuthGate';
+import GlobalSearch from './GlobalSearch';
 
 type AppShellProps = {
   children: ReactNode;
@@ -65,6 +67,17 @@ export default function AppShell({
   action,
 }: AppShellProps) {
   const pathname = usePathname();
+  const employee = useCurrentUser()?.role === 'EMPLOYEE';
+  const links: { href: string; label: string; mobile: string; icon: IconType }[] = [
+    { href: '/requests', label: employee ? 'Мои заявки' : 'Входящие заявки', mobile: 'Заявки', icon: 'requests' },
+    ...(employee ? [] : [
+      { href: '/', label: 'Закупки', mobile: 'Закупки', icon: 'tasks' as const },
+      { href: '/registry', label: 'Реестр позиций', mobile: 'Реестр', icon: 'registry' as const },
+      { href: '/suppliers', label: 'Поставщики', mobile: 'Поставщики', icon: 'suppliers' as const },
+      { href: '/orders', label: 'Заказы', mobile: 'Заказы', icon: 'tasks' as const },
+      { href: '/analytics', label: 'Аналитика', mobile: 'Аналитика', icon: 'registry' as const },
+    ]),
+  ];
 
   const desktopLinkClass = (href: string) =>
     `flex items-center gap-3 rounded-xl px-3.5 py-3 font-medium transition ${
@@ -94,43 +107,14 @@ export default function AppShell({
         </div>
 
         <nav className="flex-1 space-y-1.5 px-3 py-5 text-sm">
-          <Link href="/requests" className={desktopLinkClass('/requests')}>
-            <BoxIcon type="requests" />
-            Входящие заявки
-          </Link>
-
-          <Link href="/" className={desktopLinkClass('/')}>
-            <BoxIcon type="tasks" />
-            Закупки
-          </Link>
-
-          <Link href="/registry" className={desktopLinkClass('/registry')}>
-            <BoxIcon type="registry" />
-            Реестр позиций
-          </Link>
-
-          <div className="flex items-center justify-between rounded-xl px-3.5 py-3 text-slate-400">
-            <span className="flex items-center gap-3">
-              <BoxIcon type="suppliers" />
-              Поставщики
-            </span>
-            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-              скоро
-            </span>
-          </div>
+          {links.map(({ href, label, icon }) => (
+            <Link key={href} href={href} className={desktopLinkClass(href)}
+              aria-current={isCurrentPath(pathname, href) ? 'page' : undefined}>
+              <BoxIcon type={icon} />{label}
+            </Link>
+          ))}
         </nav>
 
-        <div className="m-3 rounded-2xl border border-slate-200 bg-slate-50 p-3.5">
-          <div className="flex items-center gap-3">
-            <div className="grid h-9 w-9 place-items-center rounded-full bg-slate-900 text-xs font-semibold text-white">
-              И
-            </div>
-            <div>
-              <div className="text-sm font-medium">Рабочее место</div>
-              <div className="text-xs text-slate-400">Инженер</div>
-            </div>
-          </div>
-        </div>
       </aside>
 
       <div className="lg:pl-[232px]">
@@ -161,6 +145,9 @@ export default function AppShell({
 
             {action && <div className="shrink-0">{action}</div>}
           </div>
+          <div className="mx-auto max-w-[1500px] px-4 pb-3 sm:px-6 lg:px-8">
+            <GlobalSearch />
+          </div>
         </header>
 
         <main className="mx-auto max-w-[1500px] px-4 pb-24 pt-6 sm:px-6 lg:px-8 lg:pb-10">
@@ -168,21 +155,13 @@ export default function AppShell({
         </main>
       </div>
 
-      <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-3 border-t border-slate-200 bg-white/95 px-2 py-2 backdrop-blur lg:hidden">
-        <Link href="/requests" className={mobileLinkClass('/requests')}>
-          <BoxIcon type="requests" />
-          Заявки
-        </Link>
-
-        <Link href="/" className={mobileLinkClass('/')}>
-          <BoxIcon type="tasks" />
-          Закупки
-        </Link>
-
-        <Link href="/registry" className={mobileLinkClass('/registry')}>
-          <BoxIcon type="registry" />
-          Реестр
-        </Link>
+      <nav aria-label="Разделы" className="fixed inset-x-0 bottom-0 z-40 flex justify-between overflow-x-auto border-t border-slate-200 bg-white/95 px-1 py-2 backdrop-blur lg:hidden">
+        {links.map(({ href, mobile, icon }) => (
+          <Link key={href} href={href} className={mobileLinkClass(href)}
+            aria-current={isCurrentPath(pathname, href) ? 'page' : undefined}>
+            <BoxIcon type={icon} />{mobile}
+          </Link>
+        ))}
       </nav>
     </div>
   );

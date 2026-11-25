@@ -18,6 +18,7 @@ const SAFE_METHODS = new Set([
 function isProtectedResource(path: string): boolean {
   return (
     path.startsWith('/telegram/') ||
+    path.startsWith('/discovery/') ||
     path === '/tasks' ||
     path.startsWith('/tasks/') ||
     path === '/purchase-requests' ||
@@ -113,7 +114,8 @@ export async function apiFetch(
 
   if (
     typeof window !== 'undefined' &&
-    isProtectedResource(path)
+    !options.signal?.aborted &&
+    isProtectedResource(path.split('?')[0])
   ) {
     if (response.status === 401) {
       window.dispatchEvent(

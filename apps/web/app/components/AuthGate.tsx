@@ -3,6 +3,8 @@
 import { AUTH_EVENTS } from '../../lib/api-client';
 import Link from 'next/link';
 import {
+  createContext,
+  useContext,
   useEffect,
   useState,
   type FormEvent,
@@ -27,6 +29,12 @@ type AuthGateProps = {
   children: ReactNode;
   allowEmployee?: boolean;
 };
+
+const CurrentUserContext = createContext<AuthUser | null>(null);
+
+export function useCurrentUser() {
+  return useContext(CurrentUserContext);
+}
 
 function hasProcurementAccess(user: AuthUser): boolean {
   return user.role === 'PROCUREMENT' || user.role === 'ADMIN';
@@ -286,7 +294,7 @@ export default function AuthGate({ children, allowEmployee = false }: AuthGatePr
         )}
       </div>
 
-      {children}
+      <CurrentUserContext.Provider value={user}>{children}</CurrentUserContext.Provider>
     </>
   );
 }
