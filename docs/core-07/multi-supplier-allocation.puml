@@ -1,0 +1,46 @@
+@startuml
+title CORE-07 — Безопасное распределение по поставщикам
+skinparam shadowing false
+actor "Снабженец A" as A
+actor "Снабженец B" as B
+participant "API" as API
+database "PostgreSQL / Task lock" as DB
+participant "Учёт остатков" as Q
+database "OrderRevision" as H
+
+A -> API : POST заказ КП-А\nidempotencyKey UUID
+API -> DB : BEGIN; SELECT Task FOR UPDATE
+DB --> API : Блокировка получена
+API -> Q : required - activeOrders >= quantity?
+Q --> API : да, доступно
+API -> DB : CREATE PurchaseOrder + items\nUNIQUE(taskId, idempotencyKey)
+API -> H : CREATED v1
+API -> DB : COMMIT
+DB --> B : Освободить блокировку
+
+B -> API : POST заказ КП-Б (параллельно)
+API -> DB : SELECT Task FOR UPDATE
+API -> Q : Пересчитать после заказа A
+Q --> API : превышение потребности
+API --> B : HTTP 409, без новых заказов
+
+A -> API : POST с тем же UUID и тем же телом
+API -> DB : Поиск идемпотентного заказа
+DB --> API : Существующий заказ
+API --> A : Тот же orderId
+
+A -> API : PATCH заказ с expectedVersion
+API -> DB : SELECT Task FOR UPDATE
+API -> Q : Проверить остальные активные заказы
+Q --> API : Доступно
+API -> DB : UPDATE items, version+1
+API -> H : UPDATED: снимок до/после
+API -> DB : COMMIT
+
+A -> API : PATCH .../cancel до оплаты, reason
+API -> DB : SELECT Task FOR UPDATE
+API -> H : CANCELLED, до/после
+API -> DB : cancelledAt, остаток освобождён
+note over API,DB : CORE-08 использует ту же блокировку Task
+для оплаты, приёмки и закрытия закупки.
+@enduml

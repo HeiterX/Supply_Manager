@@ -6,6 +6,7 @@ import PageLayout from '@/app/components/PageLayout';
 import { StatusBadge, taskStatusLabels } from '@/app/components/StatusBadge';
 import { WorkingTable, WorkingTableControls } from '@/app/components/WorkingTable';
 import { Card, Field, Input, Skeleton } from '@/app/components/ui';
+import { taskLink } from '@/lib/discovery';
 import { useWorkingList, workingLink } from '@/lib/working-list';
 
 type SupplierLink = { supplier: { name: string } } | null;
@@ -49,7 +50,7 @@ function Registry() {
   return <PageLayout title="Реестр позиций" subtitle="Номенклатура, количество, стоимость и связанная закупка"
     action={<Link href="/" className="ui-button ui-button--outline">К закупкам</Link>}>
     <div className="min-w-0 space-y-4">
-      <WorkingTableControls list={list} statuses={statuses} registry />
+      <WorkingTableControls list={list} statuses={statuses} registry entity="items" />
       {list.legacy && list.page && <Card className="p-4">
         <Field id="registry-search" label="Поиск по реестру">
           <Input type="search" value={legacySearch} onChange={(event) => setLegacySearch(event.target.value)} />
@@ -58,7 +59,7 @@ function Registry() {
       <WorkingTable list={{ ...list, page }} label="Реестр позиций" headers={headers} empty="В реестре пока нет позиций" filtered={Boolean(term)}>
         {items?.map((item) => <tr key={item.id}>
           <th scope="row" className="text-left [overflow-wrap:anywhere] md:min-w-44">
-            <Link href={workingLink(`/tasks/${item.task.id}?tab=items`, list.href)}
+            <Link href={taskLink(item.task.id, '/registry', list.query, 'items', item.id)}
               className="text-accent hover:underline">{item.name}</Link>
             <span className="block text-xs text-muted">{item.partNumber || 'Без артикула'}</span>
           </th>

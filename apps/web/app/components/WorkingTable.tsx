@@ -4,6 +4,7 @@ import { useState, type ReactNode } from 'react';
 import { viewKeys, type WorkingList } from '@/lib/working-list';
 import { Alert, Badge, Button, Card, EmptyState, Field, Input, Select, Skeleton, TableRegion } from './ui';
 import LoadError from './LoadError';
+import { DiscoveryControls } from './DiscoveryControls';
 
 type Choice = readonly [string, string];
 const purchaseViews = [
@@ -16,14 +17,16 @@ const purchaseViews = [
 const sorts = [['createdAt', 'Дата создания'], ['number', 'Номер'], ['deadline', 'Срок'], ['priority', 'Приоритет'], ['status', 'Статус']] as const;
 const presetKey = 'supply-manager:procurement-view';
 
-export function WorkingTableControls({ list, statuses, purchases = false, registry = false }: {
+export function WorkingTableControls({ list, statuses, purchases = false, registry = false, entity }: {
   list: WorkingList;
   statuses: readonly Choice[];
   purchases?: boolean;
   registry?: boolean;
+  entity?: 'tasks' | 'requests' | 'items';
 }) {
   const { query, change } = list;
   const [feedback, setFeedback] = useState('');
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   function update(values: Record<string, string>, reset: string[] = []) {
     const next = new URLSearchParams(query);
@@ -100,6 +103,11 @@ export function WorkingTableControls({ list, statuses, purchases = false, regist
       </>}
       {feedback && <span role="status" className="text-sm text-muted">{feedback}</span>}
     </div>
+    {entity && <details onToggle={event => setAdvancedOpen(event.currentTarget.open)}>
+      <summary className="cursor-pointer font-medium">Расширенные фильтры и экспорт</summary>
+      {advancedOpen && <DiscoveryControls entity={entity} query={query} change={change} total={list.page?.total}
+        exportUrl={`/discovery/lists/${entity}/export?${query}`} />}
+    </details>}
   </Card>;
 }
 

@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { randomUUID } from 'node:crypto';
 import { ValidationPipe, type INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
@@ -53,9 +54,16 @@ describe('Multi-supplier procurement (e2e)', () => {
     return res.body.id as string;
   }
   async function addOffer(taskId: string, name: string, items: Array<{ taskItemId: string; quantity: number; unitPrice: number }>) {
-    const res = await client.post(`${api}/${taskId}/supplier-offers`).send({ supplierName: name, deliveryPrice: 100, items }).expect(201);
+    const res = await client.post(`${api}/${taskId}/supplier-offers`).send({
+      supplierName: `${name} ${randomUUID().slice(0, 8)}`, currency: 'RUB',
+      deliveryPrice: 100, items: items.map(item => ({ ...item, currency: 'RUB' })),
+    }).expect(201);
     suppliers.push(res.body.supplier.id);
-    return res.body as { id: string; items: Array<{ id: string; taskItemId: string }> };
+    return res.body as { id: string; supplierId: string; items: Array<{ id: string; taskItemId: string }> };
+  }
+  async function choose(taskId: string, offerId: string) {
+    await client.patch(`${api}/${taskId}/supplier-offers/${offerId}/decision`)
+      .send({ reason: 'Соответствует спецификации и согласован срок поставки' }).expect(200);
   }
   function order(taskId: string, offer: { id: string; items: Array<{ id: string; taskItemId: string }> }, quantities: Record<string, number>, invoice: string) {
     return client.post(`${api}/${taskId}/supplier-offers/${offer.id}/purchase-order`).send({
@@ -79,13 +87,18 @@ describe('Multi-supplier procurement (e2e)', () => {
     const c = await addOffer(taskId, 'Поставщик В', [{ taskItemId: bearing, quantity: 1, unitPrice: 1200 }]);
     // A quote can be corrected before ordering, but never after it has been used.
     const edited = await client.patch(`${api}/${taskId}/supplier-offers/${c.id}`).send({
-      supplierName: 'Поставщик В', items: [{ taskItemId: bearing, quantity: 1, unitPrice: 1250 }],
+      supplierId: c.supplierId, currency: 'RUB',
+      items: [{ taskItemId: bearing, quantity: 1, unitPrice: 1250, currency: 'RUB' }],
     }).expect(200);
     c.items = edited.body.items;
+    await choose(taskId, a.id);
+    await choose(taskId, b.id);
+    await choose(taskId, c.id);
     const resA = await order(taskId, a, { [bearing]: 6, [gasket]: 20 }, 'A-1').expect(201);
     const resB = await order(taskId, b, { [bearing]: 4 }, 'B-1').expect(201);
     const idA = resA.body.id as string;
     const idB = resB.body.id as string;
+    await prisma.purchaseOrder.updateMany({ where: { id: { in: [idA, idB] } }, data: { ledgerEnabled: false } });
     expect(resA.body.items).toHaveLength(2);
     expect(resB.body.items).toHaveLength(1);
     await order(taskId, c, { [bearing]: 1 }, 'C-1').expect(409);
@@ -121,13 +134,16 @@ describe('Multi-supplier procurement (e2e)', () => {
     const itemId = await addItem(taskId, 'Фильтр', 10);
     const a = await addOffer(taskId, 'Отменённый поставщик', [{ taskItemId: itemId, quantity: 10, unitPrice: 10 }]);
     const b = await addOffer(taskId, 'Новый поставщик', [{ taskItemId: itemId, quantity: 10, unitPrice: 11 }]);
+    await choose(taskId, a.id);
     const res = await order(taskId, a, { [itemId]: 10 }, 'OLD').expect(201);
     await action(taskId, res.body.id, 'cancel', { reason: 'Нет товара' }).expect(200);
+    await choose(taskId, b.id);
     const replacement = await order(taskId, b, { [itemId]: 10 }, 'NEW').expect(201);
     expect(replacement.body.items).toHaveLength(1);
     const state = await client.get(`${api}/${taskId}`).expect(200);
     expect(state.body.purchaseOrders).toHaveLength(2);
     expect(state.body.purchaseOrders.filter((o: { cancelledAt: string | null }) => !o.cancelledAt)).toHaveLength(1);
+    await prisma.purchaseOrder.update({ where: { id: replacement.body.id as string }, data: { ledgerEnabled: false } });
     await action(taskId, replacement.body.id, 'send-to-payment').expect(200);
     await action(taskId, replacement.body.id, 'confirm-payment').expect(200);
     await action(taskId, replacement.body.id, 'cancel', { reason: 'Поздно' }).expect(409);

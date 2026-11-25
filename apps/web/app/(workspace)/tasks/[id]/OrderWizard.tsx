@@ -42,6 +42,7 @@ export default function OrderWizard({ initialOffer, offer, available, unavailabl
     return [item.id, { selected: amount > 0, quantity: amount > 0 ? String(amount) : '' }];
   })));
   const lock = useRef(false);
+  const submission = useRef<{ fingerprint: string; key: string } | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const form = useRef<HTMLFormElement>(null);
   const focus = useFocusAfterRender();
@@ -109,12 +110,22 @@ export default function OrderWizard({ initialOffer, offer, available, unavailabl
     lock.current = true;
     setBusy(true);
     try {
+      const payload = {
+        invoiceNumber: invoice.trim(),
+        invoiceDate: new Date(invoiceDate).toISOString(),
+        notes: notes.trim() || undefined,
+        items: selected.map(item => ({
+          supplierOfferItemId: item.id,
+          quantity: Number(draft[item.id].quantity.replace(',', '.')),
+        })),
+      };
+      const fingerprint = JSON.stringify(payload);
+      if (submission.current?.fingerprint !== fingerprint) {
+        submission.current = { fingerprint, key: crypto.randomUUID() };
+      }
       const ok = await onAction(`/supplier-offers/${offer.id}/purchase-order`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ invoiceNumber: invoice.trim(), invoiceDate: new Date(invoiceDate).toISOString(),
-          notes: notes.trim() || undefined, items: selected.map((item) => ({
-            supplierOfferItemId: item.id, quantity: Number(draft[item.id].quantity.replace(',', '.')),
-          })) }),
+        body: JSON.stringify({ ...payload, idempotencyKey: submission.current.key }),
       }, `Заказ у «${offer.supplier.name}» оформлен`, setError);
       if (ok) complete();
     } finally { lock.current = false; setBusy(false); }

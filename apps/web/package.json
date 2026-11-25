@@ -8,10 +8,12 @@
     "start": "next start",
     "lint": "eslint",
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test test/api-error.test.mjs",
-    "test:browser": "node --test test/core13.browser.mjs"
+    "test:working": "node --test test/core13.browser.mjs",
+    "test:browser": "node --test test/discovery.browser.mjs",
+    "test:e2e": "node --test test/core08-browser.test.mjs"
   },
   "dependencies": {
-    "next": "16.3.6",
+    "next": "16.4.6",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
@@ -22,7 +24,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.3.6",
+    "eslint-config-next": "16.4.6",
     "playwright": "^1.65.1",
     "tailwindcss": "^4",
     "typescript": "^5"

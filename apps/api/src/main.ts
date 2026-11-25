@@ -1,24 +1,36 @@
+
 import 'dotenv/config';
+
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import cookieParser from 'cookie-parser';
 
 import { AppModule } from './app.module.js';
+import { createCsrfOriginMiddleware } from './security/csrf-origin.middleware.js';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   app.setGlobalPrefix('api/v1');
 
-  // Trust only explicitly configured proxy addresses/subnets, never every hop.
-  const trustedProxies = process.env.TRUSTED_PROXY_CIDRS?.split(',')
+  // Доверяем только явно указанным прокси.
+  const trustedProxies = process.env.TRUSTED_PROXY_CIDRS
+    ?.split(',')
     .map((value) => value.trim())
     .filter(Boolean);
+
   if (trustedProxies?.length) {
-    app.getHttpAdapter().getInstance().set('trust proxy', trustedProxies);
+    app
+      .getHttpAdapter()
+      .getInstance()
+      .set('trust proxy', trustedProxies);
   }
 
-  const allowedOrigins = (process.env.FRONTEND_ORIGIN ?? 'http://localhost:3001')
+  // Разрешённые адреса frontend.
+  const allowedOrigins = (
+    process.env.FRONTEND_ORIGIN ??
+    'http://localhost:3001'
+  )
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
@@ -30,6 +42,12 @@ async function bootstrap() {
   });
 
   app.use(cookieParser());
+
+  // Дополнительная проверка источника
+  // изменяющих HTTP-запросов.
+  app.use(
+    createCsrfOriginMiddleware(allowedOrigins),
+  );
 
   app.useGlobalPipes(
     new ValidationPipe({

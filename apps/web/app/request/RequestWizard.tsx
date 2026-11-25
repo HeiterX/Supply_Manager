@@ -1,15 +1,91 @@
 'use client';
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { Alert, Badge, Button, Card, Field, Input, Textarea } from '@/app/components/ui';
+import { Alert, Badge, Button, Card, Field, Input, Select, Textarea } from '@/app/components/ui';
 import { apiFetch } from '@/lib/api-client';
 import { apiError, apiMessage, couldHaveSaved, type ApiError } from '@/lib/api-error';
 import { useFocusAfterRender } from '@/lib/use-focus-after-render';
 import { useRetryDelay } from '@/lib/use-retry-delay';
+import { priorityLabels, workingDate } from '@/lib/working-list';
 
 type Item = { id: number; name: string; quantity: string; unit: string; description: string; photo: File | null };
 type Created = { id: string; number: number; items: { id: string; sortOrder: number }[]; uploadToken: string };
 type Upload = { id: string; file: File; itemId: string };
+const PUBLIC_REQUEST_DRAFT_KEY =
+  'supply-manager:public-request-draft:v1';
+
+type StoredDraftItem = {
+  name: string;
+  quantity: string;
+  unit: string;
+  description: string;
+};
+
+type StoredRequestDraft = {
+  version: 1;
+  savedAt: string;
+  requesterName: string;
+  priority: string;
+  requiredAt: string;
+  items: StoredDraftItem[];
+};
+
+function parseStoredDraft(raw: string): StoredRequestDraft {
+  const parsed: unknown = JSON.parse(raw);
+
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error('Сохранённый черновик повреждён');
+  }
+
+  const draft = parsed as Partial<StoredRequestDraft>;
+
+  const allowedPriorities = [
+    'LOW',
+    'NORMAL',
+    'HIGH',
+    'URGENT',
+  ];
+
+  const validItems =
+    Array.isArray(draft.items) &&
+    draft.items.length >= 1 &&
+    draft.items.length <= 20 &&
+    draft.items.every((entry: unknown) => {
+      if (!entry || typeof entry !== 'object') {
+        return false;
+      }
+
+      const item = entry as Record<string, unknown>;
+
+      return (
+        typeof item.name === 'string' &&
+        item.name.length <= 250 &&
+        typeof item.quantity === 'string' &&
+        item.quantity.length <= 50 &&
+        typeof item.unit === 'string' &&
+        item.unit.length <= 50 &&
+        typeof item.description === 'string' &&
+        item.description.length <= 3000
+      );
+    });
+
+  if (
+    draft.version !== 1 ||
+    typeof draft.savedAt !== 'string' ||
+    typeof draft.requesterName !== 'string' ||
+    draft.requesterName.length > 120 ||
+    typeof draft.priority !== 'string' ||
+    !allowedPriorities.includes(draft.priority) ||
+    typeof draft.requiredAt !== 'string' ||
+    !/^(|\\d{4}-\\d{2}-\\d{2})$/.test(draft.requiredAt) ||
+    !validItems
+  ) {
+    throw new Error('Сохранённый черновик имеет неверный формат');
+  }
+
+  return draft as StoredRequestDraft;
+}
+
 const steps = ['Заявитель', 'Комплектующие', 'Фотографии', 'Проверка'];
 const newItem = (id: number): Item => ({ id, name: '', quantity: '1', unit: 'шт.', description: '', photo: null });
 
@@ -38,6 +114,10 @@ function itemErrors(item: Item) {
 export default function RequestWizard() {
   const [step, setStep] = useState(0);
   const [name, setName] = useState('');
+  const [priority, setPriority] = useState('NORMAL');
+  const [requiredAt, setRequiredAt] = useState('');
+  const [dateError, setDateError] = useState('');
+  const [draftNotice, setDraftNotice] = useState('');
   const [items, setItems] = useState([newItem(1)]);
   const [validated, setValidated] = useState(false);
   const [photoErrors, setPhotoErrors] = useState<Record<number, string>>({});
@@ -59,7 +139,7 @@ export default function RequestWizard() {
   const form = useRef<HTMLFormElement>(null);
   const focus = useFocusAfterRender();
   const uploads = useRef<{ token: string; pending: Upload[] } | null>(null);
-  const dirty = Boolean(name || items.length > 1 || items.some((item) => item.name || item.description || item.photo || item.quantity !== '1' || item.unit !== 'шт.'));
+  const dirty = Boolean(name || priority !== 'NORMAL' || requiredAt || items.length > 1 || items.some((item) => item.name || item.description || item.photo || item.quantity !== '1' || item.unit !== 'шт.'));
 
   useEffect(() => {
     if (!dirty || number !== undefined) return;
@@ -67,6 +147,31 @@ export default function RequestWizard() {
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
   }, [dirty, number]);
+
+  function saveDraft() {
+    try {
+      const draft: StoredRequestDraft = {
+        version: 1, requesterName: name, priority, requiredAt, savedAt: new Date().toISOString(),
+        items: items.map(({ name, unit, quantity, description }) => ({ name, unit, quantity, description })),
+      };
+      sessionStorage.setItem(PUBLIC_REQUEST_DRAFT_KEY, JSON.stringify(draft));
+      setDraftNotice('Черновик сохранён в этой вкладке. Фото нужно прикрепить заново.');
+    } catch { setDraftNotice('Не удалось сохранить черновик.'); }
+  }
+
+  function restoreDraft() {
+    try {
+      const raw = sessionStorage.getItem(PUBLIC_REQUEST_DRAFT_KEY);
+      if (!raw) { setDraftNotice('Сохранённого черновика пока нет.'); return; }
+      const draft = parseStoredDraft(raw);
+      setName(draft.requesterName);
+      setPriority(draft.priority);
+      setRequiredAt(draft.requiredAt);
+      setItems(draft.items.map(item => ({ ...item, id: ++sequence.current, photo: null })));
+      setPhotoErrors({});
+      setDraftNotice('Черновик восстановлен.');
+    } catch { setDraftNotice('Не удалось восстановить черновик.'); }
+  }
 
   function navigate(next: number, invalid = false) {
     setStep(next);
@@ -118,7 +223,9 @@ export default function RequestWizard() {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (lock.current || uncertain || (step === 3 && waiting)) return;
-    if (step === 0 && name.trim().length < 2 || step === 1 && items.some((item) => Object.values(itemErrors(item)).some(Boolean))) {
+    const invalidDate = requiredAt && new Date(`${requiredAt}T23:59:59`).getTime() <= Date.now();
+    if (step === 0 && (name.trim().length < 2 || invalidDate) || step === 1 && items.some((item) => Object.values(itemErrors(item)).some(Boolean))) {
+      setDateError(invalidDate ? 'Выберите дату в будущем.' : '');
       navigate(step, true);
       return;
     }
@@ -135,7 +242,8 @@ export default function RequestWizard() {
     try {
       const response = await apiFetch('/purchase-requests/public', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requesterName: name.trim(), items: items.map((item) => ({
+        body: JSON.stringify({ requesterName: name.trim(), priority,
+          requiredAt: requiredAt ? new Date(`${requiredAt}T23:59:59`).toISOString() : undefined, items: items.map((item) => ({
           name: item.name.trim(), quantity: Number(item.quantity.replace(',', '.')), unit: item.unit.trim(),
           description: item.description.trim() || undefined,
         })) }),
@@ -166,6 +274,10 @@ export default function RequestWizard() {
         setFailed(items.filter((item) => item.photo).length);
       }
       setName('');
+      setPriority('NORMAL');
+      setRequiredAt('');
+      setDraftNotice('');
+      try { sessionStorage.removeItem(PUBLIC_REQUEST_DRAFT_KEY); } catch { /* Storage is optional. */ }
       setItems([newItem(++sequence.current)]);
     } catch (failure) {
       const unknown = couldHaveSaved(failure);
@@ -211,13 +323,28 @@ export default function RequestWizard() {
         <h2 ref={heading} tabIndex={-1} className="text-lg font-semibold">{steps[step]}</h2>
         <form ref={form} noValidate onSubmit={submit} className="space-y-4">
           <fieldset disabled={busy || uncertain} className="min-w-0 space-y-4">
-            {step === 0 && <Card className="p-4 sm:p-6">
+            {step === 0 && <Card className="space-y-4 p-4 sm:p-6">
               <Field id="request-name" label="Имя и фамилия заявителя"
                 error={validation?.fields.requesterName ?? (validated && name.trim().length < 2 ? 'Введите имя заявителя.' : undefined)}>
                 <Input id="request-name" autoComplete="name" required maxLength={120} value={name}
                   aria-invalid={validated && name.trim().length < 2} aria-describedby={validated && name.trim().length < 2 ? 'request-name-error' : undefined}
                   onChange={(event) => { setName(event.target.value); if (validation?.fields.requesterName) { setValidation(undefined); setError(''); } }} />
               </Field>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field id="request-priority" label="Приоритет"><Select id="request-priority" value={priority}
+                  onChange={event => setPriority(event.target.value)}>
+                  {Object.entries(priorityLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                </Select></Field>
+                <Field id="request-required-at" label="Необходимо до" error={dateError}>
+                  <Input id="request-required-at" type="date" value={requiredAt}
+                    onChange={event => { setRequiredAt(event.target.value); setDateError(''); }} />
+                </Field>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" disabled={!dirty} onClick={saveDraft}>Сохранить черновик</Button>
+                <Button variant="outline" onClick={restoreDraft}>Восстановить черновик</Button>
+              </div>
+              {draftNotice && <p role="status" className="text-sm text-muted">{draftNotice}</p>}
             </Card>}
             {step === 1 && <>
               {items.map((item, index) => {
@@ -266,6 +393,8 @@ export default function RequestWizard() {
             </>}
             {step === 3 && <Card className="space-y-4 p-4 [overflow-wrap:anywhere] sm:p-6">
               <p><span className="text-muted">Заявитель · </span><span>{name.trim()}</span></p>
+              <p>Приоритет · {priorityLabels[priority]}</p>
+              {requiredAt && <p>Необходимо до · {workingDate(requiredAt)}</p>}
               <ul className="space-y-3">
                 {items.map((item) => <li key={item.id} className="border-t border-border pt-3">
                   <p className="font-semibold">{item.name.trim()} · {item.quantity} {item.unit}</p>

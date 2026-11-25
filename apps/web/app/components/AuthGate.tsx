@@ -27,7 +27,7 @@ export function useSession() {
   return session;
 }
 
-export default function AuthGate({ children }: { children: ReactNode }) {
+export default function AuthGate({ children, allowEmployee = false }: { children: ReactNode; allowEmployee?: boolean }) {
   const pathname = usePathname();
   const router = useRouter();
   const [session, setSession] = useState<AuthUser | null>();
@@ -73,6 +73,17 @@ export default function AuthGate({ children }: { children: ReactNode }) {
       logoutLock.current = false;
       setSigningOut(false);
     }
+  }
+
+  if (session?.role === 'EMPLOYEE' && !allowEmployee) {
+    return <main className="auth-screen">
+      <Card className="auth-card">
+        <h1>Недостаточно прав</h1>
+        <Link href="/settings/telegram" className="text-sm font-medium text-accent hover:underline">Настройки Telegram</Link>
+        {logoutError && <Alert tone="danger">{logoutError}</Alert>}
+        <Button loading={signingOut} onClick={() => void logout()}>Выйти</Button>
+      </Card>
+    </main>;
   }
 
   if (session) return <SessionContext.Provider value={{ user: session, signingOut, logoutError, logout }}>{children}</SessionContext.Provider>;

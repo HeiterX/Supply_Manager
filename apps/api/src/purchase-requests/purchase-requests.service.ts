@@ -20,7 +20,7 @@ import {
 import { Prisma } from '../generated/prisma/client.js';
 import type { AuthUser } from '../auth/auth.types.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { TelegramService } from '../telegram/telegram.service.js';
+import { TelegramDeliveryService } from '../telegram/telegram-delivery.service.js';
 import type {
   CreatePublicPurchaseRequestDto,
   CreatePurchaseRequestDto,
@@ -51,6 +51,10 @@ const userSelect = {
 const requestInclude = {
   requester: { select: userSelect },
   processedBy: { select: userSelect },
+  assignedTo: { select: userSelect },
+  history: {
+    orderBy: { createdAt: 'asc' as const },
+  },
   items: {
     orderBy: [
       { sortOrder: 'asc' as const },
@@ -71,37 +75,47 @@ const requestInclude = {
 export class PurchaseRequestsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly telegramService: TelegramService,
+    private readonly telegramDelivery: TelegramDeliveryService,
   ) {}
 
   /*
    * Существующее создание заявки зарегистрированным пользователем.
    */
   async create(user: AuthUser, dto: CreatePurchaseRequestDto) {
-    const requiredAt = dto.requiredAt
-      ? new Date(dto.requiredAt)
-      : null;
+    const requiredAt = dto.requiredAt ? new Date(dto.requiredAt) : null;
 
-    return this.prisma.purchaseRequest.create({
-      data: {
-        requesterId: user.id,
-        title: dto.title.trim(),
-        description: this.optionalText(dto.description),
-        priority: dto.priority ?? 'NORMAL',
-        requiredAt,
-        notes: this.optionalText(dto.notes),
-        items: {
-          create: dto.items.map((item, index) => ({
-            name: item.name.trim(),
-            partNumber: this.optionalText(item.partNumber),
-            quantity: item.quantity,
-            unit: item.unit.trim(),
-            notes: this.optionalText(item.notes),
-            sortOrder: index,
-          })),
+    return this.prisma.$transaction(async (tx) => {
+      const purchaseRequest = await tx.purchaseRequest.create({
+        data: {
+          requesterId: user.id,
+          title: dto.title.trim(),
+          description: this.optionalText(dto.description),
+          priority: dto.priority ?? 'NORMAL',
+          requiredAt,
+          notes: this.optionalText(dto.notes),
+          history: {
+            create: {
+              actorId: user.id,
+              actorName: user.fullName,
+              action: 'CREATED',
+              toStatus: 'NEW',
+            },
+          },
+          items: {
+            create: dto.items.map((item, index) => ({
+              name: item.name.trim(),
+              partNumber: this.optionalText(item.partNumber),
+              quantity: item.quantity,
+              unit: item.unit.trim(),
+              notes: this.optionalText(item.notes),
+              sortOrder: index,
+            })),
+          },
         },
-      },
-      include: requestInclude,
+        include: requestInclude,
+      });
+      await this.telegramDelivery.requestCreated(tx, purchaseRequest);
+      return purchaseRequest;
     });
   }
 
@@ -111,8 +125,18 @@ export class PurchaseRequestsService {
   async createPublic(dto: CreatePublicPurchaseRequestDto) {
     const firstItem = dto.items[0];
 
-    const purchaseRequest =
-      await this.prisma.purchaseRequest.create({
+    const requiredAt = dto.requiredAt
+      ? new Date(dto.requiredAt)
+      : null;
+
+    if (requiredAt && requiredAt.getTime() <= Date.now()) {
+      throw new BadRequestException(
+        'Срок потребности должен быть в будущем',
+      );
+    }
+
+    const purchaseRequest = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.purchaseRequest.create({
         data: {
           requesterName: dto.requesterName.trim(),
 
@@ -123,8 +147,17 @@ export class PurchaseRequestsService {
            */
           title: firstItem.name.trim(),
 
-          priority: 'NORMAL',
+          priority: dto.priority ?? 'NORMAL',
+          requiredAt,
           status: 'NEW',
+
+          history: {
+            create: {
+              actorName: dto.requesterName.trim(),
+              action: 'CREATED',
+              toStatus: 'NEW',
+            },
+          },
 
           items: {
             create: dto.items.map((item, index) => ({
@@ -138,21 +171,9 @@ export class PurchaseRequestsService {
         },
         include: requestInclude,
       });
-
-    /*
-     * Telegram — только дополнительный канал уведомления.
-     * Ошибка Telegram не должна отменять уже созданную заявку.
-     */
-    try {
-      await this.telegramService.sendNewPurchaseRequest(
-        purchaseRequest,
-      );
-    } catch (error) {
-      console.error(
-        `Не удалось отправить Telegram-уведомление о заявке №${purchaseRequest.number}:`,
-        error,
-      );
-    }
+      await this.telegramDelivery.requestCreated(tx, created);
+      return created;
+    });
 
     return {
       ...purchaseRequest,
@@ -160,7 +181,6 @@ export class PurchaseRequestsService {
       uploadToken: this.createPublicUploadToken(purchaseRequest.id),
     };
   }
-
 
   /*
    * The public form returns a short-lived signed upload capability.
@@ -240,7 +260,8 @@ export class PurchaseRequestsService {
       // Fully decode and re-encode: reject corrupt pixel data and strip metadata
       // and trailing payloads. Metadata inspection alone does not decode pixels.
       const sanitized = await image.rotate().toFormat(format).toBuffer();
-      if (sanitized.length > MAX_PHOTO_SIZE) throw new Error('Output too large');
+      if (sanitized.length > MAX_PHOTO_SIZE)
+        throw new Error('Output too large');
       return { ...detected, buffer: sanitized };
     } catch {
       throw new BadRequestException(
@@ -383,6 +404,122 @@ export class PurchaseRequestsService {
     };
   }
 
+
+  async review(user: AuthUser, id: string) {
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockRequest(tx, id);
+
+      const request = await tx.purchaseRequest.findUnique({
+        where: { id },
+      });
+
+      if (!request) {
+        throw new NotFoundException('Заявка не найдена');
+      }
+
+      if (request.status === 'IN_REVIEW') {
+        if (request.assignedToId !== user.id) {
+          throw new ConflictException(
+            'Заявка уже рассматривается другим сотрудником',
+          );
+        }
+
+        return tx.purchaseRequest.findUnique({
+          where: { id },
+          include: requestInclude,
+        });
+      }
+
+      if (request.taskId || request.status !== 'NEW') {
+        throw new ConflictException(
+          'Заявку нельзя взять на рассмотрение',
+        );
+      }
+
+      return tx.purchaseRequest.update({
+        where: { id },
+        data: {
+          status: 'IN_REVIEW',
+          assignedToId: user.id,
+          history: {
+            create: {
+              actorId: user.id,
+              actorName: user.fullName,
+              action: 'START_REVIEW',
+              fromStatus: request.status,
+              toStatus: 'IN_REVIEW',
+            },
+          },
+        },
+        include: requestInclude,
+      });
+    });
+  }
+
+  async reject(user: AuthUser, id: string, reason: string) {
+    const comment = reason?.trim();
+
+    if (!comment || comment.length < 5) {
+      throw new BadRequestException(
+        'Укажите причину отказа (минимум 5 символов)',
+      );
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockRequest(tx, id);
+
+      const request = await tx.purchaseRequest.findUnique({
+        where: { id },
+      });
+
+      if (!request) {
+        throw new NotFoundException('Заявка не найдена');
+      }
+
+      if (
+        request.taskId ||
+        !['NEW', 'IN_REVIEW', 'NEEDS_CLARIFICATION'].includes(
+          request.status,
+        )
+      ) {
+        throw new ConflictException(
+          'Заявку нельзя отклонить на текущем этапе',
+        );
+      }
+
+      if (
+        request.assignedToId &&
+        request.assignedToId !== user.id &&
+        user.role !== 'ADMIN'
+      ) {
+        throw new ConflictException(
+          'Заявка закреплена за другим сотрудником',
+        );
+      }
+
+      return tx.purchaseRequest.update({
+        where: { id },
+        data: {
+          status: 'REJECTED',
+          decisionComment: comment,
+          processedById: user.id,
+          processedAt: new Date(),
+          history: {
+            create: {
+              actorId: user.id,
+              actorName: user.fullName,
+              action: 'REJECTED',
+              fromStatus: request.status,
+              toStatus: 'REJECTED',
+              comment,
+            },
+          },
+        },
+        include: requestInclude,
+      });
+    });
+  }
+
   async accept(user: AuthUser, id: string) {
     return this.prisma.$transaction(async (tx) => {
       await this.lockRequest(tx, id);
@@ -395,10 +532,7 @@ export class PurchaseRequestsService {
             },
           },
           items: {
-            orderBy: [
-              { sortOrder: 'asc' },
-              { createdAt: 'asc' },
-            ],
+            orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
           },
         },
       });
@@ -421,8 +555,17 @@ export class PurchaseRequestsService {
         purchaseRequest.status === 'REJECTED' ||
         purchaseRequest.status === 'CANCELLED'
       ) {
+        throw new ConflictException('Эту заявку нельзя принять в работу');
+      }
+
+      if (
+        purchaseRequest.status === 'IN_REVIEW' &&
+        purchaseRequest.assignedToId &&
+        purchaseRequest.assignedToId !== user.id &&
+        user.role !== 'ADMIN'
+      ) {
         throw new ConflictException(
-          'Эту заявку нельзя принять в работу',
+          'Заявка закреплена за другим сотрудником',
         );
       }
 
@@ -455,6 +598,20 @@ export class PurchaseRequestsService {
               unit: item.unit,
               notes: item.notes,
               sortOrder: item.sortOrder,
+              sourceRequestItemId: item.id,
+              requiredAt: purchaseRequest.requiredAt,
+              technicalParameters: {},
+              originalSnapshot: {
+                sourceRequestId: purchaseRequest.id,
+                sourceRequestItemId: item.id,
+                name: item.name,
+                partNumber: item.partNumber,
+                quantity: item.quantity.toString(),
+                unit: item.unit,
+                notes: item.notes,
+                requiredAt: purchaseRequest.requiredAt?.toISOString() ?? null,
+                photoOriginalName: item.photoOriginalName,
+              },
             })),
           },
 
@@ -475,6 +632,15 @@ export class PurchaseRequestsService {
           taskId: task.id,
           processedById: user.id,
           processedAt: new Date(),
+          history: {
+            create: {
+              actorId: user.id,
+              actorName: user.fullName,
+              action: 'ACCEPTED',
+              fromStatus: purchaseRequest.status,
+              toStatus: 'CONVERTED',
+            },
+          },
         },
         include: requestInclude,
       });
@@ -496,39 +662,26 @@ export class PurchaseRequestsService {
   async findAll() {
     return this.prisma.purchaseRequest.findMany({
       include: requestInclude,
-      orderBy: [
-        { status: 'asc' },
-        { createdAt: 'desc' },
-      ],
+      orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
     });
   }
 
   async findOne(user: AuthUser, id: string) {
-    const purchaseRequest =
-      await this.prisma.purchaseRequest.findUnique({
-        where: {
-          id,
-        },
-        include: requestInclude,
-      });
+    const purchaseRequest = await this.prisma.purchaseRequest.findUnique({
+      where: {
+        id,
+      },
+      include: requestInclude,
+    });
 
     if (!purchaseRequest) {
-      throw new NotFoundException(
-        'Заявка не найдена',
-      );
+      throw new NotFoundException('Заявка не найдена');
     }
 
-    const canSeeAll =
-      user.role === 'PROCUREMENT' ||
-      user.role === 'ADMIN';
+    const canSeeAll = user.role === 'PROCUREMENT' || user.role === 'ADMIN';
 
-    if (
-      !canSeeAll &&
-      purchaseRequest.requesterId !== user.id
-    ) {
-      throw new ForbiddenException(
-        'Нет доступа к этой заявке',
-      );
+    if (!canSeeAll && purchaseRequest.requesterId !== user.id) {
+      throw new ForbiddenException('Нет доступа к этой заявке');
     }
 
     return purchaseRequest;
@@ -549,8 +702,6 @@ export class PurchaseRequestsService {
   private optionalText(value?: string) {
     const normalized = value?.trim();
 
-    return normalized
-      ? normalized
-      : null;
+    return normalized ? normalized : null;
   }
 }

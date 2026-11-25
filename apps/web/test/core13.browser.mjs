@@ -15,7 +15,7 @@ const date = '2026-11-20T12:00:00.000Z';
 const user = { id: 'staff-1', username: 'fixture', fullName: 'Тестовый снабженец', role: 'PROCUREMENT' };
 const part = { id: 'part-1', name: 'Комплект уплотнений для стенда', quantity: '4.5', unit: 'компл.', partNumber: 'QA-10', unitPrice: '1200', currency: 'RUB', notes: 'Синтетическая позиция' };
 const supplier = { id: 'supplier-1', name: 'Тестовая верфь' };
-const offer = { id: 'offer-1', status: 'RECEIVED', price: '5400', deliveryPrice: '100', deliveryDays: 5, requestedAt: date, supplier,
+const offer = { id: 'offer-1', status: 'RECEIVED', currency: 'RUB', decisionReason: 'Проверено тестом', version: 1, price: '5400', deliveryPrice: '100', deliveryDays: 5, requestedAt: date, supplier,
   items: [{ id: 'line-1', taskItemId: part.id, taskItem: part, quantity: '4.5', unitPrice: '1200', currency: 'RUB', inStock: true }] };
 const task = { id: 'fixture-task', number: 314, title: 'Уплотнения испытательного стенда', status: 'SEARCHING', priority: 'HIGH',
   createdAt: date, updatedAt: date, deadline: date, nextAction: 'Уточнить наличие', reminderAt: null, items: [part], supplierOffers: [offer],
@@ -42,11 +42,12 @@ async function setup(browser, role = 'PROCUREMENT') {
     const path = url.pathname.slice('/api/v1'.length);
     const method = route.request().method();
     const headers = { 'access-control-allow-origin': web.origin, 'access-control-allow-credentials': 'true',
-      'access-control-allow-methods': 'GET,POST,PATCH,DELETE,OPTIONS', 'access-control-allow-headers': 'content-type,x-upload-token',
+      'access-control-allow-methods': 'GET,POST,PATCH,DELETE,OPTIONS', 'access-control-allow-headers': 'content-type,x-upload-token,x-csrf-token',
       'access-control-expose-headers': 'Retry-After' };
     const respond = (json, status = 200) => route.fulfill({ json, status,
       headers: status === 429 ? { ...headers, 'retry-after': '2' } : headers });
     if (method === 'OPTIONS') return route.fulfill({ headers, status: 204 });
+    if (path === '/auth/csrf') return respond({ csrfToken: 'a'.repeat(64) });
     if (path === '/auth/me') return respond({ ...user, role });
     if (path === '/auth/register') {
       calls.registrations.push(route.request().postDataJSON());
@@ -70,7 +71,9 @@ async function setup(browser, role = 'PROCUREMENT') {
     if (path === '/tasks') return respond([task]);
     if (path === '/purchase-requests') return respond([request]);
     if (path === '/purchase-requests/mine') return respond([request]);
-    if (path === `/tasks/${task.id}`) return respond({ ...task, purchaseOrders: orders }, calls.taskStatus);
+    if (path === `/tasks/${task.id}`) {
+      return respond({ ...task, supplierOffers: calls.unlockedItem ? [] : task.supplierOffers, purchaseOrders: orders }, calls.taskStatus);
+    }
     if (path === `/tasks/${task.id}/items/${part.id}` && method === 'DELETE') {
       calls.deletions += 1;
       return respond({});
@@ -431,6 +434,10 @@ test('CORE-14 keyboard, error handling and axe checks', { timeout: 105000 }, asy
     await page.setViewportSize({ width: 1440, height: 900 });
     await goto(page, `/tasks/${task.id}?tab=items`);
     const remove = page.getByRole('button', { name: /Удалить/ });
+    await remove.waitFor();
+    assert.equal(await remove.isDisabled(), true);
+    calls.unlockedItem = true;
+    await page.reload();
     await remove.focus();
     await page.keyboard.press('Enter');
     const dialog = page.getByRole('dialog', { name: 'Подтвердите действие' });
