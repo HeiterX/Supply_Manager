@@ -114,15 +114,10 @@ export default function AppShell({
             Номенклатура
           </Link>
 
-          <div className="flex items-center justify-between rounded-xl px-3.5 py-3 text-slate-400">
-            <span className="flex items-center gap-3">
-              <BoxIcon type="suppliers" />
-              Поставщики
-            </span>
-            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-              скоро
-            </span>
-          </div>
+          <Link href="/suppliers" className={desktopLinkClass('/suppliers')}>
+            <BoxIcon type="suppliers" />
+            Поставщики
+          </Link>
         </nav>
 
         <div className="m-3 rounded-2xl border border-slate-200 bg-slate-50 p-3.5">
@@ -173,7 +168,7 @@ export default function AppShell({
         </main>
       </div>
 
-      <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-4 border-t border-slate-200 bg-white/95 px-2 py-2 backdrop-blur lg:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-slate-200 bg-white/95 px-2 py-2 backdrop-blur lg:hidden">
         <Link href="/requests" className={mobileLinkClass('/requests')}>
           <BoxIcon type="requests" />
           Заявки
@@ -192,6 +187,10 @@ export default function AppShell({
         <Link href="/catalog" className={mobileLinkClass('/catalog')}>
           <BoxIcon type="registry" />
           Каталог
+        </Link>
+        <Link href="/suppliers" className={mobileLinkClass('/suppliers')}>
+          <BoxIcon type="suppliers" />
+          Поставщики
         </Link>
       </nav>
     </div>

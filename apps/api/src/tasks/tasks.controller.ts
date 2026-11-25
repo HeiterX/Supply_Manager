@@ -3,11 +3,16 @@ import {
   Controller,
   Delete,
   Get,
+  Res,
+  UploadedFile,
+  UseInterceptors,
   Param,
   Patch,
   Post,
   UseGuards,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
 
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { RolesGuard } from '../auth/roles.guard.js';
@@ -26,6 +31,8 @@ import { UpdateTaskDto } from './dto/update-task.dto.js';
 import { UpdateTaskItemDto } from './dto/update-task-item.dto.js';
 import { TasksService } from './tasks.service.js';
 import { MultiOrdersService } from './multi-orders.service.js';
+import { OfferDocumentsService } from './offer-documents.service.js';
+import { DecideSupplierOfferDto } from './dto/decide-supplier-offer.dto.js';
 
 @Controller('tasks')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -34,6 +41,7 @@ export class TasksController {
   constructor(
     private readonly tasksService: TasksService,
     private readonly multiOrders: MultiOrdersService,
+    private readonly offerDocs: OfferDocumentsService,
   ) {}
 
   @Post()
@@ -112,19 +120,59 @@ export class TasksController {
 
   @Post(':id/supplier-offers')
   addSupplierOffer(
+    @CurrentUser() user: AuthUser,
     @Param('id') id: string,
     @Body() dto: CreateSupplierOfferDto,
   ) {
-    return this.tasksService.addSupplierOffer(id, dto);
+    return this.tasksService.addSupplierOffer(id, dto, user.id);
   }
 
   @Patch(':taskId/supplier-offers/:offerId')
   updateSupplierOffer(
+    @CurrentUser() user: AuthUser,
     @Param('taskId') taskId: string,
     @Param('offerId') offerId: string,
     @Body() dto: CreateSupplierOfferDto,
   ) {
-    return this.multiOrders.updateOffer(taskId, offerId, dto);
+    return this.multiOrders.updateOffer(taskId, offerId, dto, user.id);
+  }
+
+  @Patch(':taskId/supplier-offers/:offerId/decision')
+  decideSupplierOffer(
+    @CurrentUser() user: AuthUser,
+    @Param('taskId') taskId: string,
+    @Param('offerId') offerId: string,
+    @Body() dto: DecideSupplierOfferDto,
+  ) {
+    return this.multiOrders.selectOffer(taskId, offerId, dto.reason, user.id);
+  }
+
+  @Post(':taskId/supplier-offers/:offerId/documents')
+  @UseInterceptors(FileInterceptor('file', {
+    limits: { fileSize: 8 * 1024 * 1024, files: 1, fields: 0, parts: 1 },
+  }))
+  uploadOfferDocument(
+    @CurrentUser() user: AuthUser,
+    @Param('taskId') taskId: string,
+    @Param('offerId') offerId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.offerDocs.upload(taskId, offerId, user.id, file);
+  }
+
+  @Get(':taskId/supplier-offers/:offerId/documents/:documentId')
+  async downloadOfferDocument(
+    @Param('taskId') taskId: string,
+    @Param('offerId') offerId: string,
+    @Param('documentId') documentId: string,
+    @Res() response: Response,
+  ) {
+    const document = await this.offerDocs.download(taskId, offerId, documentId);
+    response.setHeader('Cache-Control', 'private, no-store');
+    response.setHeader('X-Content-Type-Options', 'nosniff');
+    response.setHeader('Content-Security-Policy', 'sandbox');
+    response.type(document.mimeType);
+    return response.download(document.path, document.originalName);
   }
 
   @Patch(':taskId/supplier-offers/:offerId/select')

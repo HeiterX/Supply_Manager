@@ -17,10 +17,12 @@ import { UpdateTaskDto } from './dto/update-task.dto.js';
 import { UpdateTaskItemDto } from './dto/update-task-item.dto.js';
 import type { Prisma } from '../generated/prisma/client.js';
 import { normalizeCatalogText, validateTechnicalParameters } from './catalog.service.js';
+import { SuppliersService } from './suppliers.service.js';
+import { quotePrice, offerSnapshot } from './quote-utils.js';
 
 @Injectable()
 export class TasksService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly suppliers: SuppliersService) {}
 
   create(dto: CreateTaskDto) {
     return this.prisma.task.create({
@@ -100,6 +102,8 @@ export class TasksService {
         supplierOffers: {
           include: {
             supplier: true,
+            revisions: { orderBy: { createdAt: 'desc' } },
+            documents: { orderBy: { createdAt: 'desc' } },
             items: {
               include: {
                 taskItem: true,
@@ -116,6 +120,8 @@ export class TasksService {
         selectedOffer: {
           include: {
             supplier: true,
+            revisions: { orderBy: { createdAt: 'desc' } },
+            documents: { orderBy: { createdAt: 'desc' } },
             items: {
               include: {
                 taskItem: true,
@@ -598,6 +604,7 @@ export class TasksService {
   async addSupplierOffer(
     taskId: string,
     dto: CreateSupplierOfferDto,
+    actorId?: string,
   ) {
     const task = await this.prisma.task.findUnique({ where: { id: taskId }, select: { status: true } });
     if (!task) throw new NotFoundException('Закупка не найдена');
@@ -605,13 +612,13 @@ export class TasksService {
       throw new ConflictException('Нельзя добавлять КП к закрытой или отменённой закупке');
     }
 
-    const supplierName = dto.supplierName.trim();
-
-    if (!supplierName) {
-      throw new BadRequestException(
-        'Укажите наименование поставщика',
-      );
+    if (!dto.supplierId && !dto.supplierName?.trim()) {
+      throw new BadRequestException('Выберите поставщика из справочника или укажите его название');
     }
+    if (dto.validUntil && new Date(dto.validUntil).getTime() < Date.now()) {
+      throw new BadRequestException('Срок действия нового КП уже истёк');
+    }
+    const pricing = quotePrice(dto);
 
     const offerItems = dto.items ?? [];
 
@@ -662,29 +669,6 @@ export class TasksService {
       }
     }
 
-    /*
-     * Если для всех строк указана цена,
-     * общую стоимость товара рассчитываем автоматически.
-     *
-     * Старое dto.price пока сохраняется как fallback,
-     * чтобы существующий frontend продолжал работать.
-     */
-    const canCalculatePrice =
-      offerItems.length > 0 &&
-      offerItems.every(
-        (item) => item.unitPrice !== undefined,
-      );
-
-    const calculatedPrice = canCalculatePrice
-      ? offerItems.reduce(
-          (sum, item) =>
-            sum +
-            item.quantity *
-              (item.unitPrice ?? 0),
-          0,
-        )
-      : undefined;
-
     return this.prisma.$transaction(
       async (tx) => {
         // Повторяем проверку после блокировки Task: никакая позиция не может
@@ -706,20 +690,7 @@ export class TasksService {
             }
           }
         }
-        const supplier =
-          await tx.supplier.create({
-            data: {
-              name: supplierName,
-              contact:
-                dto.contact?.trim() || null,
-              phone:
-                dto.phone?.trim() || null,
-              email:
-                dto.email?.trim() || null,
-              website:
-                dto.website?.trim() || null,
-            },
-          });
+        const supplier = await this.suppliers.resolveForOffer(tx, dto, actorId);
 
         const offer =
           await tx.supplierOffer.create({
@@ -728,9 +699,11 @@ export class TasksService {
               supplierId: supplier.id,
               status: 'OFFER_RECEIVED',
 
-              price:
-                calculatedPrice ??
-                dto.price,
+              price: pricing.price,
+              currency: pricing.currency,
+              validUntil: dto.validUntil ? new Date(dto.validUntil) : null,
+              paymentTerms: dto.paymentTerms?.trim() || null,
+              deliveryTerms: dto.deliveryTerms?.trim() || null,
 
               deliveryPrice:
                 dto.deliveryPrice,
@@ -761,11 +734,7 @@ export class TasksService {
                             unitPrice:
                               item.unitPrice,
 
-                            currency:
-                              item.currency
-                                ?.trim()
-                                .toUpperCase() ||
-                              'RUB',
+                            currency: pricing.currency ?? item.currency?.trim().toUpperCase() ?? 'RUB',
 
                             inStock:
                               item.inStock,
@@ -794,6 +763,16 @@ export class TasksService {
             },
           });
 
+        await tx.supplierOfferRevision.create({ data: {
+          offerId: offer.id, version: 1, actorId: actorId ?? null,
+          action: 'CREATED', snapshot: offerSnapshot({
+            ...offer,
+            version: 1, currency: pricing.currency,
+            validUntil: dto.validUntil ? new Date(dto.validUntil) : null,
+            paymentTerms: dto.paymentTerms?.trim() || null,
+            deliveryTerms: dto.deliveryTerms?.trim() || null,
+          }),
+        } });
         await tx.taskActivity.create({
           data: {
             taskId,

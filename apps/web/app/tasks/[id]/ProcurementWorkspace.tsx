@@ -1,10 +1,13 @@
 'use client';
 
 import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { apiFetch, API_BASE_URL } from '../../../lib/api-client';
 
 export type Supplier = {
   id: string; name: string; contact: string | null; phone: string | null;
   email: string | null; website: string | null; notes: string | null;
+  status?: 'ACTIVE' | 'PAUSED' | 'BLOCKED';
+  taxId?: string | null; categories?: string[];
 };
 export type TaskItem = {
   id: string; taskId: string; name: string; partNumber: string | null;
@@ -29,6 +32,11 @@ export type SupplierOffer = {
   id: string; status: string; price: string | null; deliveryPrice: string | null;
   deliveryDays: number | null; inStock: boolean | null; notes: string | null;
   requestedAt: string; receivedAt: string | null; supplier: Supplier;
+  supplierId: string; version: number; currency: string | null;
+  validUntil: string | null; paymentTerms: string | null; deliveryTerms: string | null;
+  decisionReason: string | null; decidedAt: string | null;
+  documents?: Array<{ id: string; version: number; originalName: string; createdAt: string; size: number }>;
+  revisions?: Array<{ id: string; version: number; action: string; snapshot: unknown; createdAt: string }>;
   items: SupplierOfferItem[];
 };
 export type PurchaseOrderItem = {
@@ -61,6 +69,10 @@ type ActionForm = { order: PurchaseOrder; action: ActionName };
 
 const money = (v: string | number | null) => v === null || !Number.isFinite(Number(v)) ? '—' :
   new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 2 }).format(Number(v));
+const quoteMoney = (v: string | number | null, currency: string | null) =>
+  v === null || !currency ? 'Не указано' : Number.isFinite(Number(v))
+    ? `${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2, minimumFractionDigits: 2 }).format(Number(v))} ${currency}`
+    : 'Не указано';
 const qty = (v: string | number) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 3 }).format(Number(v));
 const date = (v: string | null) => v ? new Date(v).toLocaleString('ru-RU') : '—';
 const localDate = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
@@ -103,6 +115,15 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
   const [offerOpen, setOfferOpen] = useState(false);
   const [editingOffer, setEditingOffer] = useState<SupplierOffer | null>(null);
   const [supplier, setSupplier] = useState({ name: '', contact: '', phone: '', email: '', website: '' });
+  const [supplierId, setSupplierId] = useState('');
+  const [supplierQuery, setSupplierQuery] = useState('');
+  const [supplierMatches, setSupplierMatches] = useState<Supplier[]>([]);
+  const [offerCurrency, setOfferCurrency] = useState('RUB');
+  const [validUntil, setValidUntil] = useState('');
+  const [paymentTerms, setPaymentTerms] = useState('');
+  const [deliveryTerms, setDeliveryTerms] = useState('');
+  const [decisionOffer, setDecisionOffer] = useState<SupplierOffer | null>(null);
+  const [decisionReason, setDecisionReason] = useState('');
   const [deliveryPrice, setDeliveryPrice] = useState('');
   const [deliveryDays, setDeliveryDays] = useState('');
   const [offerNotes, setOfferNotes] = useState('');
@@ -146,14 +167,63 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
     const row = orderDraft[item.id]; return sum + (row?.selected ? Number(row.quantity || 0) * Number(item.unitPrice ?? 0) : 0);
   }, 0) ?? 0;
 
+  async function searchSuppliers() {
+    setLocalError('');
+    try {
+      const response = await apiFetch(`/suppliers?q=${encodeURIComponent(supplierQuery.trim())}`, { cache: 'no-store' });
+      if (!response.ok) throw new Error('Поиск поставщиков недоступен');
+      setSupplierMatches(await response.json() as Supplier[]);
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : 'Ошибка поиска');
+    }
+  }
+
+  function pickSupplier(value: Supplier) {
+    setSupplierId(value.id);
+    setSupplier({
+      name: value.name, contact: value.contact ?? '', phone: value.phone ?? '',
+      email: value.email ?? '', website: value.website ?? '',
+    });
+    setSupplierMatches([]);
+  }
+
+  async function selectOfferManually(event: FormEvent) {
+    event.preventDefault();
+    if (!decisionOffer) return;
+    const ok = await onAction(`/supplier-offers/${decisionOffer.id}/decision`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: decisionReason.trim() }),
+    }, 'Выбор КП и его причина сохранены', setLocalError);
+    if (ok) { setDecisionOffer(null); setDecisionReason(''); }
+  }
+
+  async function uploadOfferDocument(offer: SupplierOffer, file: File | undefined) {
+    if (!file) return;
+    const form = new FormData();
+    form.append('file', file);
+    await onAction(`/supplier-offers/${offer.id}/documents`, {
+      method: 'POST', body: form,
+    }, `Документ «${file.name}» прикреплён к КП`, setLocalError);
+  }
+
   function openOffer() {
     setEditingOffer(null);
+    setSupplierId(''); setSupplierQuery(''); setSupplierMatches([]);
+    setSupplier({ name: '', contact: '', phone: '', email: '', website: '' });
+    setOfferCurrency('RUB'); setValidUntil(''); setPaymentTerms(''); setDeliveryTerms('');
+    setDeliveryPrice(''); setDeliveryDays(''); setOfferNotes('');
     setLocalError('');
     setDraft(Object.fromEntries(task.items.map(i => [i.id, { selected: true, quantity: String(i.quantity), price: '', inStock: true, notes: '' }])));
     setOfferOpen(true);
   }
   function openEditOffer(offer: SupplierOffer) {
     setEditingOffer(offer); setLocalError('');
+    setSupplierId(offer.supplierId);
+    setSupplierMatches([]); setSupplierQuery('');
+    setOfferCurrency(offer.currency ?? '');
+    setValidUntil(offer.validUntil ? offer.validUntil.slice(0, 10) : '');
+    setPaymentTerms(offer.paymentTerms ?? '');
+    setDeliveryTerms(offer.deliveryTerms ?? '');
     setSupplier({ name: offer.supplier.name, contact: offer.supplier.contact ?? '',
       phone: offer.supplier.phone ?? '', email: offer.supplier.email ?? '', website: offer.supplier.website ?? '' });
     setDeliveryPrice(offer.deliveryPrice === null ? '' : String(offer.deliveryPrice));
@@ -181,7 +251,7 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
   async function saveOffer(event: FormEvent) {
     event.preventDefault(); setLocalError('');
     const selected = task.items.filter(i => draft[i.id]?.selected);
-    if (!supplier.name.trim() || !selected.length) { setLocalError('Укажите поставщика и выберите позиции'); return; }
+    if ((!supplierId && !supplier.name.trim()) || !selected.length) { setLocalError('Укажите поставщика и выберите позиции'); return; }
     for (const item of selected) {
       const row = draft[item.id]; const amount = Number(row.quantity);
       if (!Number.isFinite(amount) || amount <= 0 || milli(amount) > milli(item.quantity) || Math.abs(amount * 1000 - milli(amount)) > 1e-6) {
@@ -193,17 +263,23 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
     }
     const ok = await onAction(editingOffer ? `/supplier-offers/${editingOffer.id}` : '/supplier-offers', { method: editingOffer ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        supplierId: supplierId || undefined,
         supplierName: supplier.name.trim(), contact: supplier.contact.trim() || undefined,
         phone: supplier.phone.trim() || undefined, email: supplier.email.trim() || undefined,
         website: supplier.website.trim() || undefined,
+        currency: offerCurrency || undefined,
+        validUntil: validUntil ? new Date(`${validUntil}T23:59:59`).toISOString() : undefined,
+        paymentTerms: paymentTerms.trim() || undefined,
+        deliveryTerms: deliveryTerms.trim() || undefined,
+        expectedVersion: editingOffer?.version,
         deliveryPrice: deliveryPrice === '' ? undefined : Number(deliveryPrice),
         deliveryDays: deliveryDays === '' ? undefined : Number(deliveryDays), notes: offerNotes.trim() || undefined,
         items: selected.map(i => ({ taskItemId: i.id, quantity: Number(draft[i.id].quantity),
           unitPrice: draft[i.id].price === '' ? undefined : Number(draft[i.id].price),
-          currency: 'RUB', inStock: draft[i.id].inStock, notes: draft[i.id].notes.trim() || undefined })),
+          currency: offerCurrency || undefined, inStock: draft[i.id].inStock, notes: draft[i.id].notes.trim() || undefined })),
       }),
     }, editingOffer ? 'КП обновлено' : 'Коммерческое предложение сохранено', setLocalError);
-    if (ok) { setOfferOpen(false); setEditingOffer(null); setSupplier({ name: '', contact: '', phone: '', email: '', website: '' }); setDeliveryPrice(''); setDeliveryDays(''); setOfferNotes(''); }
+    if (ok) { setOfferOpen(false); setEditingOffer(null); setSupplierId(''); setSupplier({ name: '', contact: '', phone: '', email: '', website: '' }); setDeliveryPrice(''); setDeliveryDays(''); setOfferNotes(''); }
   }
 
   async function saveOrder(event: FormEvent) {
@@ -282,6 +358,48 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
           <p className="mt-1 text-sm text-slate-500">Каждый поставщик предлагает конкретные позиции, цены и количество. Разные наборы позиций нельзя сравнивать только по общей сумме.</p></div>
         <button disabled={busy || isClosed || !task.items.length} onClick={openOffer} className={primaryClass}>＋ Добавить КП</button>
       </div>
+      {task.supplierOffers.length > 0 && (
+        <section className="overflow-x-auto rounded-2xl border border-slate-200 bg-white p-4">
+          <h3 className="font-semibold text-slate-900">Сравнение КП по позициям</h3>
+          <p className="mt-1 text-xs text-slate-500">Автоматического выбора нет; валюты не конвертируются, неизвестные цены и условия отмечены явно.</p>
+          <table className="mt-4 w-full min-w-[650px] text-left text-xs">
+            <thead className="border-b border-slate-200">
+              <tr><th className="p-2">Потребность</th>{task.supplierOffers.map(offer => (
+                <th key={offer.id} className="min-w-[175px] p-2">
+                  {offer.supplier.name}<span className="block font-normal text-slate-500">v{offer.version} · {offer.currency ?? 'валюта не указана'}</span>
+                </th>
+              ))}</tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {task.items.map(item => <tr key={item.id}>
+                <td className="p-2 font-semibold">{item.name}
+                  <span className="block font-normal text-slate-500">Требуется {qty(item.quantity)} {item.unit}</span>
+                </td>
+                {task.supplierOffers.map(o => {
+                  const line = o.items.find(i => i.taskItemId === item.id);
+                  return <td key={o.id} className="p-2">
+                    {!line ? 'Не предложено' : <>
+                      <div className="font-semibold">{quoteMoney(line.unitPrice, o.currency)} / {item.unit}</div>
+                      <div className="mt-1 text-slate-500">{qty(line.quantity)} {item.unit}</div>
+                      <div className="text-slate-500">{line.inStock === null ? 'Наличие не указано' : line.inStock ? 'В наличии' : 'Под заказ'}</div>
+                    </>}
+                  </td>;
+                })}
+              </tr>)}
+              <tr className="bg-slate-50">
+                <td className="p-2 font-semibold">Условия КП</td>
+                {task.supplierOffers.map(o => <td key={o.id} className="p-2">
+                  <div>Поставка: {o.deliveryDays === null ? 'не указана' : `${o.deliveryDays} дн.`}</div>
+                  <div>Оплата: {o.paymentTerms || 'не указана'}</div>
+                  <div>Доставка: {o.deliveryTerms || 'не указана'}</div>
+                  <div>Действует до: {o.validUntil ? date(o.validUntil) : 'не указано'}</div>
+                  <div className="mt-1 font-semibold">Товары: {quoteMoney(o.price, o.currency)}</div>
+                </td>)}
+              </tr>
+            </tbody>
+          </table>
+        </section>
+      )}
       {!task.supplierOffers.length ? <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500">Пока нет предложений поставщиков. Добавьте первое КП.</div> :
         <div className="grid gap-4 xl:grid-cols-2">{task.supplierOffers.map(offer => {
           const ordered = orderByOffer(offer.id);
@@ -289,20 +407,70 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
           return <article key={offer.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-semibold text-slate-950">{offer.supplier.name}</h3>
               <p className="mt-1 text-xs text-slate-500">{[offer.supplier.contact, offer.supplier.phone, offer.supplier.email].filter(Boolean).join(' · ') || 'Контакты не указаны'}</p></div>
-              {ordered && <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">Заказ оформлен</span>}</div>
+              <div className="flex flex-wrap gap-2">
+                {ordered && <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">Заказ оформлен</span>}
+                {offer.decisionReason && <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">Выбрано вручную</span>}
+                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs">Версия {offer.version}</span>
+              </div></div>
             {!offer.items?.length ? <div className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-700">КП старого формата без позиций. Для многопоставочного заказа добавьте новое КП с позициями.</div> :
               <div className="mt-4 space-y-2">{offer.items.map(item => <div key={item.id} className="rounded-xl bg-slate-50 p-3">
                 <div className="flex flex-wrap items-start justify-between gap-2"><div className="text-sm font-medium text-slate-800">{item.taskItem.name}</div>
-                  <div className="text-sm font-semibold text-slate-800">{item.unitPrice === null ? 'Цена не указана' : money(Number(item.unitPrice) * Number(item.quantity))}</div></div>
-                <p className="mt-1 text-xs text-slate-500">{qty(item.quantity)} {item.taskItem.unit} · {money(item.unitPrice)} / {item.taskItem.unit} · {item.inStock === true ? 'В наличии' : item.inStock === false ? 'Под заказ' : 'Наличие не указано'}</p>
+                  <div className="text-sm font-semibold text-slate-800">{item.unitPrice === null ? 'Цена не указана' : quoteMoney(Number(item.unitPrice) * Number(item.quantity), offer.currency)}</div></div>
+                <p className="mt-1 text-xs text-slate-500">{qty(item.quantity)} {item.taskItem.unit} · {quoteMoney(item.unitPrice, offer.currency)} / {item.taskItem.unit} · {item.inStock === true ? 'В наличии' : item.inStock === false ? 'Под заказ' : 'Наличие не указано'}</p>
                 {item.notes && <p className="mt-1 text-xs text-slate-500">{item.notes}</p>}
               </div>)}</div>}
-            <div className="mt-4 flex flex-wrap justify-between gap-3 border-t border-slate-100 pt-4 text-sm"><div><span className="text-slate-500">Товары: </span><b>{money(offer.price)}</b>
-              <div className="text-xs text-slate-500">Доставка: {money(offer.deliveryPrice)} · Срок: {offer.deliveryDays ?? '—'} дн.</div></div>
-              <div className="text-right"><span className="text-xs text-slate-400">Итого по КП</span><div className="font-bold">{known ? money(Number(offer.price) + Number(offer.deliveryPrice ?? 0)) : 'Не рассчитано'}</div></div></div>
+            <div className="mt-4 flex flex-wrap justify-between gap-3 border-t border-slate-100 pt-4 text-sm">
+              <div><span className="text-slate-500">Товары: </span><b>{quoteMoney(offer.price, offer.currency)}</b>
+                <div className="text-xs text-slate-500">Доставка: {quoteMoney(offer.deliveryPrice, offer.currency)} · Срок: {offer.deliveryDays === null ? 'не указан' : `${offer.deliveryDays} дн.`}</div>
+                <div className="text-xs text-slate-500">Действует до: {offer.validUntil ? date(offer.validUntil) : 'не указано'}</div>
+                <div className="mt-1 text-xs text-slate-500">Оплата: {offer.paymentTerms || 'не указана'}</div>
+                <div className="text-xs text-slate-500">Доставка: {offer.deliveryTerms || 'условия не указаны'}</div>
+              </div>
+              <div className="text-right"><span className="text-xs text-slate-400">Итого по КП</span>
+                <div className="font-bold">{known && offer.currency && offer.deliveryPrice !== null
+                  ? quoteMoney(Number(offer.price) + Number(offer.deliveryPrice), offer.currency)
+                  : 'Не рассчитано'}</div>
+              </div>
+            </div>
             {offer.notes && <p className="mt-3 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">{offer.notes}</p>}
+            {offer.decisionReason && <p className="mt-3 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">Причина ручного выбора: {offer.decisionReason}</p>}
+            <div className="mt-3 rounded-xl border border-slate-100 p-3">
+              <h4 className="text-xs font-semibold">Документы КП</h4>
+              {(offer.documents ?? []).length === 0 && <p className="mt-2 text-xs text-slate-500">Файл пока не прикреплён</p>}
+              {(offer.documents ?? []).map(doc => (
+                <a key={doc.id} href={`${API_BASE_URL}/tasks/${task.id}/supplier-offers/${offer.id}/documents/${doc.id}`}
+                  target="_blank" rel="noreferrer" className="mt-2 block text-xs font-semibold text-blue-700 hover:underline">
+                  {doc.originalName} · версия {doc.version}
+                </a>
+              ))}
+              {!isClosed && <label className="mt-3 block text-xs text-slate-600">
+                Прикрепить PDF/PNG/JPEG (до 8 МБ)
+                <input type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
+                  className="mt-1 block w-full text-xs" disabled={busy}
+                  onChange={e => { void uploadOfferDocument(offer, e.target.files?.[0]); e.target.value = ''; }} />
+              </label>}
+            </div>
+            {(offer.revisions ?? []).length > 0 && <details className="mt-3 rounded-xl bg-slate-50 p-3 text-xs">
+              <summary className="cursor-pointer font-semibold">История версий и решений ({offer.revisions?.length})</summary>
+              <div className="mt-3 space-y-2">{offer.revisions?.map(rev => (
+                <details key={rev.id} className="rounded-lg border border-slate-200 bg-white p-2">
+                  <summary className="cursor-pointer">v{rev.version} · {rev.action} · {date(rev.createdAt)}</summary>
+                  <pre className="mt-2 overflow-x-auto whitespace-pre-wrap">{JSON.stringify(rev.snapshot, null, 2)}</pre>
+                </details>
+              ))}</div>
+            </details>}
             {!isClosed && !orders.some(order => order.supplierOfferId === offer.id) && <button disabled={busy} onClick={() => openEditOffer(offer)} className={`mt-4 ${secondaryClass}`}>Изменить КП</button>}
-            {!ordered && offer.items?.length > 0 && !isClosed && <button disabled={busy || offer.items.every(i => available(i.taskItemId) <= 0)} onClick={() => openOrder(offer)} className={`mt-4 w-full ${primaryClass}`}>Оформить заказ у поставщика →</button>}
+            {!orders.some(order => order.supplierOfferId === offer.id) && offer.items.length > 0 && !isClosed &&
+              <button disabled={busy || Boolean(offer.validUntil && new Date(offer.validUntil) < new Date())}
+                onClick={() => { setDecisionOffer(offer); setDecisionReason(offer.decisionReason ?? ''); setLocalError(''); }}
+                className={`ml-2 mt-4 ${secondaryClass}`}>Выбрать КП с причиной</button>}
+            {!ordered && offer.items?.length > 0 && !isClosed && <button
+              disabled={busy || !offer.decisionReason || offer.currency !== 'RUB' ||
+                Boolean(offer.validUntil && new Date(offer.validUntil) < new Date()) ||
+                offer.items.every(i => available(i.taskItemId) <= 0)}
+              onClick={() => openOrder(offer)} className={`mt-4 w-full ${primaryClass}`}>Оформить заказ у поставщика →</button>}
+            {!offer.decisionReason && <p className="mt-2 text-xs text-amber-700">Перед заказом требуется ручное решение с причиной.</p>}
+            {offer.currency && offer.currency !== 'RUB' && <p className="mt-2 text-xs text-amber-700">Заказы в {offer.currency} пока не поддержаны; валюты не пересчитываются автоматически.</p>}
           </article>;
         })}</div>}
     </> : <>
@@ -341,11 +509,54 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
 
     {offerOpen && <Dialog title={editingOffer ? "Редактировать КП" : "Новое коммерческое предложение"} onClose={() => setOfferOpen(false)}>
       <form onSubmit={saveOffer} className="space-y-5"><div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Поставщик *"><input autoFocus required className={inputClass} value={supplier.name} onChange={e => setSupplier(s => ({ ...s, name: e.target.value }))} placeholder="ООО «ПромСнаб»" /></Field>
+        <Field label="Поставщик *">
+          <input autoFocus required readOnly={Boolean(supplierId)} className={inputClass} value={supplier.name}
+            onChange={e => setSupplier(s => ({ ...s, name: e.target.value }))}
+            placeholder="ООО «ПромСнаб»" />
+          {supplierId && <button type="button" className="mt-2 text-xs text-blue-600" onClick={() => {
+            setSupplierId(''); setSupplier({ name: '', contact: '', phone: '', email: '', website: '' });
+          }}>Выбрать другого поставщика</button>}
+        </Field>
         <Field label="Контактное лицо"><input className={inputClass} value={supplier.contact} onChange={e => setSupplier(s => ({ ...s, contact: e.target.value }))} /></Field>
         <Field label="Телефон"><input className={inputClass} value={supplier.phone} onChange={e => setSupplier(s => ({ ...s, phone: e.target.value }))} /></Field>
         <Field label="Email"><input type="email" className={inputClass} value={supplier.email} onChange={e => setSupplier(s => ({ ...s, email: e.target.value }))} /></Field>
         <Field label="Сайт (с https://)"><input type="url" className={inputClass} value={supplier.website} onChange={e => setSupplier(s => ({ ...s, website: e.target.value }))} placeholder="https://example.ru" /></Field>
+      </div>
+      <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-3">
+        <h4 className="text-xs font-semibold text-slate-700">Найти поставщика в едином справочнике</h4>
+        <div className="mt-2 flex gap-2">
+          <input value={supplierQuery} className={inputClass} onChange={e => setSupplierQuery(e.target.value)}
+            placeholder="Название, ИНН, контакт" />
+          <button type="button" onClick={() => void searchSuppliers()} className={secondaryClass}>Найти</button>
+        </div>
+        {supplierMatches.length > 0 && <div className="mt-2 max-h-44 space-y-1 overflow-y-auto">
+          {supplierMatches.map(s => <button key={s.id} type="button"
+            disabled={s.status === 'BLOCKED' || s.status === 'PAUSED'} onClick={() => pickSupplier(s)}
+            className="block w-full rounded-lg bg-white p-2 text-left text-xs text-slate-700 hover:bg-blue-100 disabled:opacity-40">
+            <b>{s.name}</b> · {s.taxId ?? 'ИНН не указан'} · {s.status ?? 'ACTIVE'}
+          </button>)}
+        </div>}
+        <p className="mt-2 text-xs text-slate-500">Новый поставщик с уникальным названием будет добавлен в справочник при сохранении КП. Существующая карточка не изменяется из формы КП.</p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Валюта КП">
+          <select value={offerCurrency} onChange={e => setOfferCurrency(e.target.value)} className={inputClass}>
+            <option value="">Не указана</option>
+            <option value="RUB">RUB · рубли</option>
+            <option value="EUR">EUR · евро</option>
+            <option value="USD">USD · доллары</option>
+            <option value="CNY">CNY · юани</option>
+          </select>
+        </Field>
+        <Field label="Действует до">
+          <input type="date" value={validUntil} onChange={e => setValidUntil(e.target.value)} className={inputClass} />
+        </Field>
+        <Field label="Условия оплаты">
+          <textarea rows={2} maxLength={2000} value={paymentTerms} onChange={e => setPaymentTerms(e.target.value)} className={inputClass} placeholder="Например: 50% предоплата" />
+        </Field>
+        <Field label="Условия доставки">
+          <textarea rows={2} maxLength={2000} value={deliveryTerms} onChange={e => setDeliveryTerms(e.target.value)} className={inputClass} placeholder="Самовывоз, ТК, включена..." />
+        </Field>
       </div>
       <div><h3 className="font-semibold text-slate-900">Позиции предложения</h3><p className="mt-1 text-xs text-slate-500">Снимите галочку с позиций, которые поставщик не предлагает. Можно указать частичное количество.</p>
         <div className="mt-3 space-y-3">{task.items.map(item => {
@@ -353,20 +564,42 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
           return <div key={item.id} className="rounded-xl border border-slate-200 p-3">
             <label className="flex items-center gap-3 text-sm font-semibold"><input type="checkbox" checked={row.selected} onChange={e => updateDraft(item.id, { selected: e.target.checked })} />{item.name} <span className="font-normal text-slate-400">нужно {qty(item.quantity)} {item.unit}</span></label>
             {row.selected && <div className="mt-3 grid gap-3 sm:grid-cols-2"><Field label={`Количество, ${item.unit} *`}><input required type="number" min="0.001" max={Number(item.quantity)} step="0.001" className={inputClass} value={row.quantity} onChange={e => updateDraft(item.id, { quantity: e.target.value })} /></Field>
-              <Field label="Цена за единицу, ₽"><input type="number" min="0" step="0.01" className={inputClass} value={row.price} onChange={e => updateDraft(item.id, { price: e.target.value })} placeholder="Можно оставить пустым" /></Field>
+              <Field label={`Цена за единицу, ${offerCurrency || 'валюта не указана'}`}><input type="number" min="0" step="0.01" className={inputClass} value={row.price} onChange={e => updateDraft(item.id, { price: e.target.value })} placeholder="Можно оставить пустым" /></Field>
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={row.inStock} onChange={e => updateDraft(item.id, { inStock: e.target.checked })} />В наличии</label>
-              <div className="text-right text-sm font-semibold">Сумма: {row.price === '' ? '—' : money(Number(row.price) * Number(row.quantity))}</div>
+              <div className="text-right text-sm font-semibold">Сумма: {row.price === '' ? 'не указана' : quoteMoney(Number(row.price) * Number(row.quantity), offerCurrency || null)}</div>
               <div className="sm:col-span-2"><input className={inputClass} value={row.notes} onChange={e => updateDraft(item.id, { notes: e.target.value })} placeholder="Комментарий по позиции" /></div>
             </div>}
           </div>;
         })}</div></div>
-      <div className="grid gap-3 sm:grid-cols-2"><Field label="Стоимость доставки, ₽"><input type="number" min="0" step="0.01" className={inputClass} value={deliveryPrice} onChange={e => setDeliveryPrice(e.target.value)} /></Field>
+      <div className="grid gap-3 sm:grid-cols-2"><Field label={`Стоимость доставки, ${offerCurrency || 'валюта не указана'}`}><input type="number" min="0" step="0.01" className={inputClass} value={deliveryPrice} onChange={e => setDeliveryPrice(e.target.value)} /></Field>
         <Field label="Срок поставки, дней"><input type="number" min="0" step="1" className={inputClass} value={deliveryDays} onChange={e => setDeliveryDays(e.target.value)} /></Field></div>
-      <div className="rounded-xl bg-blue-50 p-4 text-sm"><div className="flex justify-between"><span>Товары</span><b>{offeredPriced ? money(offeredTotal) : 'Не все цены указаны'}</b></div>
-        <div className="mt-2 flex justify-between"><span>Итого с доставкой</span><b>{offeredPriced ? money(offeredTotal + Number(deliveryPrice || 0)) : '—'}</b></div></div>
+      <div className="rounded-xl bg-blue-50 p-4 text-sm">
+        <div className="flex justify-between"><span>Товары</span><b>{offeredPriced ? quoteMoney(offeredTotal, offerCurrency || null) : 'Не все цены указаны'}</b></div>
+        <div className="mt-2 flex justify-between"><span>Итого с доставкой</span>
+          <b>{offeredPriced && deliveryPrice !== '' ? quoteMoney(offeredTotal + Number(deliveryPrice), offerCurrency || null) : 'Не рассчитано'}</b>
+        </div>
+        <p className="mt-2 text-xs text-blue-800">Если цена, валюта или доставка неизвестны — итог не рассчитывается.</p>
+      </div>
       <Field label="Комментарий к КП"><textarea rows={3} className={inputClass} value={offerNotes} onChange={e => setOfferNotes(e.target.value)} /></Field>
       {localError && <p className="text-sm text-rose-600">{localError}</p>}
       <div className="flex flex-wrap justify-end gap-2"><button type="button" onClick={() => setOfferOpen(false)} className={secondaryClass}>Отмена</button><button disabled={busy || !task.items.some(i => draft[i.id]?.selected)} className={primaryClass}>{editingOffer ? "Сохранить изменения" : "Сохранить КП"}</button></div>
+      </form>
+    </Dialog>}
+
+    {decisionOffer && <Dialog title={`Ручной выбор КП «${decisionOffer.supplier.name}»`} onClose={() => setDecisionOffer(null)}>
+      <form onSubmit={selectOfferManually} className="space-y-4">
+        <p className="text-sm text-slate-600">Версия {decisionOffer.version} · цена {quoteMoney(decisionOffer.price, decisionOffer.currency)}.
+          Система не выбирает поставщиков автоматически. Решение попадёт в историю.</p>
+        <Field label="Причина выбора (не менее 10 символов) *">
+          <textarea required minLength={10} maxLength={2000} rows={4}
+            className={inputClass} value={decisionReason} onChange={e => setDecisionReason(e.target.value)}
+            placeholder="Почему выбрано это КП: техническое соответствие, срок, цена и условия" />
+        </Field>
+        {localError && <p className="text-sm text-rose-600">{localError}</p>}
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={() => setDecisionOffer(null)} className={secondaryClass}>Отмена</button>
+          <button disabled={busy || decisionReason.trim().length < 10} className={primaryClass}>Зафиксировать решение</button>
+        </div>
       </form>
     </Dialog>}
 
