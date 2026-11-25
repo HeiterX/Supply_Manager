@@ -15,10 +15,14 @@ import { CreateTaskItemDto } from './dto/create-task-item.dto.js';
 import { ShipPurchaseOrderDto } from './dto/ship-purchase-order.dto.js';
 import { UpdateTaskDto } from './dto/update-task.dto.js';
 import { UpdateTaskItemDto } from './dto/update-task-item.dto.js';
+import { TelegramDeliveryService } from '../telegram/telegram-delivery.service.js';
 
 @Injectable()
 export class TasksService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly telegramDelivery: TelegramDeliveryService,
+  ) {}
 
   create(dto: CreateTaskDto) {
     return this.prisma.task.create({
@@ -224,6 +228,7 @@ export class TasksService {
             text,
           })),
         });
+        await this.telegramDelivery.taskChanged(tx, id);
       }
 
       return tx.task.findUnique({
@@ -701,6 +706,7 @@ export class TasksService {
           nextAction: `Согласовать условия и оформить заказ у «${offer.supplier.name}»`,
         },
       });
+      await this.telegramDelivery.taskChanged(tx, taskId);
 
       await tx.taskActivity.create({
         data: {
@@ -840,6 +846,7 @@ export class TasksService {
             : `Получить счёт от «${offer.supplier.name}»`,
         },
       });
+      await this.telegramDelivery.taskChanged(tx, taskId);
 
       const formattedTotal =
         totalPrice !== null
@@ -937,6 +944,7 @@ export class TasksService {
           reminderAt,
         },
       });
+      await this.telegramDelivery.taskChanged(tx, taskId);
 
       await tx.taskActivity.create({
         data: {
@@ -1067,6 +1075,7 @@ export class TasksService {
           reminderAt: null,
         },
       });
+      await this.telegramDelivery.taskChanged(tx, taskId);
 
       const activityText = purchaseOrder
         ? `Заказ у «${supplierName}» отменён${invoiceNumber ? `, счёт № ${invoiceNumber}` : ''}. Причина: ${cancelReason}`
@@ -1179,6 +1188,7 @@ export class TasksService {
           reminderAt: null,
         },
       });
+      await this.telegramDelivery.taskChanged(tx, taskId);
 
       await tx.taskActivity.create({
         data: {
@@ -1301,6 +1311,7 @@ export class TasksService {
           reminderAt: expectedDeliveryAt,
         },
       });
+      await this.telegramDelivery.taskChanged(tx, taskId);
 
       const details = [
         `Заказ отгружен поставщиком. Транспортная компания: ${carrier}`,
@@ -1413,6 +1424,7 @@ export class TasksService {
           reminderAt: null,
         },
       });
+      await this.telegramDelivery.taskChanged(tx, taskId);
 
       const carrier = purchaseOrder.carrier;
       const trackingNumber = purchaseOrder.trackingNumber;
@@ -1526,6 +1538,7 @@ export class TasksService {
           reminderAt: null,
         },
       });
+      await this.telegramDelivery.taskChanged(tx, taskId);
 
       const details = [
         'Товар получен',
@@ -1648,6 +1661,7 @@ export class TasksService {
           reminderAt: null,
         },
       });
+      await this.telegramDelivery.taskChanged(tx, taskId);
 
       await tx.taskActivity.create({
         data: {
@@ -1742,6 +1756,7 @@ export class TasksService {
           reminderAt: null,
         },
       });
+      await this.telegramDelivery.taskChanged(tx, taskId);
 
       await tx.taskActivity.create({
         data: {

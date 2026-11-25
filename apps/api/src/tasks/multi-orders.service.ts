@@ -8,13 +8,17 @@ import type { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto.js';
 import { CreateSupplierOfferDto } from './dto/create-supplier-offer.dto.js';
+import { TelegramDeliveryService } from '../telegram/telegram-delivery.service.js';
 
 const milli = (value: number) => Math.round(value * 1000);
 const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
 @Injectable()
 export class MultiOrdersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly telegramDelivery: TelegramDeliveryService,
+  ) {}
 
   // A row lock serializes all allocations for the same procurement task.
   private async lockTask(tx: Prisma.TransactionClient, taskId: string) {
@@ -77,6 +81,7 @@ export class MultiOrdersService {
       where: { id: taskId },
       data: { status: status as 'SEARCHING' | 'HANDED_OVER' | 'ORDERED' | 'WAITING_PAYMENT' | 'WAITING_SHIPMENT' | 'IN_TRANSIT' | 'READY_FOR_PICKUP' | 'RECEIVED', nextAction, reminderAt: null },
     });
+    await this.telegramDelivery.taskChanged(tx, taskId);
   }
 
   async updateOffer(taskId: string, offerId: string, dto: CreateSupplierOfferDto) {
@@ -310,6 +315,7 @@ export class MultiOrdersService {
       await tx.task.update({ where: { id: taskId }, data: {
         status: 'CLOSED', closedAt: new Date(), nextAction: null, reminderAt: null,
       } });
+      await this.telegramDelivery.taskChanged(tx, taskId);
       await tx.taskActivity.create({ data: { taskId, text: 'Закупка закрыта' } });
       return tx.task.findUnique({ where: { id: taskId } });
     }, { timeout: 15000 });

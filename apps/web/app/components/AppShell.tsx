@@ -107,6 +107,7 @@ function UserMenu() {
       <div className="user-details"><strong>{user.fullName}</strong><small>{roleLabels[user.role]}</small></div>
       <hr className="ui-divider" />
       {logoutError && <Alert tone="danger">{logoutError}</Alert>}
+      <Link href="/settings/telegram" className="ui-button ui-button--ghost w-full justify-start">Настройки Telegram</Link>
       <Button variant="ghost" className="w-full justify-start" loading={signingOut} onClick={() => void logout()}>Выйти</Button>
     </div>
   </div>;

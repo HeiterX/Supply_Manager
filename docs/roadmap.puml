@@ -802,6 +802,19 @@ RESULTEXP ==> FINAL
 ' ЛЕГЕНДА
 ' ============================================================
 
+package "CORE-10: безопасный Telegram-канал (22.11.2026)" #BBDEFB {
+    rectangle "Telegram Bot API\ngrammY / HTTPS webhook\nsecret_token header" as CORE10_TG
+    rectangle "NestJS TelegramModule\nweb confirmation / current RBAC\nopaque expiring read-only callbacks" as CORE10_BACKEND
+    rectangle "PostgreSQL\nlink hashes / subscriptions\nupdate receipts / transactional outbox" as CORE10_DB
+    rectangle "CORE-09 server events\nassignment / due / overdue\ncontract ready; backend pending" as CORE10_EVENTS
+    CORE10_TG --> CORE10_BACKEND : private updates
+    CORE10_BACKEND --> CORE10_DB : atomic receipt + reply
+    CORE10_DB --> CORE10_BACKEND : delivery lease
+    CORE10_BACKEND --> CORE10_TG : confirmed send / bounded retry
+    CORE10_EVENTS ..> CORE10_BACKEND : stable event ID + authorized recipients
+    ARCH --> CORE10_BACKEND : existing business services
+}
+
 legend bottom
 |= Цвет |= Состояние |
 |<#C8E6C9>| Уже реализовано / работает |
