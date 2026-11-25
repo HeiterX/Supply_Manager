@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import AppShell from '../../components/AppShell';
 import AuthGate from '../../components/AuthGate';
+import PageLayout from '../../components/PageLayout';
 
 import { apiFetch } from '../../../lib/api-client';
 import { getCurrentUser } from '../../../lib/auth';
@@ -310,7 +311,7 @@ function AdminUsersContent() {
   ).length;
 
   return (
-    <AppShell
+    <PageLayout
       title="Управление пользователями"
       subtitle="Сотрудники, роли и доступ к Supply Manager"
       action={
@@ -529,14 +530,14 @@ function AdminUsersContent() {
         Сейчас API возвращает до 50 последних пользователей.
         Полную пагинацию добавим отдельно.
       </p>
-    </AppShell>
+    </PageLayout>
   );
 }
 
 export default function AdminUsersPage() {
   return (
     <AuthGate>
-      <AdminUsersContent />
+      <AppShell><AdminUsersContent /></AppShell>
     </AuthGate>
   );
 }

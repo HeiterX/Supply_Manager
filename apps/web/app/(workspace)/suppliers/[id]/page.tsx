@@ -2,16 +2,15 @@
 
 import Link from 'next/link';
 import { Suspense, use } from 'react';
-import { useCoreResource } from '../../../lib/discovery';
-import AppShell from '../../components/AppShell';
-import AuthGate from '../../components/AuthGate';
-import OrderDirectory from '../../components/OrderDirectory';
+import { useCoreResource } from '@/lib/discovery';
+import PageLayout from '@/app/components/PageLayout';
+import OrderDirectory from '@/app/components/OrderDirectory';
 import type { Supplier } from '../page';
 
 function SupplierContent({ id }: { id: string }) {
   const { data, loading, error } = useCoreResource<Supplier>(`/discovery/suppliers/${encodeURIComponent(id)}`);
   return (
-    <AppShell title={data?.name ?? 'Поставщик'}
+    <PageLayout title={data?.name ?? 'Поставщик'}
       action={<Link href="/suppliers" className="text-sm font-semibold text-blue-700">К поставщикам</Link>}>
       {loading && <p role="status">Загружаем данные поставщика…</p>}
       {error && <p role="alert" className="text-rose-700">{error}</p>}
@@ -28,11 +27,11 @@ function SupplierContent({ id }: { id: string }) {
           <Suspense><OrderDirectory supplierId={id} /></Suspense>
         </>
       )}
-    </AppShell>
+    </PageLayout>
   );
 }
 
 export default function SupplierPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  return <AuthGate><SupplierContent id={id} /></AuthGate>;
+  return <SupplierContent id={id} />;
 }

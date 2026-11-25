@@ -2,10 +2,9 @@
 
 import Link from 'next/link';
 import { Suspense } from 'react';
-import { useDiscoveryList } from '../../lib/discovery';
-import AppShell from '../components/AppShell';
-import AuthGate from '../components/AuthGate';
-import { DiscoveryControls, Pagination } from '../components/DiscoveryControls';
+import { useDiscoveryList } from '@/lib/discovery';
+import PageLayout from '@/app/components/PageLayout';
+import { DiscoveryControls, Pagination } from '@/app/components/DiscoveryControls';
 
 export type Supplier = { id: string; name: string; contact: string | null; email: string | null; phone: string | null; website: string | null };
 
@@ -13,7 +12,7 @@ function SuppliersContent() {
   const list = useDiscoveryList<Supplier>('suppliers');
   const { data, loading, error } = list;
   return (
-    <AppShell title="Поставщики">
+    <PageLayout title="Поставщики">
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <DiscoveryControls entity="suppliers" {...list} total={data?.total} />
         {loading && <p role="status" className="p-5 text-sm text-slate-500">Загружаем поставщиков…</p>}
@@ -30,10 +29,10 @@ function SuppliersContent() {
         </ul>
         <Pagination page={data} onChange={list.setPage} />
       </section>
-    </AppShell>
+    </PageLayout>
   );
 }
 
 export default function SuppliersPage() {
-  return <AuthGate><Suspense><SuppliersContent /></Suspense></AuthGate>;
+  return <Suspense><SuppliersContent /></Suspense>;
 }

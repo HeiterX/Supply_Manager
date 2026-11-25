@@ -2,167 +2,190 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import type { ReactNode } from 'react';
-import { useCurrentUser } from './AuthGate';
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { AUTH_EVENTS } from '@/lib/api-client';
+import { useSession } from './AuthGate';
+import { Dialog } from './Dialog';
 import GlobalSearch from './GlobalSearch';
+import { getCurrentSection, navigation, roleLabels } from './navigation';
+import PageLayout from './PageLayout';
+import { Alert, Avatar, Button, EmptyState, Input } from './ui';
 
-type AppShellProps = {
-  children: ReactNode;
-  title?: string;
-  subtitle?: string;
-  action?: ReactNode;
+const collapseKey = 'supply-manager:sidebar-collapsed';
+const sidebarChange = 'supply-manager:sidebar-change';
+
+function subscribeSidebar(callback: () => void) {
+  window.addEventListener(sidebarChange, callback);
+  window.addEventListener('storage', callback);
+  return () => {
+    window.removeEventListener(sidebarChange, callback);
+    window.removeEventListener('storage', callback);
+  };
+}
+
+function readCollapsed() {
+  try { return localStorage.getItem(collapseKey) === 'true'; }
+  catch { return false; }
+}
+
+const icons = {
+  home: 'M3 10l9-7 9 7v10h-6v-6H9v6H3z',
+  purchases: 'M3 4h2l3 11h11l2-8H6m3 13h.01m9 0h.01',
+  requests: 'M6 3h8l4 4v14H6zm3 9h6m-6 4h6M14 3v5h4',
+  registry: 'M3 7l9-4 9 4-9 4zm0 5 9 4 9-4M3 17l9 4 9-4',
+  suppliers: 'M3 21V7l9-4 9 4v14H3zm5 0v-8h8v8',
+  analytics: 'M4 4v16h16M8 16v-4m5 4V8m5 8V5',
+  plus: 'M12 5v14M5 12h14',
+  menu: 'M4 6h16M4 12h16M4 18h16',
+  panel: 'M3 4h18v16H3zm6 0v16',
+  search: 'M21 21l-5-5m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z',
+  chevron: 'm6 9 6 6 6-6',
 };
 
-type IconType = 'requests' | 'tasks' | 'registry' | 'suppliers';
-
-function BoxIcon({ type }: { type: IconType }) {
-  const common = 'h-5 w-5';
-
-  if (type === 'requests') {
-    return (
-      <svg className={common} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-        <path d="M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" />
-        <path d="M8 9h8M8 13h8M8 17h5" />
-        <circle cx="18.5" cy="5.5" r="2.5" fill="currentColor" stroke="none" />
-      </svg>
-    );
-  }
-
-  if (type === 'tasks') {
-    return (
-      <svg className={common} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-        <path d="M5 4h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z" />
-        <path d="M8 9h8M8 13h8M8 17h5" />
-      </svg>
-    );
-  }
-
-  if (type === 'registry') {
-    return (
-      <svg className={common} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-        <path d="M4 7h16M4 12h16M4 17h16" />
-        <path d="M7 4v16M17 4v16" opacity=".45" />
-      </svg>
-    );
-  }
-
-  return (
-    <svg className={common} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <path d="M16 20v-1.5A3.5 3.5 0 0 0 12.5 15h-5A3.5 3.5 0 0 0 4 18.5V20" />
-      <circle cx="10" cy="8" r="3" />
-      <path d="M17 8h3M18.5 6.5v3" />
-    </svg>
-  );
+function Icon({ name }: { name: keyof typeof icons }) {
+  return <svg aria-hidden="true" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+    strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round"><path d={icons[name]} /></svg>;
 }
 
-function isCurrentPath(pathname: string, href: string) {
-  if (href === '/') return pathname === '/';
-  return pathname === href || pathname.startsWith(`${href}/`);
+function Brand() {
+  return <Link href="/dashboard" className="app-brand" aria-label="Supply Manager — главная">
+    <span className="brand-mark" aria-hidden="true">SM</span>
+    <span className="brand-text"><strong>Supply Manager</strong><small>Снабжение и закупки</small></span>
+  </Link>;
 }
 
-export default function AppShell({
-  children,
-  title,
-  subtitle,
-  action,
-}: AppShellProps) {
-  const pathname = usePathname();
-  const employee = useCurrentUser()?.role === 'EMPLOYEE';
-  const links: { href: string; label: string; mobile: string; icon: IconType }[] = [
-    { href: '/requests', label: employee ? 'Мои заявки' : 'Входящие заявки', mobile: 'Заявки', icon: 'requests' },
-    ...(employee ? [] : [
-      { href: '/', label: 'Закупки', mobile: 'Закупки', icon: 'tasks' as const },
-      { href: '/registry', label: 'Реестр позиций', mobile: 'Реестр', icon: 'registry' as const },
-      { href: '/suppliers', label: 'Поставщики', mobile: 'Поставщики', icon: 'suppliers' as const },
-      { href: '/orders', label: 'Заказы', mobile: 'Заказы', icon: 'tasks' as const },
-      { href: '/analytics', label: 'Аналитика', mobile: 'Аналитика', icon: 'registry' as const },
-    ]),
-  ];
+type Entries = typeof navigation;
+type Current = ReturnType<typeof getCurrentSection>;
 
-  const desktopLinkClass = (href: string) =>
-    `flex items-center gap-3 rounded-xl px-3.5 py-3 font-medium transition ${
-      isCurrentPath(pathname, href)
-        ? 'bg-blue-50 text-blue-700'
-        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-950'
-    }`;
+function NavLinks({ entries, current, pathname, onNavigate }: {
+  entries: Entries;
+  current: Current;
+  pathname: string;
+  onNavigate?: () => void;
+}) {
+  return <nav className="app-nav" aria-label="Основная навигация">
+    {entries.map((entry) => <Link className="app-nav-link" href={entry.href} key={entry.href} onClick={onNavigate}
+      aria-label={entry.label} title={entry.label} aria-current={current === entry ? (entry.href === pathname ? 'page' : 'location') : undefined}>
+      <Icon name={entry.icon} /><span>{entry.label}</span>
+    </Link>)}
+  </nav>;
+}
 
-  const mobileLinkClass = (href: string) =>
-    `flex flex-col items-center gap-1 rounded-xl px-2 py-2 text-[11px] font-medium transition ${
-      isCurrentPath(pathname, href)
-        ? 'text-blue-600'
-        : 'text-slate-500'
-    }`;
+function Breadcrumbs({ current, pathname, canSeeSection }: { current: Current; pathname: string; canSeeSection: boolean }) {
+  if (!current || current.href === '/dashboard') return <span className="text-sm font-semibold">Главная</span>;
+  const details = pathname.startsWith('/tasks/') ? 'Карточка закупки' :
+    pathname.startsWith('/requests/') ? 'Карточка заявки' :
+    pathname.startsWith('/suppliers/') ? 'Карточка поставщика' : undefined;
+  return <nav aria-label="Хлебные крошки" className="app-crumbs">
+    <Link href="/dashboard">Главная</Link><span aria-hidden="true">›</span>
+    {details && canSeeSection ? <Link href={current.href}>{current.label}</Link> :
+      <span aria-current={details ? undefined : 'page'}>{current.label}</span>}
+    {details && <><span aria-hidden="true">›</span><span aria-current="page">{details}</span></>}
+  </nav>;
+}
 
-  return (
-    <div className="min-h-screen bg-[#f5f7fb] text-slate-950">
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-[232px] border-r border-slate-200/80 bg-white lg:flex lg:flex-col">
-        <div className="flex h-20 items-center gap-3 border-b border-slate-100 px-5">
-          <div className="grid h-10 w-10 place-items-center rounded-2xl bg-blue-600 text-sm font-bold text-white shadow-sm shadow-blue-200">
-            SM
-          </div>
-          <div className="min-w-0">
-            <div className="truncate text-sm font-semibold">Supply Manager</div>
-            <div className="text-xs text-slate-400">Снабжение и закупки</div>
-          </div>
-        </div>
+function SectionSearch({ entries }: { entries: Entries }) {
+  const [query, setQuery] = useState('');
+  const matches = entries.filter(({ label }) => label.toLowerCase().includes(query.trim().toLowerCase()));
+  return <Dialog title="Поиск по разделам" trigger={(open) =>
+    <Button variant="outline" className="app-search" onClick={() => { setQuery(''); open(); }} aria-label="Поиск по разделам">
+      <Icon name="search" /><span>Поиск по разделам</span>
+    </Button>}>
+    {(close) => <>
+      <Input type="search" aria-label="Название раздела" placeholder="Название раздела" value={query}
+        onChange={(event) => setQuery(event.target.value)} data-initial-focus />
+      {matches.length ? <NavLinks entries={matches} current={undefined} pathname="" onNavigate={close} /> :
+        <p role="status" className="mt-4 text-sm text-muted">Разделы не найдены.</p>}
+    </>}
+  </Dialog>;
+}
 
-        <nav className="flex-1 space-y-1.5 px-3 py-5 text-sm">
-          {links.map(({ href, label, icon }) => (
-            <Link key={href} href={href} className={desktopLinkClass(href)}
-              aria-current={isCurrentPath(pathname, href) ? 'page' : undefined}>
-              <BoxIcon type={icon} />{label}
-            </Link>
-          ))}
-        </nav>
-
-      </aside>
-
-      <div className="lg:pl-[232px]">
-        <header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/90 backdrop-blur">
-          <div className="mx-auto flex min-h-20 max-w-[1500px] items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
-            <div className="min-w-0">
-              <div className="mb-1 flex items-center gap-2 lg:hidden">
-                <div className="grid h-8 w-8 place-items-center rounded-xl bg-blue-600 text-[10px] font-bold text-white">
-                  SM
-                </div>
-                <span className="text-xs font-semibold text-slate-500">
-                  Supply Manager
-                </span>
-              </div>
-
-              {title && (
-                <h1 className="truncate text-xl font-semibold tracking-tight sm:text-2xl">
-                  {title}
-                </h1>
-              )}
-
-              {subtitle && (
-                <p className="mt-1 hidden text-sm text-slate-500 sm:block">
-                  {subtitle}
-                </p>
-              )}
-            </div>
-
-            {action && <div className="shrink-0">{action}</div>}
-          </div>
-          <div className="mx-auto max-w-[1500px] px-4 pb-3 sm:px-6 lg:px-8">
-            <GlobalSearch />
-          </div>
-        </header>
-
-        <main className="mx-auto max-w-[1500px] px-4 pb-24 pt-6 sm:px-6 lg:px-8 lg:pb-10">
-          {children}
-        </main>
-      </div>
-
-      <nav aria-label="Разделы" className="fixed inset-x-0 bottom-0 z-40 flex justify-between overflow-x-auto border-t border-slate-200 bg-white/95 px-1 py-2 backdrop-blur lg:hidden">
-        {links.map(({ href, mobile, icon }) => (
-          <Link key={href} href={href} className={mobileLinkClass(href)}
-            aria-current={isCurrentPath(pathname, href) ? 'page' : undefined}>
-            <BoxIcon type={icon} />{mobile}
-          </Link>
-        ))}
-      </nav>
+function UserMenu() {
+  const { user, signingOut, logoutError, logout } = useSession();
+  return <div className="relative">
+    <Button variant="ghost" className="app-user-button" popoverTarget="app-user-menu" aria-label={`Меню пользователя: ${user.fullName}`}>
+      <Avatar name={user.fullName} />
+      <span className="app-user-label"><strong>{user.fullName}</strong><small>{roleLabels[user.role]}</small></span>
+      <Icon name="chevron" />
+    </Button>
+    <div popover="auto" id="app-user-menu" className="ui-popover" aria-label="Меню пользователя">
+      <div className="user-details"><strong>{user.fullName}</strong><small>{roleLabels[user.role]}</small></div>
+      <hr className="ui-divider" />
+      {logoutError && <Alert tone="danger">{logoutError}</Alert>}
+      <Link href="/settings/telegram" className="ui-button ui-button--ghost w-full justify-start">Настройки Telegram</Link>
+      <Button variant="ghost" className="w-full justify-start" loading={signingOut} onClick={() => void logout()}>Выйти</Button>
     </div>
-  );
+  </div>;
+}
+
+function WorkspaceContent({ children, allowed }: { children: ReactNode; allowed: boolean }) {
+  const [forbidden, setForbidden] = useState(false);
+  useEffect(() => {
+    const deny = () => setForbidden(true);
+    window.addEventListener(AUTH_EVENTS.forbidden, deny);
+    return () => window.removeEventListener(AUTH_EVENTS.forbidden, deny);
+  }, []);
+
+  if (allowed && !forbidden) return children;
+
+  return <PageLayout title="Недостаточно прав">
+    <EmptyState title="403 · Доступ ограничен" description="Для этого раздела требуются дополнительные права."
+      action={<Link href="/dashboard" className="ui-button ui-button--outline">На главную</Link>} />
+  </PageLayout>;
+}
+
+export default function AppShell({ children, tools }: { children: ReactNode; tools?: ReactNode }) {
+  const pathname = usePathname();
+  const { user } = useSession();
+  const [fallbackCollapsed, setFallbackCollapsed] = useState(false);
+  const stored = useSyncExternalStore(subscribeSidebar, readCollapsed, () => false);
+  const collapsed = stored || fallbackCollapsed;
+  const current = getCurrentSection(pathname, user.role);
+  const entries = navigation.filter((entry) => entry.roles.includes(user.role));
+  const allowed = !current || entries.includes(current);
+
+  function toggleSidebar() {
+    try {
+      localStorage.setItem(collapseKey, String(!collapsed));
+      window.dispatchEvent(new Event(sidebarChange));
+    } catch {
+      setFallbackCollapsed(!collapsed);
+    }
+  }
+
+  return <div className="app-shell" data-collapsed={collapsed}>
+    <a href="#workspace-main" className="skip-link">К содержимому</a>
+    <aside className="app-sidebar" aria-label="Боковая панель">
+      <Brand />
+      <NavLinks entries={entries} current={current} pathname={pathname} />
+    </aside>
+    <div className="app-body">
+      <header className="app-header">
+        <div className="app-header-context">
+          <Button variant="ghost" icon className="app-sidebar-toggle" aria-pressed={collapsed}
+            aria-label={collapsed ? 'Развернуть боковое меню' : 'Свернуть боковое меню'} onClick={toggleSidebar}>
+            <Icon name="panel" />
+          </Button>
+          <Dialog key={pathname} title="Навигация" className="app-drawer"
+            trigger={(open) => <Button variant="ghost" icon className="app-mobile-toggle" aria-label="Открыть навигацию" onClick={open}>
+              <Icon name="menu" />
+            </Button>}>
+            {(close) => <NavLinks entries={entries} current={current} pathname={pathname} onNavigate={close} />}
+          </Dialog>
+          <Breadcrumbs current={current} pathname={pathname} canSeeSection={allowed} />
+        </div>
+        <div className="app-header-search">
+          <GlobalSearch key={pathname} />
+        </div>
+        <div className="app-header-tools" key={pathname}>
+          <SectionSearch entries={entries} />
+          {tools}
+          <UserMenu />
+        </div>
+      </header>
+      <main id="workspace-main" className="app-main" tabIndex={-1}>
+        <WorkspaceContent key={pathname} allowed={allowed}>{children}</WorkspaceContent>
+      </main>
+    </div>
+  </div>;
 }

@@ -2,9 +2,11 @@
 
 import Image from 'next/image';
 import { useState } from 'react';
-import { API_BASE_URL, apiFetch } from '../../lib/api-client';
-import { reportTimeZone, statusLabels, useCoreResource } from '../../lib/discovery';
-import { useCurrentUser } from '../components/AuthGate';
+import { API_BASE_URL, apiFetch } from '@/lib/api-client';
+import { reportTimeZone, useCoreResource } from '@/lib/discovery';
+import { useSession } from '@/app/components/AuthGate';
+import { StatusBadge } from '@/app/components/StatusBadge';
+import { Button } from '@/app/components/ui';
 
 type RequestItem = {
   id: string;
@@ -47,16 +49,6 @@ export type PurchaseRequest = {
 };
 
 
-const statusStyles: Record<string, string> = {
-  NEW: 'bg-blue-50 text-blue-700 ring-blue-100',
-  ACCEPTED: 'bg-emerald-50 text-emerald-700 ring-emerald-100',
-  APPROVED: 'bg-emerald-50 text-emerald-700 ring-emerald-100',
-  IN_PROGRESS: 'bg-violet-50 text-violet-700 ring-violet-100',
-  CONVERTED: 'bg-violet-50 text-violet-700 ring-violet-100',
-  REJECTED: 'bg-rose-50 text-rose-700 ring-rose-100',
-  CANCELLED: 'bg-slate-100 text-slate-600 ring-slate-200',
-};
-
 function formatDateTime(value: string) {
   return new Intl.DateTimeFormat('ru-RU', {
     timeZone: reportTimeZone,
@@ -98,7 +90,8 @@ export default function RequestCard({
   const [accepting, setAccepting] = useState(false);
   const [acceptError, setAcceptError] = useState('');
 
-  const canManage = useCurrentUser()?.role !== 'EMPLOYEE';
+  const { user } = useSession();
+  const canManage = user.role !== 'EMPLOYEE';
   const details = useCoreResource<PurchaseRequest>(expanded && !request.items
     ? `/purchase-requests/${request.id}` : null);
   const fullRequest = details.data ?? request;
@@ -140,10 +133,6 @@ export default function RequestCard({
     }
   }
 
-  const statusClass =
-    statusStyles[request.status] ??
-    'bg-slate-100 text-slate-600 ring-slate-200';
-
   return (
     <article className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
       <button
@@ -157,11 +146,7 @@ export default function RequestCard({
             <span className="text-sm font-semibold text-slate-950">
               Заявка №{request.number}
             </span>
-            <span
-              className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ${statusClass}`}
-            >
-              {statusLabels[request.status] ?? request.status}
-            </span>
+            <StatusBadge status={request.status} kind="request" />
           </div>
           <div className="mt-2 text-base font-semibold text-slate-900">
             {request.title}
@@ -269,14 +254,9 @@ export default function RequestCard({
                 Следующий этап — принятие заявки и создание закупки.
               </p>
               <div className="sm:text-right">
-                <button
-                  type="button"
-                  onClick={() => void handleAccept()}
-                  disabled={accepting}
-                  className="h-11 w-full rounded-xl bg-blue-600 px-5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
-                >
-                  {accepting ? 'Принимаем...' : 'Принять в работу'}
-                </button>
+                <Button loading={accepting} className="w-full sm:w-auto" onClick={() => void handleAccept()}>
+                  {accepting ? 'Принимаем…' : 'Принять в работу'}
+                </Button>
                 {acceptError && (
                   <p className="mt-2 max-w-sm text-sm leading-5 text-red-600">
                     {acceptError}

@@ -3,10 +3,9 @@
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Suspense, type FormEvent, type ReactNode } from 'react';
-import { formatDecimal, formatReportDate, statusLabels, taskLink, useCoreResource } from '../../lib/discovery';
-import AppShell from '../components/AppShell';
-import AuthGate from '../components/AuthGate';
-import { buttonClass, ExportButtons, fieldClass } from '../components/DiscoveryControls';
+import { formatDecimal, formatReportDate, statusLabels, taskLink, useCoreResource } from '@/lib/discovery';
+import PageLayout from '@/app/components/PageLayout';
+import { buttonClass, ExportButtons, fieldClass } from '@/app/components/DiscoveryControls';
 
 type Status = { status: string; count: number };
 type Monthly = { month: string; created: number; closed: number; invoices: string; paid: string; unknownAmounts: number };
@@ -134,7 +133,7 @@ function AnalyticsContent() {
     window.history.pushState(null, '', next.size ? `/analytics?${next}` : '/analytics');
   }
   return (
-    <AppShell title="Аналитика">
+    <PageLayout title="Аналитика">
       <div className="space-y-5">
         <section className={panelClass}>
           <form key={query.toString()} onSubmit={apply} className="flex flex-wrap items-end gap-3">
@@ -205,10 +204,10 @@ function AnalyticsContent() {
           </>
         )}
       </div>
-    </AppShell>
+    </PageLayout>
   );
 }
 
 export default function AnalyticsPage() {
-  return <AuthGate><Suspense><AnalyticsContent /></Suspense></AuthGate>;
+  return <Suspense><AnalyticsContent /></Suspense>;
 }

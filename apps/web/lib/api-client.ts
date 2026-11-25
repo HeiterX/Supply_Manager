@@ -91,9 +91,11 @@ export async function apiFetch(
   path: `/${string}`,
   options: RequestInit = {},
 ): Promise<Response> {
+  const page = typeof window === 'undefined' ? null : window.location.pathname;
+  const resourcePath = path.split('?')[0];
   const headers = new Headers(options.headers);
 
-  if (needsCsrfToken(path, options)) {
+  if (needsCsrfToken(resourcePath, options)) {
     const csrfToken = await getCsrfToken(
       options.signal ?? undefined,
     );
@@ -115,7 +117,7 @@ export async function apiFetch(
   if (
     typeof window !== 'undefined' &&
     !options.signal?.aborted &&
-    isProtectedResource(path.split('?')[0])
+    isProtectedResource(resourcePath)
   ) {
     if (response.status === 401) {
       window.dispatchEvent(
@@ -123,7 +125,7 @@ export async function apiFetch(
       );
     }
 
-    if (response.status === 403) {
+    if (response.status === 403 && window.location.pathname === page) {
       window.dispatchEvent(
         new Event(AUTH_EVENTS.forbidden),
       );

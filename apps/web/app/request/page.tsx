@@ -1,5 +1,9 @@
 'use client';
 
+import { Alert, Button, Card } from '@/app/components/ui';
+
+import { Input, Textarea } from '@/app/components/ui';
+
 import { FormEvent, useRef, useState } from 'react';
 
 const API_URL =
@@ -338,7 +342,7 @@ export default function RequestPage() {
 
   if (createdRequest) {
     return (
-      <main className="min-h-screen bg-[#f5f7fb] px-4 py-6 sm:px-6 sm:py-10">
+      <main className="min-h-screen bg-background px-4 py-6 sm:px-6 sm:py-10">
         <div className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-xl items-center justify-center">
           <section className="w-full rounded-[28px] border border-slate-200 bg-white px-5 py-8 shadow-sm sm:px-9 sm:py-10">
             <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-50">
@@ -359,16 +363,12 @@ export default function RequestPage() {
             </div>
 
             <div className="mt-6 text-center">
-              <p className="text-sm font-semibold text-emerald-600">
-                ГОТОВО
-              </p>
-
               <h1 className="mt-2 text-2xl font-bold tracking-tight text-slate-950 sm:text-3xl">
                 Заявка отправлена
               </h1>
 
               <div className="mt-5 inline-flex rounded-2xl bg-[#eef2ff] px-5 py-3">
-                <span className="text-lg font-bold text-[#315cf4]">
+                <span className="text-lg font-bold text-accent">
                   Заявка № {createdRequest.number}
                 </span>
               </div>
@@ -389,7 +389,7 @@ export default function RequestPage() {
             <button
               type="button"
               onClick={createAnotherRequest}
-              className="mt-7 flex h-13 w-full items-center justify-center rounded-2xl bg-[#3d66f5] px-5 text-[15px] font-semibold text-white transition active:scale-[0.99] sm:hover:bg-[#3157df]"
+              className="ui-button ui-button--primary mt-7 flex h-13 w-full items-center justify-center px-5 text-[15px] font-semibold transition active:scale-[0.99]"
             >
               Отправить ещё одну заявку
             </button>
@@ -404,10 +404,10 @@ export default function RequestPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
+    <main className="min-h-screen bg-background text-slate-950">
       <header className="border-b border-slate-200/80 bg-white">
         <div className="mx-auto flex max-w-3xl items-center px-4 py-4 sm:px-6">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#3d66f5] text-sm font-bold text-white">
+          <div className="brand-mark" aria-hidden="true">
             SM
           </div>
 
@@ -424,12 +424,8 @@ export default function RequestPage() {
 
       <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6 sm:py-10">
         <section className="mb-6 sm:mb-8">
-          <p className="text-sm font-semibold text-[#3d66f5]">
-            Новая заявка
-          </p>
-
           <h1 className="mt-1.5 text-2xl font-bold tracking-tight text-slate-950 sm:text-3xl">
-            Что необходимо приобрести?
+            Подать заявку
           </h1>
 
           <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">
@@ -446,7 +442,7 @@ export default function RequestPage() {
                 <span className="ml-1 text-red-500">*</span>
               </span>
 
-              <input
+              <Input
                 type="text"
                 value={requesterName}
                 onChange={(event) => {
@@ -456,7 +452,6 @@ export default function RequestPage() {
                 placeholder="Иванов Иван Иванович"
                 autoComplete="name"
                 maxLength={120}
-                className="h-13 w-full rounded-xl border border-slate-200 bg-white px-4 text-base text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-[#6d89f7] focus:ring-4 focus:ring-[#3d66f5]/10"
               />
             </label>
           </section>
@@ -481,42 +476,24 @@ export default function RequestPage() {
             <button
               type="button"
               onClick={addItem}
-              className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-[#9eb0f8] bg-[#f8f9ff] px-4 text-sm font-semibold text-[#315cf4] transition active:scale-[0.99] sm:hover:bg-[#f0f3ff]"
+              className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-[#9eb0f8] bg-[#f8f9ff] px-4 text-sm font-semibold text-accent transition active:scale-[0.99] sm:hover:bg-[#f0f3ff]"
             >
               <span className="text-xl font-normal leading-none">+</span>
               Добавить ещё позицию
             </button>
           )}
 
-          {error && (
-            <div
-              role="alert"
-              className="mt-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3.5 text-sm leading-5 text-red-700"
-            >
-              {error}
-            </div>
-          )}
+          {error && <div className="mt-5"><Alert tone="danger">{error}</Alert></div>}
 
-          <div className="mt-6 rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="flex h-14 w-full items-center justify-center rounded-2xl bg-[#3d66f5] px-5 text-base font-semibold text-white shadow-sm transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60 sm:hover:bg-[#3157df]"
-            >
-              {isSubmitting ? (
-                <span className="flex items-center gap-3">
-                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-                  Отправляем заявку...
-                </span>
-              ) : (
-                'Отправить заявку'
-              )}
-            </button>
+          <Card className="mt-6 p-4 sm:p-6">
+            <Button type="submit" loading={isSubmitting} className="w-full">
+              {isSubmitting ? "Отправляем…" : "Отправить заявку"}
+            </Button>
 
             <p className="mt-3 text-center text-xs leading-5 text-slate-400">
               После отправки заявка сразу поступит в систему снабжения
             </p>
-          </div>
+          </Card>
         </form>
 
         <footer className="py-7 text-center text-xs text-slate-400">
@@ -551,7 +528,7 @@ function ItemCard({
     <section className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm">
       <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3.5 sm:px-6">
         <div className="flex items-center gap-2.5">
-          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#eef2ff] text-xs font-bold text-[#315cf4]">
+          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#eef2ff] text-xs font-bold text-accent">
             {index + 1}
           </span>
 
@@ -578,13 +555,12 @@ function ItemCard({
             <span className="ml-1 text-red-500">*</span>
           </span>
 
-          <input
+          <Input
             type="text"
             value={item.name}
             onChange={(event) => onChange('name', event.target.value)}
             placeholder="Например, подшипник SKF 6205"
             maxLength={250}
-            className="h-13 w-full rounded-xl border border-slate-200 bg-white px-4 text-base text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-[#6d89f7] focus:ring-4 focus:ring-[#3d66f5]/10"
           />
         </label>
 
@@ -595,7 +571,7 @@ function ItemCard({
               <span className="ml-1 text-red-500">*</span>
             </span>
 
-            <input
+            <Input
               type="text"
               inputMode="decimal"
               value={item.quantity}
@@ -603,7 +579,6 @@ function ItemCard({
                 onChange('quantity', event.target.value)
               }
               placeholder="1"
-              className="h-13 w-full min-w-0 rounded-xl border border-slate-200 bg-white px-4 text-base text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-[#6d89f7] focus:ring-4 focus:ring-[#3d66f5]/10"
             />
           </label>
 
@@ -613,14 +588,13 @@ function ItemCard({
               <span className="ml-1 text-red-500">*</span>
             </span>
 
-            <input
+            <Input
               type="text"
               value={item.unit}
               onChange={(event) => onChange('unit', event.target.value)}
               placeholder="шт."
               list={`units-${item.key}`}
               maxLength={50}
-              className="h-13 w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3 text-base text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-[#6d89f7] focus:ring-4 focus:ring-[#3d66f5]/10"
             />
 
             <datalist id={`units-${item.key}`}>
@@ -641,7 +615,7 @@ function ItemCard({
             Подробное описание
           </span>
 
-          <textarea
+          <Textarea
             value={item.description}
             onChange={(event) =>
               onChange('description', event.target.value)
@@ -649,7 +623,6 @@ function ItemCard({
             placeholder="Характеристики, назначение, маркировка, допустимые аналоги или другая полезная информация"
             rows={4}
             maxLength={3000}
-            className="w-full resize-y rounded-xl border border-slate-200 bg-white px-4 py-3 text-base leading-6 text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-[#6d89f7] focus:ring-4 focus:ring-[#3d66f5]/10"
           />
         </label>
 
@@ -661,7 +634,7 @@ function ItemCard({
             </span>
           </div>
 
-          <input
+          <Input
             ref={fileInputRef}
             type="file"
             accept="image/jpeg,image/png,image/webp"
@@ -723,7 +696,7 @@ function ItemCard({
               className="flex min-h-28 w-full items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-center transition active:bg-slate-100 sm:hover:border-[#8da3fa] sm:hover:bg-[#f8f9ff]"
             >
               <span>
-                <span className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl bg-white text-[#3d66f5] shadow-sm">
+                <span className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl bg-white text-accent shadow-sm">
                   <svg
                     viewBox="0 0 24 24"
                     fill="none"
