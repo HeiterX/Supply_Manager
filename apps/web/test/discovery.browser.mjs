@@ -166,7 +166,7 @@ test('CORE-11 against the production Web build and isolated API', { timeout: 900
     }
     await page.route(/\/discovery\/analytics(?:\?|$)/, (route) => route.abort('failed'));
     await page.goto(`${web}/analytics`);
-    await page.getByRole('alert').getByText(/Сервер недоступен/).waitFor();
+    await page.getByRole('alert').getByText(/Не удалось связаться с сервером/).waitFor();
     await page.unroute(/\/discovery\/analytics(?:\?|$)/);
     await page.getByRole('button', { name: 'Повторить' }).click();
     await page.getByRole('heading', { name: 'Оплаты', exact: true }).waitFor();

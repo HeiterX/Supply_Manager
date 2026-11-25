@@ -29,7 +29,7 @@ export function WorkingTableControls({ list, statuses, purchases = false, regist
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   function update(values: Record<string, string>, reset: string[] = []) {
-    const next = new URLSearchParams(query);
+    const next = new URLSearchParams(window.location.search);
     for (const key of ['page', ...reset]) next.delete(key);
     for (const [key, value] of Object.entries(values)) {
       if (value) next.set(key, value);
@@ -40,7 +40,8 @@ export function WorkingTableControls({ list, statuses, purchases = false, regist
 
   function saveView() {
     try {
-      const preferences = Object.fromEntries(viewKeys.flatMap((key) => query.has(key) ? [[key, query.get(key)!]] : []));
+      const current = new URLSearchParams(window.location.search);
+      const preferences = Object.fromEntries(viewKeys.flatMap((key) => current.has(key) ? [[key, current.get(key)!]] : []));
       localStorage.setItem(presetKey, JSON.stringify(preferences));
       setFeedback('Представление сохранено в этом браузере.');
     } catch {
@@ -121,7 +122,7 @@ export function WorkingTable({ list, label, headers, empty, filtered = false, ch
 }) {
   const { page, query, change, loading, legacy } = list;
   function setPage(value: number, pageSize?: string) {
-    const next = new URLSearchParams(query);
+    const next = new URLSearchParams(window.location.search);
     next.set('page', String(value));
     if (pageSize) next.set('pageSize', pageSize);
     change(next);
