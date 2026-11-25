@@ -47,19 +47,24 @@ test('CORE-11 against the production Web build and isolated API', { timeout: 900
 
   await suite.test('URL filters, server pagination, return link and downloads', async () => {
     const main = page.getByRole('main');
-    await main.getByRole('searchbox', { name: 'Поиск', exact: true }).fill(fixture.marker);
-    await main.getByRole('combobox', { name: 'Приоритет', exact: true }).selectOption('HIGH');
-    await main.getByRole('button', { name: 'Применить' }).click();
-    await main.getByText('Найдено 27', { exact: true }).waitFor();
+    await main.getByText('Расширенные фильтры и экспорт', { exact: true }).click();
+    const filters = main.locator('details').filter({ has: page.getByText('Расширенные фильтры и экспорт', { exact: true }) });
+    await filters.getByRole('searchbox', { name: 'Поиск', exact: true }).fill(fixture.marker);
+    await filters.getByRole('combobox', { name: 'Приоритет', exact: true }).selectOption('HIGH');
+    await filters.getByRole('button', { name: 'Применить' }).click();
+    await main.getByText('Всего 27', { exact: true }).waitFor();
     assert.equal(new URL(page.url()).searchParams.get('priority'), 'HIGH');
     await main.getByRole('button', { name: 'Далее', exact: true }).click();
-    await main.getByText('Страница 2 из 2').waitFor();
+    await main.getByText('2 / 2', { exact: true }).waitFor();
     const secondPage = page.url();
     const row = main.getByRole('link', { name: new RegExp(fixture.marker) }).first();
     await row.click();
     await page.getByRole('link', { name: '← К списку' }).click();
-    await main.getByText('Страница 2 из 2').waitFor();
+    await main.getByText('2 / 2', { exact: true }).waitFor();
     assert.equal(page.url(), secondPage);
+    if (!(await filters.getByRole('button', { name: 'Скачать CSV', exact: true }).isVisible())) {
+      await main.getByText('Расширенные фильтры и экспорт', { exact: true }).click();
+    }
     for (const format of ['CSV', 'XLSX']) {
       const downloaded = page.waitForEvent('download');
       await main.getByRole('button', { name: `Скачать ${format}`, exact: true }).click();
@@ -150,7 +155,7 @@ test('CORE-11 against the production Web build and isolated API', { timeout: 900
       await employee.getByRole('heading', { name: 'Вход в Supply Manager' }).waitFor();
       await login(employee, fixture.employee, '/requests');
       await employee.getByRole('heading', { name: 'Мои заявки' }).waitFor();
-      await employee.getByText(fixture.own.title, { exact: true }).waitFor();
+      await employee.getByRole('link', { name: new RegExp(fixture.own.title) }).waitFor();
       assert.equal(await employee.getByText('Чужая заявка', { exact: false }).count(), 0);
       const forbidden = await employee.request.get(`${api}/discovery/lists/orders`);
       assert.equal(forbidden.status(), 403);

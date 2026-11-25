@@ -204,6 +204,9 @@ package "ЭТАП 8. ДОВЕСТИ FRONTEND ДО ПОЛНОЦЕННОГО РА�
     rectangle "CORE-12\nAuthGate → AppShell → рабочие маршруты\nPageLayout, UI-компоненты и токены Tailwind\nПубличная форма использует общие токены" as WEBFOUNDATION #E5EFFF
 
     WEBFOUNDATION --> WORKPLACE
+    rectangle "CORE-13\nСписки, карточки и пошаговые формы\nСм. CORE-13-working-screens.puml" as WORKINGSCREENS #E5EFFF
+    WEBFOUNDATION --> WORKINGSCREENS
+    WORKINGSCREENS --> WORKPLACE
     UIITEM --> WORKPLACE
     UIHISTORY --> WORKPLACE
     UICHANGE --> WORKPLACE

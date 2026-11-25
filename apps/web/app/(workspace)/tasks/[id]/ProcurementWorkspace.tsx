@@ -1,10 +1,12 @@
 'use client';
 
 import OfferComparison from './OfferComparison';
+import OrderWizard from './OrderWizard';
+import { milli, orderAllocation } from './allocation';
 import { useConfirmation } from '@/app/components/use-confirmation';
 import { Modal as Dialog } from '@/app/components/Modal';
 
-import { useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { apiFetch, API_BASE_URL } from '@/lib/api-client';
 import FulfillmentPanel from './FulfillmentPanel';
 
@@ -75,8 +77,8 @@ type OrderDraft = { selected: boolean; quantity: string };
 type ActionName = 'send-to-payment' | 'confirm-payment' | 'ship' | 'ready-for-pickup' | 'receive' | 'hand-over' | 'cancel';
 type ActionForm = { order: PurchaseOrder; action: ActionName };
 
-const money = (v: string | number | null) => v === null || !Number.isFinite(Number(v)) ? '—' :
-  new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 2 }).format(Number(v));
+const money = (v: string | number | null, currency = 'RUB') => v === null || !Number.isFinite(Number(v)) ? '—' :
+  new Intl.NumberFormat('ru-RU', { style: 'currency', currency, maximumFractionDigits: 2 }).format(Number(v));
 const quoteMoney = (v: string | number | null, currency: string | null) =>
   v === null || !currency ? 'Не указано' : Number.isFinite(Number(v))
     ? `${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2, minimumFractionDigits: 2 }).format(Number(v))} ${currency}`
@@ -84,7 +86,6 @@ const quoteMoney = (v: string | number | null, currency: string | null) =>
 const qty = (v: string | number) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 3 }).format(Number(v));
 const date = (v: string | null) => v ? new Date(v).toLocaleString('ru-RU') : '—';
 const localDate = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
-const milli = (v: string | number) => Math.round(Number(v) * 1000);
 const inputClass = 'ui-input';
 const primaryClass = 'ui-button ui-button--primary';
 const secondaryClass = 'ui-button ui-button--outline';
@@ -132,7 +133,6 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
   const [draft, setDraft] = useState<Record<string, Draft>>({});
   const [orderOffer, setOrderOffer] = useState<SupplierOffer | null>(null);
   const [editingOrder, setEditingOrder] = useState<PurchaseOrder | null>(null);
-  const orderRequestKey = useRef<string | null>(null);
   const [orderDraft, setOrderDraft] = useState<Record<string, OrderDraft>>({});
   const [invoice, setInvoice] = useState('');
   const [invoiceDate, setInvoiceDate] = useState(localDate());
@@ -148,16 +148,7 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
 
   const orders = useMemo(() => task.purchaseOrders ?? [], [task.purchaseOrders]);
   const active = useMemo(() => orders.filter(o => !o.cancelledAt && o.status !== 'CANCELLED'), [orders]);
-  const allocation = useMemo(() => {
-    const result = new Map<string, { ordered: number; handed: number }>();
-    for (const order of active) for (const line of order.items ?? []) {
-      if (!line.taskItemId) continue;
-      const prev = result.get(line.taskItemId) ?? { ordered: 0, handed: 0 };
-      const amount = milli(line.quantity);
-      result.set(line.taskItemId, { ordered: prev.ordered + amount, handed: prev.handed + (order.status === 'HANDED_OVER' ? amount : 0) });
-    }
-    return result;
-  }, [active]);
+  const allocation = useMemo(() => orderAllocation(active), [active]);
   const allAllocated = task.items.length > 0 && task.items.every(i => (allocation.get(i.id)?.ordered ?? 0) >= milli(i.quantity));
   const allHanded = task.items.length > 0 && task.items.every(i => (i.progress ? milli(i.progress.handedOver) : allocation.get(i.id)?.handed ?? 0) >= milli(i.quantity));
   const isClosed = task.status === 'CLOSED' || task.status === 'CANCELLED';
@@ -250,19 +241,15 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
   }
   function openOrder(offer: SupplierOffer) {
     setEditingOrder(null);
-    orderRequestKey.current = crypto.randomUUID();
-    setLocalError(''); setOrderOffer(offer); setInvoice(''); setInvoiceDate(localDate()); setOrderNotes('');
-    setOrderDraft(Object.fromEntries(offer.items.map(i => {
-      const amount = Math.min(Number(i.quantity), available(i.taskItemId));
-      return [i.id, { selected: amount > 0, quantity: amount > 0 ? String(amount) : '0' }];
-    })));
+    setLocalError('');
+    setOrderOffer(offer);
   }
   function openEditOrder(order: PurchaseOrder) {
     const offer = task.supplierOffers.find(entry => entry.id === order.supplierOfferId);
     if (!offer) { setLocalError('Исходное КП не найдено. Редактирование невозможно.'); return; }
     if (!order.items.length || !['ORDERED', 'WAITING_PAYMENT'].includes(order.status)) return;
     setLocalError('');
-    setEditingOrder(order); setOrderOffer(offer); orderRequestKey.current = null;
+    setEditingOrder(order); setOrderOffer(offer);
     setInvoice(order.invoiceNumber ?? '');
     const invoiceDateValue = order.invoiceDate ? new Date(order.invoiceDate) : new Date();
     setInvoiceDate(new Date(invoiceDateValue.getTime() - invoiceDateValue.getTimezoneOffset() * 60000).toISOString().slice(0, 16));
@@ -275,7 +262,6 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
   }
   function updateDraft(id: string, patch: Partial<Draft>) { setDraft(prev => ({ ...prev, [id]: { ...prev[id], ...patch } })); }
   function updateOrderDraft(id: string, patch: Partial<OrderDraft>) {
-    if (!editingOrder) orderRequestKey.current = crypto.randomUUID();
     setOrderDraft(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }));
   }
 
@@ -314,7 +300,7 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
   }
 
   async function saveOrder(event: FormEvent) {
-    event.preventDefault(); if (!orderOffer || busy) return;
+    event.preventDefault(); if (!orderOffer || !editingOrder || busy) return;
     setLocalError('');
     const selected = orderOffer.items.filter(i => orderDraft[i.id]?.selected);
     if (!selected.length) { setLocalError('Выберите позиции для заказа'); return; }
@@ -325,22 +311,17 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
       }
     }
     if (!invoice.trim() || !invoiceDate) { setLocalError('Укажите номер и дату счёта'); return; }
-    if (!editingOrder && !orderRequestKey.current) {
-      orderRequestKey.current = crypto.randomUUID();
-    }
-    const ok = await onAction(editingOrder ? `/orders/${editingOrder.id}` : `/supplier-offers/${orderOffer.id}/purchase-order`, {
-      method: editingOrder ? 'PATCH' : 'POST',
+    const ok = await onAction(`/orders/${editingOrder.id}`, {
+      method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         invoiceNumber: invoice.trim(), invoiceDate: new Date(invoiceDate).toISOString(),
         notes: orderNotes.trim() || undefined,
-        expectedVersion: editingOrder?.version,
-        idempotencyKey: editingOrder ? undefined : orderRequestKey.current,
+        expectedVersion: editingOrder.version,
         items: selected.map(i => ({ supplierOfferItemId: i.id, quantity: Number(orderDraft[i.id].quantity) })),
       }),
-    }, editingOrder ? 'Заказ изменён. Если счёт отправлялся на оплату, передайте его повторно.' :
-      `Заказ у «${orderOffer.supplier.name}» оформлен`, setLocalError);
-    if (ok) { setOrderOffer(null); setEditingOrder(null); orderRequestKey.current = null; onNavigate('orders'); }
+    }, 'Заказ изменён. Если счёт отправлялся на оплату, передайте его повторно.', setLocalError);
+    if (ok) { setOrderOffer(null); setEditingOrder(null); onNavigate('orders'); }
   }
 
   function beginAction(order: PurchaseOrder, action: ActionName) {
@@ -509,7 +490,7 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
             <p className="mt-1 text-xs text-slate-500">Счёт № {order.invoiceNumber ?? 'не указан'} · {date(order.invoiceDate)} · {qty(order.items?.length ?? 0)} поз.</p></div>
             <span className={`rounded-full px-3 py-1.5 text-xs font-semibold ${orderColors[order.status] ?? 'bg-slate-100 text-slate-700'}`}>{orderLabels[order.status] ?? order.status}</span></div>
           <div className="mt-4 space-y-2">{order.items?.length ? order.items.map(line => <div key={line.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 p-3 text-sm">
-            <span>{line.name} <span className="text-xs text-slate-500">· {qty(line.quantity)} {line.unit}</span></span><b>{line.unitPrice === null ? '—' : money(Number(line.quantity) * Number(line.unitPrice))}</b>
+            <span>{line.name} <span className="text-xs text-slate-500">· {qty(line.quantity)} {line.unit}</span></span><b>{line.unitPrice === null ? '—' : money(Number(line.quantity) * Number(line.unitPrice), line.currency)}</b>
           </div>) : <p className="text-xs text-amber-700">Заказ старого формата без детализации по позициям</p>}</div>
           <div className="mt-3 grid gap-3 text-sm sm:grid-cols-3"><div><span className="text-slate-400">Товары</span><div className="font-semibold">{money(order.price)}</div></div>
             <div><span className="text-slate-400">Доставка</span><div className="font-semibold">{money(order.deliveryPrice)}</div></div>
@@ -638,6 +619,11 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
       </form>
     </Dialog>}
 
+    {orderOffer && !editingOrder && <OrderWizard
+      initialOffer={orderOffer} offer={task.supplierOffers.find((offer) => offer.id === orderOffer.id)}
+      available={available} unavailable={isClosed || orderByOffer(orderOffer.id) || !task.supplierOffers.some((offer) => offer.id === orderOffer.id)}
+      close={() => setOrderOffer(null)} complete={() => { setOrderOffer(null); onNavigate('orders'); }} onAction={onAction} />}
+
     {decisionOffer && <Dialog busy={busy} title={`Ручной выбор КП «${decisionOffer.supplier.name}»`} onClose={() => setDecisionOffer(null)}>
       <form onSubmit={selectOfferManually} className="space-y-4">
         <p className="text-sm text-slate-600">Версия {decisionOffer.version} · цена {quoteMoney(decisionOffer.price, decisionOffer.currency)}.
@@ -655,7 +641,7 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
       </form>
     </Dialog>}
 
-    {orderOffer && <Dialog busy={busy} title={editingOrder ? `Изменить заказ у «${orderOffer.supplier.name}»` : `Оформить заказ у «${orderOffer.supplier.name}»`}
+    {orderOffer && editingOrder && <Dialog busy={busy} title={editingOrder ? `Изменить заказ у «${orderOffer.supplier.name}»` : `Оформить заказ у «${orderOffer.supplier.name}»`}
       onClose={() => { setOrderOffer(null); setEditingOrder(null); }}>
       <form onSubmit={saveOrder} className="space-y-5"><p className="text-sm text-slate-500">Укажите, сколько из предложенного количества заказываем сейчас. Система не позволит превысить остаток закупки.</p>
         <div className="space-y-3">{orderOffer.items.map(item => {
@@ -668,9 +654,9 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
               <div className="text-sm font-semibold">Сумма: {item.unitPrice === null ? '—' : money(Number(row.quantity) * Number(item.unitPrice))}</div></div>}
           </div>;
         })}</div>
-        <div className="grid gap-3 sm:grid-cols-2"><Field label="Номер счёта *"><input required className={inputClass} value={invoice} onChange={e => { setInvoice(e.target.value); if (!editingOrder) orderRequestKey.current = crypto.randomUUID(); }} /></Field>
-          <Field label="Дата счёта *"><input required type="datetime-local" className={inputClass} value={invoiceDate} onChange={e => { setInvoiceDate(e.target.value); if (!editingOrder) orderRequestKey.current = crypto.randomUUID(); }} /></Field></div>
-        <Field label="Примечание"><textarea rows={2} className={inputClass} value={orderNotes} onChange={e => { setOrderNotes(e.target.value); if (!editingOrder) orderRequestKey.current = crypto.randomUUID(); }} /></Field>
+        <div className="grid gap-3 sm:grid-cols-2"><Field label="Номер счёта *"><input required className={inputClass} value={invoice} onChange={e => { setInvoice(e.target.value); }} /></Field>
+          <Field label="Дата счёта *"><input required type="datetime-local" className={inputClass} value={invoiceDate} onChange={e => { setInvoiceDate(e.target.value); }} /></Field></div>
+        <Field label="Примечание"><textarea rows={2} className={inputClass} value={orderNotes} onChange={e => { setOrderNotes(e.target.value); }} /></Field>
         <div className="rounded-xl bg-blue-50 p-4 text-sm"><div className="flex justify-between"><span>Товары по заказу</span><b>{money(orderPrice)}</b></div>
           <div className="mt-2 flex justify-between"><span>Доставка по КП</span><b>{money(orderOffer.deliveryPrice)}</b></div>
           <div className="mt-2 flex justify-between font-semibold"><span>Итого</span><span>{orderOffer.items.filter(i => orderDraft[i.id]?.selected).some(i => i.unitPrice === null) ? 'Не все цены известны' : money(orderPrice + Number(orderOffer.deliveryPrice ?? 0))}</span></div></div>

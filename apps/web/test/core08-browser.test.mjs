@@ -63,7 +63,9 @@ test('partial payments and receipts update the real procurement workspace', { ti
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', event => {
-      if (event.type() === 'error') errors.push(event.text());
+      const source = event.location().url;
+      const optionalNextAction = source.startsWith(api.href + 'next-actions/by-task/') && event.text().includes('404');
+      if (event.type() === 'error' && !optionalNextAction) errors.push(`${event.text()} (${source})`);
     });
     page.on('dialog', dialog => void dialog.accept());
     await page.goto(new URL(task, web).href);

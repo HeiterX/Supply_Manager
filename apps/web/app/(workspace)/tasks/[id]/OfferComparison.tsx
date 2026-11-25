@@ -13,7 +13,7 @@ export default function OfferComparison({
   offers, items, offerAnchor, formatMoney, formatQuantity, formatDate,
 }: OfferComparisonProps) {
   return (
-    <section className="ui-card overflow-x-auto p-4" aria-label="Сравнение КП по позициям">
+    <section className="ui-card overflow-x-auto p-4" aria-label="Сравнение коммерческих предложений">
       <h3 className="font-semibold text-slate-900">Сравнение КП по позициям</h3>
       <p className="mt-1 text-xs text-slate-500">Автоматического выбора нет; валюты не конвертируются, неизвестные цены и условия отмечены явно.</p>
       <table className="mt-4 w-full min-w-[650px] text-left text-xs">
@@ -31,10 +31,14 @@ export default function OfferComparison({
             </td>
             {offers.map(o => {
               const line = o.items.find(i => i.taskItemId === item.id);
+              const baseline = offers[0]?.items.find(i => i.taskItemId === item.id);
+              const differentPrice = o !== offers[0] && line?.unitPrice != null && baseline?.unitPrice != null
+                && o.currency === offers[0].currency && Number(line.unitPrice) !== Number(baseline.unitPrice);
               return <td key={o.id} className="p-2">
                 {!line ? 'Не предложено' : <>
                   <div className="font-semibold">{formatMoney(line.unitPrice, o.currency)} / {item.unit}</div>
-                  <div className="mt-1 text-slate-500">{formatQuantity(line.quantity)} {item.unit}</div>
+                  {differentPrice && <span className="text-xs font-semibold text-accent">· Цена отличается</span>}
+                <div className="mt-1 text-slate-500">{formatQuantity(line.quantity)} {item.unit}</div>
                   <div className="text-slate-500">{line.inStock === null ? 'Наличие не указано' : line.inStock ? 'В наличии' : 'Под заказ'}</div>
                 </>}
               </td>;
