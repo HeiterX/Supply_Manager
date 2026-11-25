@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
+import { NotificationBell } from './core09/NotificationCenter';
 
 type AppShellProps = {
   children: ReactNode;
@@ -94,6 +95,7 @@ export default function AppShell({
         </div>
 
         <nav className="flex-1 space-y-1.5 px-3 py-5 text-sm">
+          <Link href="/actions" className={desktopLinkClass('/actions')}><BoxIcon type="tasks" />Мои действия</Link>
           <Link href="/requests" className={desktopLinkClass('/requests')}>
             <BoxIcon type="requests" />
             Входящие заявки
@@ -159,7 +161,7 @@ export default function AppShell({
               )}
             </div>
 
-            {action && <div className="shrink-0">{action}</div>}
+            <div className="flex shrink-0 items-center gap-2"><NotificationBell />{action}</div>
           </div>
         </header>
 
@@ -168,7 +170,8 @@ export default function AppShell({
         </main>
       </div>
 
-      <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-3 border-t border-slate-200 bg-white/95 px-2 py-2 backdrop-blur lg:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-4 border-t border-slate-200 bg-white/95 px-2 py-2 backdrop-blur lg:hidden">
+        <Link href="/actions" className={mobileLinkClass('/actions')}><BoxIcon type="tasks" />Действия</Link>
         <Link href="/requests" className={mobileLinkClass('/requests')}>
           <BoxIcon type="requests" />
           Заявки

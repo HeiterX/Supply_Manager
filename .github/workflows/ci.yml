@@ -2,7 +2,8 @@ name: CI — Supply Manager
 
 on:
   pull_request:
-    branches: [main]
+    # CORE-09 is stacked on CORE-02 until #39 is merged; retarget it to main afterwards.
+    branches: [main, feature/core-02-ci-stabilization]
   push:
     branches: [main]
   workflow_dispatch:
@@ -125,9 +126,15 @@ jobs:
         run: npm ci
       - name: Web lint
         run: npm run lint
+      - name: Web unit tests
+        run: npm test
       - name: Web build and TypeScript check
         if: ${{ always() && steps.web-install.outcome == 'success' }}
         run: npm run build
+      - name: Install Chromium for isolated frontend tests
+        run: npx playwright install --with-deps chromium
+      - name: Web browser tests (synthetic API contract)
+        run: npm run test:ui
 
   audit:
     name: npm audit (${{ matrix.app }}, informational)

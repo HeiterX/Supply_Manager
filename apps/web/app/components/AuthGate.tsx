@@ -1,6 +1,7 @@
 'use client';
 
 import { AUTH_EVENTS } from '../../lib/api-client';
+import { NotificationProvider } from './core09/NotificationCenter';
 import {
   useEffect,
   useState,
@@ -282,7 +283,7 @@ export default function AuthGate({ children }: AuthGateProps) {
         )}
       </div>
 
-      {children}
+      <NotificationProvider key={user?.id}>{children}</NotificationProvider>
     </>
   );
 }
