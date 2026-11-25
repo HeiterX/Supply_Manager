@@ -206,10 +206,16 @@ describe('Purchase requests (e2e)', () => {
   });
 
   it('creates an anonymous request and returns a short-lived upload credential', async () => {
+    const requiredAt = new Date(
+      Date.now() + 7 * 86400000,
+    ).toISOString();
+
     const response = await request(app.getHttpServer())
       .post('/api/v1/purchase-requests/public')
       .send({
         requesterName: 'Тестовый работник',
+        priority: 'HIGH',
+        requiredAt,
         items: [
           { name: 'Манжета', quantity: 2, unit: 'шт.' },
           { name: 'Подшипник', quantity: 1, unit: 'шт.' },
@@ -219,6 +225,11 @@ describe('Purchase requests (e2e)', () => {
         ],
       })
       .expect(201);
+
+    expect(response.body.priority).toBe('HIGH');
+    expect(
+      new Date(response.body.requiredAt as string).toISOString(),
+    ).toBe(requiredAt);
 
     publicRequestId = response.body.id as string;
     publicItemIds = (response.body.items as Array<{ id: string }>).map(

@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:browser": "node --test test/discovery.browser.mjs"
+    "test:browser": "node --test test/discovery.browser.mjs",
+    "test:e2e": "node --test test/core08-browser.test.mjs"
   },
   "dependencies": {
     "next": "16.4.6",

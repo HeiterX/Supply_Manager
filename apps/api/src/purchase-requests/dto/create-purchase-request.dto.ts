@@ -111,6 +111,14 @@ export class CreatePublicPurchaseRequestDto {
   @MaxLength(120)
   requesterName!: string;
 
+  @IsOptional()
+  @IsIn(TASK_PRIORITIES)
+  priority?: (typeof TASK_PRIORITIES)[number];
+
+  @IsOptional()
+  @IsISO8601()
+  requiredAt?: string;
+
   @IsArray()
   @ArrayMinSize(1)
   @ArrayMaxSize(20)

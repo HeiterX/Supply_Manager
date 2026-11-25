@@ -29,7 +29,7 @@ function RequestsContent() {
       {data?.items.length === 0 && <EmptyState title="Заявок не найдено" />}
       <div className="mt-5 space-y-4">
         {data?.items.map((request) => (
-          <RequestCard key={request.id} request={request} onAccepted={() => {
+          <RequestCard key={request.id} request={request} onUpdated={() => void list.reload()} onAccepted={() => {
             if (list.query.has('status')) {
               const next = new URLSearchParams(list.query);
               next.delete('status');

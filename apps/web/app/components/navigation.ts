@@ -20,6 +20,7 @@ export const navigation: readonly NavigationEntry[] = [
   { href: '/dashboard', label: 'Главная', icon: 'home', roles: everyone },
   { href: '/', label: 'Закупки', icon: 'purchases', roles: procurement },
   { href: '/requests', label: 'Входящие заявки', icon: 'requests', roles: procurement },
+  { href: '/catalog', label: 'Каталог', icon: 'registry', roles: procurement },
   { href: '/registry', label: 'Реестр позиций', icon: 'registry', roles: procurement },
   { href: '/suppliers', label: 'Поставщики', icon: 'suppliers', roles: procurement },
   { href: '/orders', label: 'Заказы', icon: 'purchases', roles: procurement },

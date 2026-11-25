@@ -27,6 +27,7 @@ import {
   CreatePurchaseRequestDto,
 } from './dto/create-purchase-request.dto.js';
 import { PurchaseRequestsService } from './purchase-requests.service.js';
+import { RejectPurchaseRequestDto } from './dto/reject-purchase-request.dto.js';
 import { PublicRequestRateLimitGuard } from './public-request-rate-limit.guard.js';
 import { PublicUploadTokenGuard } from './public-upload-token.guard.js';
 
@@ -131,6 +132,31 @@ export class PurchaseRequestsController {
   @Roles('PROCUREMENT', 'ADMIN')
   findAll() {
     return this.purchaseRequestsService.findAll();
+  }
+
+  @Patch(':id/review')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('PROCUREMENT', 'ADMIN')
+  review(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+  ) {
+    return this.purchaseRequestsService.review(user, id);
+  }
+
+  @Patch(':id/reject')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('PROCUREMENT', 'ADMIN')
+  reject(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: RejectPurchaseRequestDto,
+  ) {
+    return this.purchaseRequestsService.reject(
+      user,
+      id,
+      dto.reason,
+    );
   }
 
   @Patch(':id/accept')

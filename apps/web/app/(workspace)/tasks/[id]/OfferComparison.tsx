@@ -1,44 +1,57 @@
-import type { SupplierOffer } from './ProcurementWorkspace';
-import { Card, TableRegion } from '@/app/components/ui';
+import type { SupplierOffer, TaskItem } from './ProcurementWorkspace';
 
-const number = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 3 });
-
-function availability(inStock: boolean | null) {
-  if (inStock === null) return '—';
-  return inStock ? 'В наличии' : 'Под заказ';
-}
-
-export default function OfferComparison({ offers, offerAnchor }: {
+type OfferComparisonProps = {
   offers: SupplierOffer[];
-  offerAnchor: (offerId: string) => string;
-}) {
-  return <Card className="p-4">
-    <h3 className="mb-3 font-semibold">Сравнение коммерческих предложений</h3>
-    <TableRegion label="Сравнение коммерческих предложений">
-      <table className="min-w-[57rem] align-top">
-        <thead><tr>
-          {['Поставщик', 'Позиция', 'Кол-во', 'Цена за ед.', 'Валюта', 'Срок', 'Наличие', 'Условия', 'Действия'].map((column) =>
-            <th key={column} scope="col">{column}</th>)}
-        </tr></thead>
-        {offers.map((offer) => {
-          const items = offer.items?.length ? offer.items : [null];
-          return <tbody key={offer.id} className="border-b border-slate-200">
-            {items.map((item, index) => <tr key={item?.id ?? offer.id} className="align-top">
-              {index === 0 && <th scope="rowgroup" rowSpan={items.length} className="min-w-32 font-semibold">{offer.supplier.name}</th>}
-              <td className="min-w-36">{item?.taskItem.name ?? '—'}</td>
-              <td>{item ? `${number.format(Number(item.quantity))} ${item.taskItem.unit}` : '—'}</td>
-              <td className="whitespace-nowrap tabular-nums">{item?.unitPrice != null ? number.format(Number(item.unitPrice)) : '—'}</td>
-              <td>{item?.currency ?? '—'}</td>
-              {index === 0 && <td rowSpan={items.length} className="whitespace-nowrap">{offer.deliveryDays == null ? '—' : `${offer.deliveryDays} дн.`}</td>}
-              <td>{availability(item ? item.inStock : offer.inStock)}</td>
-              <td className="min-w-32">{[offer.notes, item?.notes].filter(Boolean).join(' · ') || '—'}</td>
-              {index === 0 && <td rowSpan={items.length}>
-                <a className="font-medium text-accent underline" href={`#${offerAnchor(offer.id)}`}>К предложению</a>
-              </td>}
-            </tr>)}
-          </tbody>;
-        })}
+  items: TaskItem[];
+  offerAnchor: (id: string) => string;
+  formatMoney: (value: string | number | null, currency: string | null) => string;
+  formatQuantity: (value: string | number) => string;
+  formatDate: (value: string | null) => string;
+};
+
+export default function OfferComparison({
+  offers, items, offerAnchor, formatMoney, formatQuantity, formatDate,
+}: OfferComparisonProps) {
+  return (
+    <section className="ui-card overflow-x-auto p-4" aria-label="Сравнение КП по позициям">
+      <h3 className="font-semibold text-slate-900">Сравнение КП по позициям</h3>
+      <p className="mt-1 text-xs text-slate-500">Автоматического выбора нет; валюты не конвертируются, неизвестные цены и условия отмечены явно.</p>
+      <table className="mt-4 w-full min-w-[650px] text-left text-xs">
+        <thead className="border-b border-slate-200">
+          <tr><th className="p-2">Потребность</th>{offers.map(offer => (
+            <th key={offer.id} className="min-w-[175px] p-2">
+              <a href={`#${offerAnchor(offer.id)}`} className="underline">{offer.supplier.name}</a><span className="block font-normal text-slate-500">v{offer.version} · {offer.currency ?? 'валюта не указана'}</span>
+            </th>
+          ))}</tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {items.map(item => <tr key={item.id}>
+            <td className="p-2 font-semibold">{item.name}
+              <span className="block font-normal text-slate-500">Требуется {formatQuantity(item.quantity)} {item.unit}</span>
+            </td>
+            {offers.map(o => {
+              const line = o.items.find(i => i.taskItemId === item.id);
+              return <td key={o.id} className="p-2">
+                {!line ? 'Не предложено' : <>
+                  <div className="font-semibold">{formatMoney(line.unitPrice, o.currency)} / {item.unit}</div>
+                  <div className="mt-1 text-slate-500">{formatQuantity(line.quantity)} {item.unit}</div>
+                  <div className="text-slate-500">{line.inStock === null ? 'Наличие не указано' : line.inStock ? 'В наличии' : 'Под заказ'}</div>
+                </>}
+              </td>;
+            })}
+          </tr>)}
+          <tr className="bg-slate-50">
+            <td className="p-2 font-semibold">Условия КП</td>
+            {offers.map(o => <td key={o.id} className="p-2">
+              <div>Поставка: {o.deliveryDays === null ? 'не указана' : `${o.deliveryDays} дн.`}</div>
+              <div>Оплата: {o.paymentTerms || 'не указана'}</div>
+              <div>Доставка: {o.deliveryTerms || 'не указана'}</div>
+              <div>Действует до: {o.validUntil ? formatDate(o.validUntil) : 'не указано'}</div>
+              <div className="mt-1 font-semibold">Товары: {formatMoney(o.price, o.currency)}</div>
+            </td>)}
+          </tr>
+        </tbody>
       </table>
-    </TableRegion>
-  </Card>;
+    </section>
+  );
 }

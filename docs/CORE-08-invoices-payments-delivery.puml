@@ -1,0 +1,34 @@
+@startuml
+title CORE-08 — Учёт исполнения заказа
+hide circle
+
+entity Task
+entity PurchaseOrder
+entity PurchaseOrderItem
+entity Invoice
+entity Payment
+entity Shipment
+entity ShipmentItem
+entity FulfillmentEvent
+entity FulfillmentOperation
+
+Task ||--o{ PurchaseOrder
+PurchaseOrder ||--o{ PurchaseOrderItem
+PurchaseOrder ||--o{ Invoice
+Invoice ||--o{ Payment
+PurchaseOrder ||--o{ Shipment
+Shipment ||--|{ ShipmentItem
+PurchaseOrderItem ||--o{ ShipmentItem
+ShipmentItem |o--o{ FulfillmentEvent
+PurchaseOrderItem ||--o{ FulfillmentEvent
+Task ||--o{ FulfillmentOperation
+FulfillmentEvent |o--o| FulfillmentEvent : урегулирование
+
+note bottom of FulfillmentOperation
+  1. BEGIN и SELECT Task FOR UPDATE
+  2. Проверка ключа повтора и остатка
+  3. Запись факта и истории
+  4. Пересчёт состояния и COMMIT
+  Закрытие использует ту же блокировку
+end note
+@enduml
