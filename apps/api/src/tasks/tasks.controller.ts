@@ -178,7 +178,7 @@ export class TasksController {
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('Content-Security-Policy', 'sandbox');
     response.type(document.mimeType);
-    return response.download(document.path, document.originalName);
+    return response.download(document.storageName, document.originalName, { root: document.directory });
   }
 
   @Patch(':taskId/supplier-offers/:offerId/select')
@@ -202,8 +202,8 @@ export class TasksController {
   }
 
   @Patch(':taskId/orders/close')
-  closeMultiSupplierTask(@Param('taskId') taskId: string) {
-    return this.multiOrders.closeTask(taskId);
+  closeMultiSupplierTask(@Param('taskId') taskId: string, @CurrentUser() user: AuthUser) {
+    return this.multiOrders.closeTask(taskId, user.id);
   }
 
   @Patch(':taskId/orders/:orderId')

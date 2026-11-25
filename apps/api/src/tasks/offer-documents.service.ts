@@ -105,6 +105,6 @@ export class OfferDocumentsService {
     if (!/^[0-9a-f-]{36}\.(pdf|png|jpg)$/.test(document.storageName)) {
       throw new BadRequestException('Некорректная ссылка на файл');
     }
-    return { ...document, path: join(directory(), document.storageName) };
+    return { ...document, directory: directory() };
   }
 }

@@ -195,6 +195,8 @@ describe('CORE-07: multi-supplier quantity reservation, idempotency and safe edi
     const created = await procurement.client.post(
       `${api}/${taskId}/supplier-offers/${offer.id}/purchase-order`,
     ).send(newOrder(offer, 5, randomUUID())).expect(201);
+    // Exercise a pre-CORE-08 order without synthesizing payment records.
+    await prisma.purchaseOrder.update({ where: { id: created.body.id as string }, data: { ledgerEnabled: false } });
     const path = `${api}/${taskId}/orders/${created.body.id as string}`;
     await procurement.client.patch(`${path}/send-to-payment`).expect(200);
     const updated = await procurement.client.patch(path).send({

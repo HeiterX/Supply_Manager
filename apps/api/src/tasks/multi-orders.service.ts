@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import type { Prisma } from '../generated/prisma/client.js';
+import { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto.js';
 import { CreateSupplierOfferDto } from './dto/create-supplier-offer.dto.js';
@@ -12,16 +12,16 @@ import { SuppliersService } from './suppliers.service.js';
 import { offerSnapshot, quotePrice } from './quote-utils.js';
 import { orderCreateFingerprint, orderSnapshot } from './order-utils.js';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto.js';
+import { assertFulfilledOrders, ledgerInclude, sum, zero } from './fulfillment-balances.js';
 
 const milli = (value: number) => Math.round(value * 1000);
-const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
 @Injectable()
 export class MultiOrdersService {
   constructor(private readonly prisma: PrismaService, private readonly suppliers: SuppliersService) {}
 
   // A row lock serializes all allocations for the same procurement task.
-  private async lockTask(tx: Prisma.TransactionClient, taskId: string) {
+  async lockTask(tx: Prisma.TransactionClient, taskId: string, allowTerminal = false) {
     const databaseUrl = process.env.DATABASE_URL;
     if (!databaseUrl) throw new Error('DATABASE_URL is not defined');
     const schema = new URL(databaseUrl).searchParams.get('schema') ?? 'public';
@@ -35,13 +35,13 @@ export class MultiOrdersService {
       include: { items: true },
     });
     if (!task) throw new NotFoundException('Закупка не найдена');
-    if (task.status === 'CLOSED' || task.status === 'CANCELLED') {
+    if (!allowTerminal && (task.status === 'CLOSED' || task.status === 'CANCELLED')) {
       throw new ConflictException('Закрытую или отменённую закупку нельзя изменять');
     }
     return task;
   }
 
-  private async refreshTask(tx: Prisma.TransactionClient, taskId: string) {
+  async refreshTask(tx: Prisma.TransactionClient, taskId: string) {
     const [items, orders] = await Promise.all([
       tx.taskItem.findMany({ where: { taskId } }),
       tx.purchaseOrder.findMany({
@@ -291,14 +291,14 @@ export class MultiOrdersService {
         return { offerItem, quantity };
       });
       const hasPrices = lines.every(line => line.offerItem.unitPrice !== null);
-      const price = hasPrices ? money(lines.reduce((sum, line) => sum + line.quantity * line.offerItem.unitPrice!.toNumber(), 0)) : null;
+      const price = hasPrices ? sum(lines.map(line => new Prisma.Decimal(line.quantity).times(line.offerItem.unitPrice!))).toDecimalPlaces(2) : null;
       const deliveryPrice = offer.deliveryPrice;
-      const totalPrice = price === null ? null : money(price + (deliveryPrice?.toNumber() ?? 0));
+      const totalPrice = price === null ? null : price.plus(deliveryPrice ?? zero);
       const order = await tx.purchaseOrder.create({
         data: {
           taskId, supplierId: offer.supplierId, supplierOfferId: offer.id,
           idempotencyKey: dto.idempotencyKey ?? null,
-          requestFingerprint: fingerprint,
+          requestFingerprint: fingerprint, ledgerEnabled: true,
           status: 'ORDERED', invoiceNumber: dto.invoiceNumber.trim(), invoiceDate: new Date(dto.invoiceDate),
           notes: dto.notes?.trim() || null, price, deliveryPrice, totalPrice, deliveryDays: offer.deliveryDays,
           items: { create: lines.map(({ offerItem, quantity }) => ({
@@ -352,7 +352,8 @@ export class MultiOrdersService {
           if (isCancelled) cancelled += quantity;
           else {
             ordered += quantity;
-            if (['ORDERED', 'WAITING_PAYMENT'].includes(order.status)) reserved += quantity;
+            const unpaid = order.ledgerEnabled ? !order.paidAt : ['ORDERED', 'WAITING_PAYMENT'].includes(order.status);
+            if (unpaid) reserved += quantity;
             else paidOrLater += quantity;
           }
           bySupplier.push({
@@ -389,6 +390,9 @@ export class MultiOrdersService {
       });
       if (!existing) throw new NotFoundException('Заказ не найден в закупке');
       if (!existing.items.length) throw new ConflictException('Заказы старого формата изменяются в прежнем сценарии');
+      if (existing.ledgerEnabled && await tx.fulfillmentOperation.count({ where: { taskId, orderId, action: { not: 'enable-ledger' } } })) {
+        throw new ConflictException('После регистрации счета или партии состав заказа защищён');
+      }
       if (existing.cancelledAt || existing.paidAt || existing.shippedAt ||
           !['ORDERED', 'WAITING_PAYMENT'].includes(existing.status)) {
         throw new ConflictException('Редактирование возможно только до оплаты и отгрузки');
@@ -445,11 +449,10 @@ export class MultiOrdersService {
       }
       const hasPrices = lines.every(line => line.source.unitPrice !== null);
       const price = hasPrices
-        ? money(lines.reduce((sum, line) =>
-            sum + line.quantity * line.source.unitPrice!.toNumber(), 0))
+        ? sum(lines.map(line => new Prisma.Decimal(line.quantity).times(line.source.unitPrice!))).toDecimalPlaces(2)
         : null;
       const totalPrice = price === null ? null
-        : money(price + (existing.deliveryPrice?.toNumber() ?? 0));
+        : price.plus(existing.deliveryPrice ?? zero);
       const before = orderSnapshot(existing);
       const existingRevisions = await tx.purchaseOrderRevision.count({
         where: { purchaseOrderId: orderId },
@@ -528,6 +531,12 @@ export class MultiOrdersService {
       if (!order) throw new NotFoundException('Заказ не найден в этой закупке');
       if (!order.items.length) throw new ConflictException('Для старого заказа используйте прежний сценарий');
       if (order.cancelledAt || order.status === 'CANCELLED') throw new ConflictException('Заказ уже отменён');
+      if (order.ledgerEnabled) {
+        if (action !== 'cancel') throw new ConflictException('Используйте учёт счетов, оплат и партий');
+        const activeInvoice = await tx.invoice.findFirst({ where: { purchaseOrderId: orderId, OR: [{ cancelledAt: null }, { payments: { some: {} } }] } });
+        const activeShipment = await tx.shipment.findFirst({ where: { purchaseOrderId: orderId, cancelledAt: null } });
+        if (activeInvoice || activeShipment) throw new ConflictException('У заказа есть действующие счета, партии или история оплат');
+      }
       let data: Prisma.PurchaseOrderUpdateInput = {};
       let event = '';
       if (action === 'cancel') {
@@ -608,17 +617,15 @@ export class MultiOrdersService {
     }, { timeout: 15000 });
   }
 
-  async closeTask(taskId: string) {
+  async closeTask(taskId: string, actorId: string) {
     return this.prisma.$transaction(async tx => {
       const task = await this.lockTask(tx, taskId);
       if (!task.items.length) throw new BadRequestException('В закупке нет позиций');
-      const orders = await tx.purchaseOrder.findMany({ where: { taskId, cancelledAt: null }, include: { items: true } });
+      const orders = await tx.purchaseOrder.findMany({ where: { taskId, cancelledAt: null }, include: ledgerInclude });
       if (!orders.length || orders.some(order => !order.items.length)) {
         throw new BadRequestException('Нет действующих заказов с позициями');
       }
-      if (orders.some(order => order.status !== 'HANDED_OVER')) {
-        throw new ConflictException('Не все действующие заказы переданы получателю');
-      }
+      assertFulfilledOrders(orders);
       const handed = new Map<string, number>();
       for (const order of orders) for (const item of order.items) {
         if (!item.taskItemId) continue;
@@ -633,6 +640,12 @@ export class MultiOrdersService {
         status: 'CLOSED', closedAt: new Date(), nextAction: null, reminderAt: null,
       } });
       await tx.taskActivity.create({ data: { taskId, text: 'Закупка закрыта' } });
+      if (orders.some(order => order.ledgerEnabled)) {
+        const closeKey = 'close:' + taskId;
+        await tx.fulfillmentOperation.create({ data: {
+          taskId, key: closeKey, fingerprint: closeKey, action: 'close', actorId, resultId: taskId,
+        } });
+      }
       return tx.task.findUnique({ where: { id: taskId } });
     }, { timeout: 15000 });
   }

@@ -78,6 +78,7 @@ enum PurchaseRequestStatus {
 }
 
 model Task {
+  fulfillmentOperations FulfillmentOperation[]
   id          String       @id @default(uuid())
   number      Int          @unique @default(autoincrement())
   title       String
@@ -356,6 +357,9 @@ model SupplierOfferDocument {
 }
 
 model PurchaseOrder {
+  ledgerEnabled Boolean @default(false)
+  invoices Invoice[]
+  shipments Shipment[]
   id String @id @default(uuid())
 
   // Собственный этап конкретного заказа у поставщика
@@ -621,6 +625,8 @@ model SupplierOfferItem {
 // Здесь хранится снимок данных на момент оформления заказа,
 // поэтому последующее редактирование TaskItem не изменит историю заказа.
 model PurchaseOrderItem {
+  shipmentItems ShipmentItem[]
+  fulfillmentEvents FulfillmentEvent[]
   id String @id @default(uuid())
 
   purchaseOrderId String
@@ -682,4 +688,122 @@ model PurchaseRequestHistory {
   createdAt DateTime @default(now())
 
   @@index([requestId, createdAt])
+}
+enum FulfillmentEventKind {
+  RECEIPT
+  RETURN
+  HANDOVER
+  DISCREPANCY
+  RESOLUTION
+}
+
+model Invoice {
+  id              String        @id @default(uuid())
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+  number          String
+  issuedOn        DateTime      @db.Date
+  dueOn           DateTime?     @db.Date
+  amount          Decimal       @db.Decimal(14, 2)
+  currency        String        @db.Char(3)
+  comment         String?
+  documentId      String?
+  approvedAt      DateTime?
+  cancelledAt     DateTime?
+  actorId         String
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  payments        Payment[]
+
+  @@unique([purchaseOrderId, number])
+}
+
+model Payment {
+  id               String   @id @default(uuid())
+  invoiceId        String
+  invoice          Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  amount           Decimal  @db.Decimal(14, 2)
+  currency         String   @db.Char(3)
+  paidOn           DateTime @db.Date
+  reference        String
+  comment          String?
+  documentId       String?
+  actorId          String
+  cancelledAt      DateTime?
+  createdAt        DateTime @default(now())
+
+  @@unique([invoiceId, reference])
+}
+
+model Shipment {
+  id              String        @id @default(uuid())
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+  number          String
+  shippedOn       DateTime?     @db.Date
+  expectedOn      DateTime?     @db.Date
+  arrivedOn       DateTime?     @db.Date
+  shortClosedAt   DateTime?
+  carrier         String?
+  trackingNumber  String?
+  comment         String?
+  actorId         String
+  cancelledAt     DateTime?
+  createdAt       DateTime      @default(now())
+  items           ShipmentItem[]
+
+  @@unique([purchaseOrderId, number])
+}
+
+model ShipmentItem {
+  id                  String            @id @default(uuid())
+  shipmentId          String
+  shipment            Shipment          @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  purchaseOrderItemId String
+  purchaseOrderItem   PurchaseOrderItem @relation(fields: [purchaseOrderItemId], references: [id], onDelete: Restrict)
+  quantity            Decimal           @db.Decimal(14, 3)
+  events              FulfillmentEvent[]
+
+  @@unique([shipmentId, purchaseOrderItemId])
+  @@index([purchaseOrderItemId])
+}
+
+model FulfillmentEvent {
+  id                  String               @id @default(uuid())
+  purchaseOrderItemId String
+  purchaseOrderItem   PurchaseOrderItem    @relation(fields: [purchaseOrderItemId], references: [id], onDelete: Restrict)
+  shipmentItemId      String?
+  shipmentItem        ShipmentItem?        @relation(fields: [shipmentItemId], references: [id], onDelete: Restrict)
+  kind                FulfillmentEventKind
+  quantity            Decimal              @db.Decimal(14, 3)
+  occurredOn          DateTime             @db.Date
+  comment             String?
+  reason              String?
+  documentId          String?
+  actorId             String
+  resolvesId          String?              @unique
+  resolves            FulfillmentEvent?    @relation("DiscrepancyResolution", fields: [resolvesId], references: [id], onDelete: Restrict)
+  resolution          FulfillmentEvent?    @relation("DiscrepancyResolution")
+  createdAt           DateTime             @default(now())
+
+  @@index([purchaseOrderItemId])
+  @@index([shipmentItemId])
+}
+
+model FulfillmentOperation {
+  id           String   @id @default(uuid())
+  taskId       String
+  task         Task     @relation(fields: [taskId], references: [id], onDelete: Restrict)
+  key          String
+  fingerprint  String
+  action       String
+  orderId      String?
+  actorId      String
+  resultId     String
+  before       Json?
+  after        Json?
+  createdAt    DateTime @default(now())
+
+  @@unique([taskId, key])
+  @@index([taskId, createdAt])
 }

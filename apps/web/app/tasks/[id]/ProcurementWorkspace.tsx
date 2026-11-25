@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { apiFetch, API_BASE_URL } from '../../../lib/api-client';
+import FulfillmentPanel from './FulfillmentPanel';
 
 export type Supplier = {
   id: string; name: string; contact: string | null; phone: string | null;
@@ -55,6 +56,7 @@ export type PurchaseOrder = {
   handedOverAt: string | null; handedOverTo: string | null;
   cancelledAt: string | null; cancelReason: string | null;
   version?: number;
+  ledgerEnabled?: boolean;
   revisions?: Array<{ id: string; action: string; version: number; actorId: string | null; before: unknown; after: unknown; createdAt: string }>;
   createdAt: string; updatedAt: string; supplier: Supplier;
   supplierOffer: SupplierOffer; items: PurchaseOrderItem[];
@@ -159,7 +161,7 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
     return result;
   }, [active]);
   const allAllocated = task.items.length > 0 && task.items.every(i => (allocation.get(i.id)?.ordered ?? 0) >= milli(i.quantity));
-  const allHanded = task.items.length > 0 && task.items.every(i => (allocation.get(i.id)?.handed ?? 0) >= milli(i.quantity));
+  const allHanded = task.items.length > 0 && task.items.every(i => (i.progress ? milli(i.progress.handedOver) : allocation.get(i.id)?.handed ?? 0) >= milli(i.quantity));
   const isClosed = task.status === 'CLOSED' || task.status === 'CANCELLED';
   const orderByOffer = (id: string) => active.some(o => o.supplierOfferId === id);
   const available = (id: string) => Math.max(0, milli(task.items.find(i => i.id === id)?.quantity ?? 0) - (allocation.get(id)?.ordered ?? 0)) / 1000;
@@ -538,7 +540,7 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
         })}</div>}
     </> : <>
       <div className="flex flex-wrap items-end justify-between gap-3"><div><h2 className="text-lg font-semibold text-slate-950">Заказы поставщикам</h2>
-        <p className="mt-1 text-sm text-slate-500">У каждого заказа свой счёт, оплата, доставка и передача. Отменённые заказы остаются в истории.</p></div>
+        <p className="mt-1 text-sm text-slate-500">Счета, партии, приёмка и передача по каждому поставщику.</p></div>
         {!isClosed && !allAllocated && <button onClick={() => onNavigate('offers')} className={primaryClass}>＋ Оформить ещё заказ</button>}
       </div>
       {!orders.length ? <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500">Заказов пока нет. Перейдите к КП и оформите первый заказ.</div> :
@@ -553,8 +555,8 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
           <div className="mt-3 grid gap-3 text-sm sm:grid-cols-3"><div><span className="text-slate-400">Товары</span><div className="font-semibold">{money(order.price)}</div></div>
             <div><span className="text-slate-400">Доставка</span><div className="font-semibold">{money(order.deliveryPrice)}</div></div>
             <div><span className="text-slate-400">Итого</span><div className="font-bold">{money(order.totalPrice)}</div></div></div>
-          {order.shippedAt && <p className="mt-3 text-xs text-slate-500">Отгружено {date(order.shippedAt)} · {order.carrier ?? '—'}{order.trackingNumber ? ` · ТТН ${order.trackingNumber}` : ''}{order.expectedDeliveryAt ? ` · Ожидается ${date(order.expectedDeliveryAt)}` : ''}</p>}
-          {order.handedOverAt && <p className="mt-2 text-xs text-emerald-700">Передано: {order.handedOverTo} · {date(order.handedOverAt)}</p>}
+          {!order.ledgerEnabled && order.shippedAt && <p className="mt-3 text-xs text-slate-500">Отгружено {date(order.shippedAt)} · {order.carrier ?? '—'}{order.trackingNumber ? ` · ТТН ${order.trackingNumber}` : ''}{order.expectedDeliveryAt ? ` · Ожидается ${date(order.expectedDeliveryAt)}` : ''}</p>}
+          {!order.ledgerEnabled && order.handedOverAt && <p className="mt-2 text-xs text-emerald-700">Передано: {order.handedOverTo} · {date(order.handedOverAt)}</p>}
           {order.cancelledAt && <p className="mt-2 text-xs text-rose-600">Отменён: {order.cancelReason ?? 'причина не указана'}</p>}
           {order.notes && <p className="mt-3 rounded-xl bg-slate-50 p-3 text-xs text-slate-600">{order.notes}</p>}
           {(order.revisions?.length ?? 0) > 0 && (
@@ -584,16 +586,17 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
               <button disabled={busy} onClick={() => openEditOrder(order)} className={secondaryClass}>
                 Изменить до оплаты
               </button>}
-            {order.status === 'ORDERED' && <button disabled={busy} onClick={() => beginAction(order, 'send-to-payment')} className={primaryClass}>Передать счёт на оплату</button>}
-            {order.status === 'WAITING_PAYMENT' && <button disabled={busy} onClick={() => beginAction(order, 'confirm-payment')} className={primaryClass}>Подтвердить оплату</button>}
-            {order.status === 'WAITING_SHIPMENT' && <button disabled={busy} onClick={() => beginAction(order, 'ship')} className={primaryClass}>Подтвердить отгрузку</button>}
-            {order.status === 'IN_TRANSIT' && <button disabled={busy} onClick={() => beginAction(order, 'ready-for-pickup')} className={primaryClass}>Груз прибыл</button>}
-            {order.status === 'READY_FOR_PICKUP' && <button disabled={busy} onClick={() => beginAction(order, 'receive')} className={primaryClass}>Подтвердить получение</button>}
-            {order.status === 'RECEIVED' && <button disabled={busy} onClick={() => beginAction(order, 'hand-over')} className={primaryClass}>Передать товар</button>}
+            {!order.ledgerEnabled && order.status === 'ORDERED' && <button disabled={busy} onClick={() => beginAction(order, 'send-to-payment')} className={primaryClass}>Передать счёт на оплату</button>}
+            {!order.ledgerEnabled && order.status === 'WAITING_PAYMENT' && <button disabled={busy} onClick={() => beginAction(order, 'confirm-payment')} className={primaryClass}>Подтвердить оплату</button>}
+            {!order.ledgerEnabled && order.status === 'WAITING_SHIPMENT' && <button disabled={busy} onClick={() => beginAction(order, 'ship')} className={primaryClass}>Подтвердить отгрузку</button>}
+            {!order.ledgerEnabled && order.status === 'IN_TRANSIT' && <button disabled={busy} onClick={() => beginAction(order, 'ready-for-pickup')} className={primaryClass}>Груз прибыл</button>}
+            {!order.ledgerEnabled && order.status === 'READY_FOR_PICKUP' && <button disabled={busy} onClick={() => beginAction(order, 'receive')} className={primaryClass}>Подтвердить получение</button>}
+            {!order.ledgerEnabled && order.status === 'RECEIVED' && <button disabled={busy} onClick={() => beginAction(order, 'hand-over')} className={primaryClass}>Передать товар</button>}
             {['ORDERED', 'WAITING_PAYMENT'].includes(order.status) && <button disabled={busy} onClick={() => beginAction(order, 'cancel')} className="rounded-xl border border-rose-200 px-4 py-2.5 text-sm font-semibold text-rose-700 hover:bg-rose-50">Отменить заказ</button>}
           </div>}
         </article>)}</div>}
-      {allHanded && !isClosed && <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5"><div className="font-semibold text-emerald-800">Все необходимые позиции переданы получателям</div>
+      {orders.length > 0 && <FulfillmentPanel taskId={task.id} taskStatus={task.status} orders={orders} busy={busy} onAction={onAction} />}
+      {allHanded && !isClosed && !orders.some(order => order.ledgerEnabled) && <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5"><div className="font-semibold text-emerald-800">Все необходимые позиции переданы получателям</div>
         <p className="mt-1 text-sm text-emerald-700">Теперь закупку можно закрыть.</p><button disabled={busy} onClick={closeTask} className="mt-3 rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40">Закрыть закупку</button></div>}
     </>}
 

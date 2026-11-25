@@ -231,6 +231,8 @@ describe('CORE-05: catalog, procurement line invariants and audit', () => {
       items: [{ supplierOfferItemId: offerLineId, quantity: 2 }],
     }).expect(201);
     orderId = order.body.id as string;
+    // Preserve the regression test for historical orders in the original workflow.
+    await prisma.purchaseOrder.update({ where: { id: orderId }, data: { ledgerEnabled: false } });
 
     const progress = async () => {
       const response = await procurement.client.get(`${api}/tasks/${taskId}`).expect(200);
