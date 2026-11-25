@@ -29,6 +29,12 @@ enum TaskPriority {
   URGENT
 }
 
+enum SupplierDirectoryStatus {
+  ACTIVE
+  PAUSED
+  BLOCKED
+}
+
 enum SupplierOfferStatus {
   REQUESTED
   WAITING_RESPONSE
@@ -72,6 +78,7 @@ enum PurchaseRequestStatus {
 }
 
 model Task {
+  fulfillmentOperations FulfillmentOperation[]
   id          String       @id @default(uuid())
   number      Int          @unique @default(autoincrement())
   title       String
@@ -95,6 +102,7 @@ model Task {
 
   // Закупаемые позиции
   items TaskItem[]
+  itemChanges TaskItemChange[]
 
   // Все предложения поставщиков по этой задаче
   supplierOffers SupplierOffer[] @relation("TaskSupplierOffers")
@@ -134,6 +142,18 @@ model TaskItem {
   notes      String?
   sortOrder  Int      @default(0)
 
+  // Каталожная карточка — ссылка, а не замена исходной спецификации
+  catalogItemId String?
+  catalogItem   CatalogItem? @relation(fields: [catalogItemId], references: [id], onDelete: SetNull)
+
+  // Исходная строка заявки; snapshot остаётся даже при её последующем удалении
+  sourceRequestItemId String?
+  sourceRequestItem PurchaseRequestItem? @relation(fields: [sourceRequestItemId], references: [id], onDelete: SetNull)
+  originalSnapshot Json?
+  technicalParameters Json?
+  requiredAt DateTime?
+  changes TaskItemChange[]
+
   // Предложения поставщиков по этой позиции
   supplierOfferItems SupplierOfferItem[]
 
@@ -145,6 +165,48 @@ model TaskItem {
 
   @@index([taskId])
   @@index([name])
+  @@index([catalogItemId])
+  @@index([sourceRequestItemId])
+}
+
+// Справочник: fingerprint учитывает артикул, единицу и вариант характеристик.
+// Номенклатура не заменяет данные исходной заявки автоматически.
+model CatalogItem {
+  id String @id @default(uuid())
+  name String
+  normalizedName String
+  partNumber String?
+  normalizedPartNumber String?
+  category String @default("Без категории")
+  unit String
+  attributes Json @default("{}")
+  fingerprint String @unique
+  active Boolean @default(true)
+  taskItems TaskItem[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([normalizedName])
+  @@index([normalizedPartNumber])
+  @@index([category])
+}
+
+// Аудит редактирования позиции переживает удаление самой позиции.
+model TaskItemChange {
+  id String @id @default(uuid())
+  taskId String
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  taskItemId String?
+  taskItem TaskItem? @relation(fields: [taskItemId], references: [id], onDelete: SetNull)
+  itemLabel String
+  action String
+  oldValue Json?
+  newValue Json?
+  actorId String?
+  createdAt DateTime @default(now())
+
+  @@index([taskId, createdAt])
+  @@index([taskItemId])
 }
 
 model TaskActivity {
@@ -165,23 +227,44 @@ model TaskActivity {
 model Supplier {
   id String @id @default(uuid())
 
-  // Основная информация о поставщике
-  name    String
+  name String
+  normalizedName String? @unique
+  taxId String? @unique
+  legalAddress String?
+  bankDetails String?
   contact String?
-  phone   String?
-  email   String?
+  phone String?
+  email String?
   website String?
-
-  // Произвольная заметка о поставщике
+  categories String[] @default([])
+  status SupplierDirectoryStatus @default(ACTIVE)
+  responsibleId String?
+  responsible User? @relation("ResponsibleSuppliers", fields: [responsibleId], references: [id], onDelete: SetNull)
   notes String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  offers         SupplierOffer[]
+  history SupplierChange[]
+  offers SupplierOffer[]
   purchaseOrders PurchaseOrder[]
 
   @@index([name])
+  @@index([status])
+  @@index([responsibleId])
+}
+
+model SupplierChange {
+  id String @id @default(uuid())
+  supplierId String
+  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  actorId String?
+  action String
+  before Json?
+  after Json?
+  createdAt DateTime @default(now())
+
+  @@index([supplierId, createdAt])
 }
 
 model SupplierOffer {
@@ -194,8 +277,18 @@ model SupplierOffer {
   supplier   Supplier @relation(fields: [supplierId], references: [id])
 
   status SupplierOfferStatus @default(REQUESTED)
+  currency String? // Валюта КП: null означает «не указано»
+  validUntil DateTime?
+  paymentTerms String?
+  deliveryTerms String?
+  version Int @default(1)
+  decisionReason String?
+  decidedById String?
+  decidedAt DateTime?
+  revisions SupplierOfferRevision[]
+  documents SupplierOfferDocument[]
 
-  // Стоимость товара в рублях
+  // Стоимость товара (только в указанной валюте)
   price Decimal? @db.Decimal(14, 2)
 
   // Стоимость доставки
@@ -231,9 +324,42 @@ model SupplierOffer {
   @@index([taskId])
   @@index([supplierId])
   @@index([status])
+  @@index([validUntil])
+}
+
+model SupplierOfferRevision {
+  id String @id @default(uuid())
+  offerId String
+  offer SupplierOffer @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  version Int
+  action String
+  actorId String?
+  snapshot Json
+  createdAt DateTime @default(now())
+
+  @@index([offerId, version])
+}
+
+model SupplierOfferDocument {
+  id String @id @default(uuid())
+  offerId String
+  offer SupplierOffer @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  version Int
+  originalName String
+  storageName String @unique
+  mimeType String
+  size Int
+  sha256 String
+  uploadedById String?
+  createdAt DateTime @default(now())
+
+  @@index([offerId, createdAt])
 }
 
 model PurchaseOrder {
+  ledgerEnabled Boolean @default(false)
+  invoices Invoice[]
+  shipments Shipment[]
   id String @id @default(uuid())
 
   // Собственный этап конкретного заказа у поставщика
@@ -260,6 +386,12 @@ model PurchaseOrder {
   deliveryPrice Decimal? @db.Decimal(14, 2)
   totalPrice    Decimal? @db.Decimal(14, 2)
   deliveryDays  Int?
+
+  // CORE-07: версия и идемпотентный ключ создания заказа.
+  version Int @default(1)
+  idempotencyKey String?
+  requestFingerprint String?
+  revisions PurchaseOrderRevision[]
 
   // Данные счёта
   invoiceNumber String?
@@ -319,6 +451,22 @@ model PurchaseOrder {
   @@index([status])
   @@index([orderedAt])
   @@index([cancelledAt])
+  @@unique([taskId, idempotencyKey])
+}
+
+model PurchaseOrderRevision {
+  id String @id @default(uuid())
+  purchaseOrderId String
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  action String
+  version Int
+  actorId String?
+  before Json?
+  after Json
+  createdAt DateTime @default(now())
+
+  @@index([purchaseOrderId, version])
+  @@index([createdAt])
 }
 
 model User {
@@ -339,7 +487,12 @@ model User {
   status UserStatus @default(PENDING)
 
   // Для будущих персональных уведомлений через Telegram
-  telegramChatId String? @unique
+  telegramChatId        String?                @unique
+  telegramUsername      String?
+  telegramMuted         Boolean                @default(false)
+  telegramLinks         TelegramLink[]
+  telegramSubscriptions TelegramSubscription[]
+  telegramDeliveries    TelegramDelivery[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -350,10 +503,79 @@ model User {
   // Заявки, обработанные снабженцем / администратором
   processedPurchaseRequests PurchaseRequest[] @relation("ProcessedPurchaseRequests")
 
+  assignedPurchaseRequests PurchaseRequest[] @relation("AssignedPurchaseRequests")
+  responsibleSuppliers Supplier[] @relation("ResponsibleSuppliers")
+
   @@index([fullName])
   @@index([department])
   @@index([role])
   @@index([status])
+}
+
+model TelegramLink {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  claimedAt DateTime?
+  chatId    String?
+  username  String?
+
+  @@index([userId])
+}
+
+model TelegramSubscription {
+  userId   String
+  user     User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category String
+  enabled  Boolean @default(true)
+
+  @@id([userId, category])
+}
+
+model TelegramUpdateReceipt {
+  updateId   BigInt   @id
+  callbackId String?  @unique
+  createdAt  DateTime @default(now())
+}
+
+model TelegramRate {
+  chatId String   @id
+  window DateTime
+  count  Int      @default(0)
+}
+
+model TelegramButton {
+  id        String    @id
+  userId    String
+  command   String
+  expiresAt DateTime
+  usedAt    DateTime?
+}
+
+model TelegramDelivery {
+  id              String    @id @default(uuid())
+  eventKey        String
+  recipientKey    String
+  userId          String?
+  user            User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chatId          String
+  category        String?
+  procurementOnly Boolean   @default(false)
+  // Only minimal message data. Never tokens, passwords or documents.
+  text            String
+  keyboard        Json?
+  status          String    @default("PENDING")
+  attempts        Int       @default(0)
+  availableAt     DateTime  @default(now())
+  leaseUntil      DateTime?
+  messageId       Int?
+  errorCode       String?
+  createdAt       DateTime  @default(now())
+
+  @@unique([eventKey, recipientKey])
+  @@index([status, availableAt])
 }
 
 model PurchaseRequest {
@@ -385,8 +607,15 @@ model PurchaseRequest {
   processedBy   User?     @relation("ProcessedPurchaseRequests", fields: [processedById], references: [id], onDelete: SetNull)
   processedAt   DateTime?
 
+  // Ответственный за рассмотрение заявки
+  assignedToId String?
+  assignedTo   User?   @relation("AssignedPurchaseRequests", fields: [assignedToId], references: [id], onDelete: SetNull)
+
   // Позиции внутри заявки
   items PurchaseRequestItem[]
+
+  // История решений по заявке
+  history PurchaseRequestHistory[]
 
   // Если заявка принята и превращена в закупку
   taskId String? @unique
@@ -397,6 +626,7 @@ model PurchaseRequest {
 
   @@index([requesterId])
   @@index([processedById])
+  @@index([assignedToId])
   @@index([status])
   @@index([priority])
   @@index([requiredAt])
@@ -424,6 +654,8 @@ model PurchaseRequestItem {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  taskItems TaskItem[]
 
   @@index([requestId])
   @@index([name])
@@ -464,6 +696,8 @@ model SupplierOfferItem {
 // Здесь хранится снимок данных на момент оформления заказа,
 // поэтому последующее редактирование TaskItem не изменит историю заказа.
 model PurchaseOrderItem {
+  shipmentItems ShipmentItem[]
+  fulfillmentEvents FulfillmentEvent[]
   id String @id @default(uuid())
 
   purchaseOrderId String
@@ -492,4 +726,155 @@ model PurchaseOrderItem {
   @@index([purchaseOrderId])
   @@index([taskItemId])
   @@index([supplierOfferItemId])
+}
+
+model SecurityAuditEvent {
+  id String @id @default(uuid())
+
+  actorId      String
+  targetUserId String
+  action       String
+
+  createdAt DateTime @default(now())
+
+  @@index([actorId, createdAt])
+  @@index([targetUserId, createdAt])
+}
+
+// Неизменяемая история действий по заявке.
+model PurchaseRequestHistory {
+  id String @id @default(uuid())
+
+  requestId String
+  request   PurchaseRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  actorId   String?
+  actorName String?
+
+  action     String
+  fromStatus PurchaseRequestStatus?
+  toStatus   PurchaseRequestStatus
+  comment    String?
+
+  createdAt DateTime @default(now())
+
+  @@index([requestId, createdAt])
+}
+enum FulfillmentEventKind {
+  RECEIPT
+  RETURN
+  HANDOVER
+  DISCREPANCY
+  RESOLUTION
+}
+
+model Invoice {
+  id              String        @id @default(uuid())
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+  number          String
+  issuedOn        DateTime      @db.Date
+  dueOn           DateTime?     @db.Date
+  amount          Decimal       @db.Decimal(14, 2)
+  currency        String        @db.Char(3)
+  comment         String?
+  documentId      String?
+  approvedAt      DateTime?
+  cancelledAt     DateTime?
+  actorId         String
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  payments        Payment[]
+
+  @@unique([purchaseOrderId, number])
+}
+
+model Payment {
+  id               String   @id @default(uuid())
+  invoiceId        String
+  invoice          Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  amount           Decimal  @db.Decimal(14, 2)
+  currency         String   @db.Char(3)
+  paidOn           DateTime @db.Date
+  reference        String
+  comment          String?
+  documentId       String?
+  actorId          String
+  cancelledAt      DateTime?
+  createdAt        DateTime @default(now())
+
+  @@unique([invoiceId, reference])
+}
+
+model Shipment {
+  id              String        @id @default(uuid())
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+  number          String
+  shippedOn       DateTime?     @db.Date
+  expectedOn      DateTime?     @db.Date
+  arrivedOn       DateTime?     @db.Date
+  shortClosedAt   DateTime?
+  carrier         String?
+  trackingNumber  String?
+  comment         String?
+  actorId         String
+  cancelledAt     DateTime?
+  createdAt       DateTime      @default(now())
+  items           ShipmentItem[]
+
+  @@unique([purchaseOrderId, number])
+}
+
+model ShipmentItem {
+  id                  String            @id @default(uuid())
+  shipmentId          String
+  shipment            Shipment          @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  purchaseOrderItemId String
+  purchaseOrderItem   PurchaseOrderItem @relation(fields: [purchaseOrderItemId], references: [id], onDelete: Restrict)
+  quantity            Decimal           @db.Decimal(14, 3)
+  events              FulfillmentEvent[]
+
+  @@unique([shipmentId, purchaseOrderItemId])
+  @@index([purchaseOrderItemId])
+}
+
+model FulfillmentEvent {
+  id                  String               @id @default(uuid())
+  purchaseOrderItemId String
+  purchaseOrderItem   PurchaseOrderItem    @relation(fields: [purchaseOrderItemId], references: [id], onDelete: Restrict)
+  shipmentItemId      String?
+  shipmentItem        ShipmentItem?        @relation(fields: [shipmentItemId], references: [id], onDelete: Restrict)
+  kind                FulfillmentEventKind
+  quantity            Decimal              @db.Decimal(14, 3)
+  occurredOn          DateTime             @db.Date
+  comment             String?
+  reason              String?
+  documentId          String?
+  actorId             String
+  resolvesId          String?              @unique
+  resolves            FulfillmentEvent?    @relation("DiscrepancyResolution", fields: [resolvesId], references: [id], onDelete: Restrict)
+  resolution          FulfillmentEvent?    @relation("DiscrepancyResolution")
+  createdAt           DateTime             @default(now())
+
+  @@index([purchaseOrderItemId])
+  @@index([shipmentItemId])
+}
+
+model FulfillmentOperation {
+  id           String   @id @default(uuid())
+  taskId       String
+  task         Task     @relation(fields: [taskId], references: [id], onDelete: Restrict)
+  key          String
+  fingerprint  String
+  action       String
+  orderId      String?
+  actorId      String
+  resultId     String
+  before       Json?
+  after        Json?
+  createdAt    DateTime @default(now())
+
+  @@unique([taskId, key])
+  @@index([taskId, createdAt])
 }

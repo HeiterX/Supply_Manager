@@ -6,19 +6,21 @@ import { Modal, ModalActions } from '@/app/components/Modal';
 
 import { Input, Textarea, Select } from '@/app/components/ui';
 
-import { apiFetch } from '@/lib/api-client';
+import { API_BASE_URL, apiFetch } from '@/lib/api-client';
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { workingBack, workingError } from '@/lib/working-list';
 import { OrderTracking } from './OrderTracking';
 import WorkNextAction from './WorkNextAction';
 import { milli, orderAllocation } from './allocation';
-import { Suspense, useCallback, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useAbortableLoad } from '@/lib/use-abortable-load';
 import { Alert, Skeleton, TableRegion } from '@/app/components/ui';
 import LoadError from '@/app/components/LoadError';
 import PageLayout from '@/app/components/PageLayout';
 import { StatusBadge } from '@/app/components/StatusBadge';
+import Image from 'next/image';
+import CatalogPicker, { type CatalogChoice } from './CatalogPicker';
 
 type Activity = { id: string; taskId: string; text: string; createdAt: string };
 import ProcurementWorkspace, {
@@ -30,6 +32,17 @@ type Task = {
   deadline: string | null; nextAction: string | null; reminderAt: string | null; createdAt: string; updatedAt: string; closedAt: string | null;
   selectedOfferId: string | null; selectedOffer: SupplierOffer | null; activities: Activity[]; items: TaskItem[]; supplierOffers: SupplierOffer[];
   purchaseOrder: PurchaseOrder | null; purchaseOrders?: PurchaseOrder[];
+  itemChanges?: Array<{ id: string; itemLabel: string; action: string; oldValue: unknown; newValue: unknown; actorId: string | null; createdAt: string }>;
+  sourceRequest?: {
+    id: string;
+    number: number;
+    items: Array<{
+      id: string;
+      name: string;
+      photoPath: string | null;
+      photoOriginalName: string | null;
+    }>;
+  } | null;
 };
 
 type Tab = 'overview' | 'items' | 'offers' | 'order' | 'payments' | 'delivery' | 'history';
@@ -51,6 +64,24 @@ function formatDateTime(value: string | null) {
   if (!value) return '—';
   return new Intl.DateTimeFormat('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value));
 }
+function parseSpecificationLines(source: string): Record<string, string> {
+  const result: Array<[string, string]> = [];
+  for (const raw of source.split('\n')) {
+    if (!raw.trim()) continue;
+    const colon = raw.indexOf(':');
+    const key = raw.slice(0, colon).trim();
+    const value = raw.slice(colon + 1).trim();
+    if (colon < 1 || !key || !value || result.some(([name]) => name.toUpperCase() === key.toUpperCase())) {
+      throw new Error('Характеристики указываются как «параметр: значение», без повторений');
+    }
+    result.push([key, value]);
+  }
+  return Object.fromEntries(result);
+}
+function specificationLines(specs?: Record<string, string> | null): string {
+  return Object.entries(specs ?? {}).map(([name, value]) => `${name}: ${value}`).join('\n');
+}
+
 function toDateTimeLocal(value: string | null) {
   if (!value) return '';
   const date = new Date(value); const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000); return local.toISOString().slice(0, 16);
@@ -185,6 +216,13 @@ function TaskContent({ taskId }: { taskId: string }) {
     else params.set('tab', next);
     window.history.pushState(null, '', params.size ? '?' + params : window.location.pathname);
   }
+  useEffect(() => {
+    if (!task || activeTab !== tab || !window.location.hash) return;
+    const id = window.location.hash.slice(1);
+    const desktop = document.getElementById(id);
+    const target = desktop?.getClientRects().length ? desktop : document.getElementById(`mobile-${id}`);
+    target?.scrollIntoView({ block: 'start' });
+  }, [activeTab, tab, task]);
   const [message, setMessage] = useState('');
   const [actionError, setActionError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -202,6 +240,9 @@ function TaskContent({ taskId }: { taskId: string }) {
   const [itemUnit, setItemUnit] = useState('шт.');
   const [itemUnitPrice, setItemUnitPrice] = useState('');
   const [itemNotes, setItemNotes] = useState('');
+  const [itemCatalogId, setItemCatalogId] = useState('');
+  const [itemRequiredAt, setItemRequiredAt] = useState('');
+  const [itemSpecs, setItemSpecs] = useState('');
   const [itemSearch, setItemSearch] = useState('');
 
   const [supplierFormOpen, setSupplierFormOpen] = useState(false);
@@ -291,10 +332,26 @@ function TaskContent({ taskId }: { taskId: string }) {
   }
 
   function openNewItem() {
-    setEditingItemId(null); setItemName(''); setItemPartNumber(''); setItemQuantity('1'); setItemUnit('шт.'); setItemUnitPrice(''); setItemNotes(''); setItemFormOpen(true);
+    setEditingItemId(null); setItemName(''); setItemPartNumber(''); setItemQuantity('1'); setItemUnit('шт.'); setItemUnitPrice(''); setItemNotes('');
+    setItemCatalogId(''); setItemRequiredAt(''); setItemSpecs('');
+    setItemFormOpen(true);
   }
   function openEditItem(item: TaskItem) {
-    setEditingItemId(item.id); setItemName(item.name); setItemPartNumber(item.partNumber ?? ''); setItemQuantity(String(item.quantity)); setItemUnit(item.unit); setItemUnitPrice(item.unitPrice === null ? '' : String(item.unitPrice)); setItemNotes(item.notes ?? ''); setItemFormOpen(true);
+    setEditingItemId(item.id); setItemName(item.name); setItemPartNumber(item.partNumber ?? ''); setItemQuantity(String(item.quantity)); setItemUnit(item.unit); setItemUnitPrice(item.unitPrice === null ? '' : String(item.unitPrice)); setItemNotes(item.notes ?? '');
+    setItemCatalogId(item.catalogItemId ?? '');
+    setItemRequiredAt(item.requiredAt ? item.requiredAt.slice(0, 10) : '');
+    setItemSpecs(specificationLines(item.technicalParameters));
+    setItemFormOpen(true);
+  }
+  function selectCatalogItem(choice: CatalogChoice) {
+    if (!editingItemId) {
+      // Только для новой позиции разрешено заполнить поля из справочника.
+      setItemName(choice.name);
+      setItemPartNumber(choice.partNumber ?? '');
+      setItemUnit(choice.unit);
+      setItemSpecs(specificationLines(choice.attributes));
+    }
+    setItemCatalogId(choice.id);
   }
   async function saveItem(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -302,10 +359,24 @@ function TaskContent({ taskId }: { taskId: string }) {
     if (!itemName.trim() || !itemUnit.trim() || !Number.isFinite(quantity) || quantity <= 0 || (price !== undefined && (!Number.isFinite(price) || price < 0))) {
       setActionError('Проверьте наименование, количество, единицу измерения и цену.'); return;
     }
+    let technicalParameters: Record<string, string>;
+    try {
+      technicalParameters = parseSpecificationLines(itemSpecs);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Некорректные характеристики');
+      return;
+    }
     const path = editingItemId ? `/items/${editingItemId}` : '/items';
     const ok = await apiAction(path, {
       method: editingItemId ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: itemName.trim(), partNumber: itemPartNumber.trim(), quantity, unit: itemUnit.trim(), unitPrice: price, currency: 'RUB', notes: itemNotes.trim() }),
+      body: JSON.stringify({
+        name: itemName.trim(), partNumber: itemPartNumber.trim(),
+        quantity, unit: itemUnit.trim(), unitPrice: price, currency: 'RUB',
+        notes: itemNotes.trim(),
+        catalogItemId: itemCatalogId || undefined,
+        technicalParameters,
+        requiredAt: itemRequiredAt ? new Date(`${itemRequiredAt}T23:59:59`).toISOString() : undefined,
+      }),
     }, editingItemId ? 'Позиция обновлена' : 'Позиция добавлена');
     if (ok) setItemFormOpen(false);
   }
@@ -629,7 +700,11 @@ function TaskContent({ taskId }: { taskId: string }) {
   const lockedItemIds = new Set((task.purchaseOrders ?? [])
     .filter(order => !order.cancelledAt)
     .flatMap(order => (order.items ?? []).map(line => line.taskItemId)));
-  const itemLocked = (id: string) => lockedItemIds.has(id) || task.status === 'CLOSED' || task.status === 'CANCELLED';
+  const itemLocked = (id: string) =>
+    lockedItemIds.has(id) ||
+    (task.purchaseOrders ?? []).some(order => (order.items ?? []).some(line => line.taskItemId === id)) ||
+    task.supplierOffers.some(offer => (offer.items ?? []).some(line => line.taskItemId === id)) ||
+    task.status === 'CLOSED' || task.status === 'CANCELLED';
 
   function positionProgress(item: TaskItem) {
     if (legacyMode) return <span className="text-muted">Не указано</span>;
@@ -727,6 +802,61 @@ function TaskContent({ taskId }: { taskId: string }) {
 
       {activeTab === 'items' && (
         <section className="space-y-5">
+          {task.sourceRequest && (
+            <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
+              <h3 className="text-base font-semibold text-slate-900">
+                Фотографии из исходной заявки №{task.sourceRequest.number}
+              </h3>
+              <p className="mt-1 text-sm text-slate-500">
+                Исходные фотографии сохраняются вместе с заявкой
+                и остаются доступны после создания закупки.
+              </p>
+
+              {task.sourceRequest.items.length > 0 ? (
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  {task.sourceRequest.items.map((item) => {
+                    const photoUrl =
+                      `${API_BASE_URL}/purchase-requests/public/items/${item.id}/photo`;
+
+                    return (
+                      <a
+                        key={item.id}
+                        href={photoUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center gap-3 rounded-xl border border-slate-200 p-3 transition hover:border-blue-300 hover:bg-blue-50/40"
+                      >
+                        <Image
+                          unoptimized
+                          width={80}
+                          height={80}
+                          crossOrigin="use-credentials"
+                          src={photoUrl}
+                          alt={`Фото: ${item.name}`}
+                          className="h-20 w-20 shrink-0 rounded-lg bg-slate-100 object-cover"
+                        />
+                        <div className="min-w-0">
+                          <div className="font-semibold text-slate-800">
+                            {item.name}
+                          </div>
+                          <div className="mt-1 truncate text-xs text-slate-500">
+                            {item.photoOriginalName ?? 'Фото позиции'}
+                          </div>
+                          <div className="mt-2 text-xs font-medium text-blue-600">
+                            Открыть фотографию
+                          </div>
+                        </div>
+                      </a>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="mt-3 text-sm text-slate-500">
+                  У исходной заявки нет прикреплённых фотографий.
+                </p>
+              )}
+            </div>
+          )}
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <h2 className="text-lg font-semibold text-slate-950">Позиции закупки</h2>
@@ -741,6 +871,35 @@ function TaskContent({ taskId }: { taskId: string }) {
               ＋ Добавить позицию
             </button>
           </div>
+
+          <section className="overflow-x-auto rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="mb-3 font-semibold text-slate-900">Прогресс по позициям</h3>
+            <p className="mb-3 text-xs text-slate-500">«Предложено» — максимальное доступное КП, а не сумма альтернативных предложений. Отменённые заказы исключены.</p>
+            <table className="w-full min-w-[720px] text-left text-xs">
+              <thead className="border-b border-slate-100 text-slate-500">
+                <tr>
+                  <th className="p-2">Позиция</th>
+                  <th className="p-2">Требуется</th>
+                  <th className="p-2">Предложено</th>
+                  <th className="p-2">Заказано</th>
+                  <th className="p-2">Получено</th>
+                  <th className="p-2">Передано</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {task.items.map((item) => (
+                  <tr key={item.id}>
+                    <td className="p-2 font-medium text-slate-900">{item.name}</td>
+                    <td className="p-2">{formatQuantity(item.progress?.required ?? item.quantity)} {item.unit}</td>
+                    <td className="p-2">{formatQuantity(item.progress?.offered ?? 0)}</td>
+                    <td className="p-2">{formatQuantity(item.progress?.ordered ?? 0)}</td>
+                    <td className="p-2">{formatQuantity(item.progress?.received ?? 0)}</td>
+                    <td className="p-2">{formatQuantity(item.progress?.handedOver ?? 0)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm">
@@ -826,7 +985,7 @@ function TaskContent({ taskId }: { taskId: string }) {
                       {filteredItems.map((item) => {
                         const total = itemTotal(item);
                         return (
-                          <tr key={item.id} className="group transition hover:bg-slate-50/70">
+                          <tr key={item.id} id={`items-${item.id}`} className="scroll-mt-40 group transition hover:bg-slate-50/70">
                             <td className="px-5 py-4">
                               <div className="max-w-xl">
                                 <div className="font-semibold text-slate-900">{item.name}</div>
@@ -838,6 +997,16 @@ function TaskContent({ taskId }: { taskId: string }) {
                                   )}
                                   {item.notes && <span className="text-slate-400">· {item.notes}</span>}
                                 </div>
+                                <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
+                                  {item.catalogItem && <span className="rounded-md bg-blue-50 px-2 py-1 text-blue-700">Каталог: {item.catalogItem.category}</span>}
+                                  {item.sourceRequestItemId && <span className="rounded-md bg-slate-100 px-2 py-1">Исходная позиция заявки сохранена</span>}
+                                  {item.requiredAt && <span>Нужно до {formatDateTime(item.requiredAt)}</span>}
+                                </div>
+                                {item.technicalParameters && Object.keys(item.technicalParameters).length > 0 && (
+                                  <p className="mt-2 text-xs text-slate-600">
+                                    Характеристики: {Object.entries(item.technicalParameters).map(([k,v]) => `${k}: ${v}`).join(' · ')}
+                                  </p>
+                                )}
                               </div>
                             </td>
                             <td className="whitespace-nowrap px-5 py-4 font-medium text-slate-700">
@@ -884,7 +1053,7 @@ function TaskContent({ taskId }: { taskId: string }) {
                   {filteredItems.map((item) => {
                     const total = itemTotal(item);
                     return (
-                      <article key={item.id} className="p-4 [overflow-wrap:anywhere]">
+                      <article key={item.id} id={`mobile-items-${item.id}`} className="scroll-mt-40 p-4 [overflow-wrap:anywhere]">
                         <div className="flex items-start justify-between gap-4">
                           <div className="min-w-0">
                             <div className="font-semibold text-slate-900">{item.name}</div>
@@ -922,6 +1091,36 @@ function TaskContent({ taskId }: { taskId: string }) {
               </>
             )}
           </div>
+          {(task.itemChanges?.length ?? 0) > 0 && (
+            <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="font-semibold text-slate-900">История изменений позиций</h3>
+              <p className="mt-1 text-xs text-slate-500">
+                До и после редактирования. История сохраняется даже после удаления неиспользованной позиции.
+              </p>
+              <div className="mt-3 space-y-3">
+                {task.itemChanges?.map((entry) => (
+                  <details key={entry.id} className="rounded-xl bg-slate-50 p-3 text-sm">
+                    <summary className="cursor-pointer font-medium text-slate-800">
+                      {entry.action === 'CREATED' ? 'Создана' : entry.action === 'DELETED' ? 'Удалена' : 'Изменена'}:
+                      {' '}{entry.itemLabel} · {formatDateTime(entry.createdAt)}
+                    </summary>
+                    {entry.oldValue !== null && (
+                      <div className="mt-3">
+                        <div className="mb-1 text-xs font-semibold text-slate-500">До изменения</div>
+                        <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg bg-white p-3 text-xs">{JSON.stringify(entry.oldValue, null, 2)}</pre>
+                      </div>
+                    )}
+                    {entry.newValue !== null && (
+                      <div className="mt-3">
+                        <div className="mb-1 text-xs font-semibold text-slate-500">После изменения</div>
+                        <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg bg-white p-3 text-xs">{JSON.stringify(entry.newValue, null, 2)}</pre>
+                      </div>
+                    )}
+                  </details>
+                ))}
+              </div>
+            </section>
+          )}
         </section>
       )}
 
@@ -1178,7 +1377,7 @@ function TaskContent({ taskId }: { taskId: string }) {
       )}
 
       {activeTab === 'order' && legacyMode && (
-        <section className="space-y-5">
+        <section id={task.purchaseOrder ? `order-${task.purchaseOrder.id}` : undefined} className="scroll-mt-40 space-y-5">
           {!task.purchaseOrder ? (
             <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center">
               <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-blue-50 text-xl text-blue-600">▣</div>
@@ -1395,7 +1594,7 @@ function TaskContent({ taskId }: { taskId: string }) {
                         {task.purchaseOrders
                           .filter((order) => order.id !== task.purchaseOrder?.id)
                           .map((order) => (
-                            <div key={order.id} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between">
+                            <div key={order.id} id={`order-${order.id}`} className="scroll-mt-40 flex flex-col gap-2 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between">
                               <div>
                                 <div className="text-sm font-medium text-slate-800">{order.supplier.name}</div>
                                 <div className="mt-0.5 text-xs text-slate-400">
@@ -1752,6 +1951,8 @@ function TaskContent({ taskId }: { taskId: string }) {
               <Input value={itemPartNumber} onChange={(e) => setItemPartNumber(e.target.value)} placeholder="6205-2RS, DN40 PN25..." className="input" />
             </Field>
 
+            <CatalogPicker selectedId={itemCatalogId} onSelect={selectCatalogItem} />
+
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Количество *">
                 <Input type="number" min="0.001" step="0.001" value={itemQuantity} onChange={(e) => setItemQuantity(e.target.value)} className="input" />
@@ -1780,9 +1981,21 @@ function TaskContent({ taskId }: { taskId: string }) {
               </div>
             )}
 
-            <Field label="Примечание">
-              <Textarea rows={3} value={itemNotes} onChange={(e) => setItemNotes(e.target.value)} placeholder="Характеристики, требования, производитель, аналог..." className="input resize-none" />
+            <Field label="Необходимо до">
+              <Input type="date" value={itemRequiredAt} onChange={(e) => setItemRequiredAt(e.target.value)} className="input" />
             </Field>
+            <Field label="Технические характеристики (параметр: значение)">
+              <textarea rows={4} value={itemSpecs} onChange={(e) => setItemSpecs(e.target.value)} placeholder={'Материал: сталь\nДиаметр: 25 мм'} className="input resize-none" />
+            </Field>
+            <Field label="Примечание">
+              <textarea rows={3} value={itemNotes} onChange={(e) => setItemNotes(e.target.value)} placeholder="Условия использования, дополнительные требования..." className="input resize-none" />
+            </Field>
+            {editingItemId && (
+              <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-700">
+                Исходные данные заявки сохраняются отдельно. Привязка номенклатуры не подменяет оригинальную спецификацию.
+                Редактирование позиции с КП или заказами запрещено.
+              </p>
+            )}
 
             <ModalActions busy={busy} onCancel={() => setItemFormOpen(false)} submitLabel={editingItemId ? 'Сохранить изменения' : 'Добавить позицию'} />
           </form>
@@ -2025,7 +2238,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 function TaskRoute() {
   const { id } = useParams<{ id: string }>();
   return (
-    <TaskContent key={id} taskId={id} />
+    <Suspense fallback={<Skeleton label="Загружаем закупку" />}><TaskContent key={id} taskId={id} /></Suspense>
   );
 }
 

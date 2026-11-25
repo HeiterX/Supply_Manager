@@ -2,6 +2,7 @@ name: CI — Supply Manager
 
 on:
   pull_request:
+    branches: [main]
   push:
     branches: [main]
   workflow_dispatch:
@@ -21,8 +22,20 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Check tracked filenames for accidental private data
         run: node scripts/check-tracked-paths.mjs
+      - name: Scan new commits for secrets (redacted)
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            range="-1 HEAD"
+          else
+            range="$BASE_SHA..HEAD"
+          fi
+          docker run --rm -v "$PWD:/repo" -w /repo ghcr.io/gitleaks/gitleaks:v8.30.1 \
+            git --redact=100 --no-banner --log-opts="$range"
 
   api:
     name: API — lint, build, E2E (PostgreSQL 17)
@@ -69,6 +82,10 @@ jobs:
         run: npm run lint
       - name: API build
         run: npm run build
+      - name: API unit tests
+        run: npm test
+      - name: E2E configuration safety tests (no database)
+        run: npm run test:e2e:safety
       - name: Write isolated E2E configurations (ignored by Git)
         run: |
           cat > .env <<'EOF'
@@ -81,6 +98,34 @@ jobs:
           EOF
       - name: API E2E (schema=e2e; migrations via existing test script)
         run: npm run test:e2e
+      - name: Install browser test dependencies
+        working-directory: apps/web
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Browser E2E against PostgreSQL
+        working-directory: .
+        env:
+          CORE08_FINANCE_ENABLED: "true"
+          CORE11_BROWSER_API: http://localhost:4080/api/v1
+          CORE11_BROWSER_WEB: http://localhost:4081
+          FRONTEND_ORIGIN: http://localhost:4081
+          NEXT_PUBLIC_API_URL: http://localhost:4080/api/v1
+          NEXT_TELEMETRY_DISABLED: "1"
+        run: |
+          npm --prefix apps/web run build
+          (cd apps/api && PORT=4080 node dist/main.js) > /tmp/core08-api.log 2>&1 &
+          (cd apps/web && node node_modules/next/dist/bin/next start -p 4081) > /tmp/core08-web.log 2>&1 &
+          trap 'cat /tmp/core08-api.log /tmp/core08-web.log' EXIT
+          for attempt in {1..20}; do
+            if curl --silent --output /dev/null http://localhost:4080/api/v1/auth/me &&
+               curl --silent --output /dev/null --fail http://localhost:4081; then
+              break
+            fi
+            sleep 1
+          done
+          npm --prefix apps/web run test:e2e
+          npm --prefix apps/web run test:browser
 
   web:
     name: Web — lint and Next.js build

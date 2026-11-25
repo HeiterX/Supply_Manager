@@ -3,14 +3,15 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useSession } from '@/app/components/AuthGate';
 import LoadError from '@/app/components/LoadError';
 import { StatusBadge } from '@/app/components/StatusBadge';
-import { Alert, Badge, Button, Card, EmptyState, Skeleton, Spinner } from '@/app/components/ui';
+import { Alert, Badge, Button, Card, EmptyState, Skeleton, Spinner, Field, Textarea } from '@/app/components/ui';
 import { apiFetch } from '@/lib/api-client';
 import { useAbortableLoad } from '@/lib/use-abortable-load';
 import { priorityLabels, workingDate, workingError, workingLink } from '@/lib/working-list';
 
-type Person = { fullName: string; department?: string | null };
+type Person = { id?: string; fullName: string; department?: string | null };
 type RequestItem = {
   id: string; name: string; partNumber: string | null; quantity: number | string; unit: string;
   notes: string | null; photoPath: string | null; photoOriginalName: string | null;
@@ -22,6 +23,8 @@ export type RequestRow = {
 };
 type Request = RequestRow & {
   items: RequestItem[]; description: string | null; notes: string | null; requiredAt: string | null;
+  assignedTo?: Person | null;
+  history?: { id: string; action: string; actorName: string | null; comment: string | null; createdAt: string }[];
   processedAt: string | null; decisionComment: string | null; task: { id: string; number: number } | null;
 };
 
@@ -71,6 +74,9 @@ function RequestPhoto({ item }: { item: RequestItem }) {
 }
 
 export default function RequestDetails({ id, back, onChanged }: { id: string; back: string; onChanged?: () => void }) {
+  const { user } = useSession();
+  const [reason, setReason] = useState('');
+  const [rejecting, setRejecting] = useState(false);
   const [request, setRequest] = useState<Request>();
   const [error, setError] = useState('');
   const [action, setAction] = useState('');
@@ -89,32 +95,41 @@ export default function RequestDetails({ id, back, onChanged }: { id: string; ba
   }, [id]);
   const reload = useAbortableLoad(load);
 
-  async function accept() {
+  async function process(operation: 'review' | 'accept' | 'reject') {
+    if (operation === 'reject' && reason.trim().length < 5) return;
     if (lock.current) return;
     lock.current = true;
     setBusy(true);
     setAction('');
     try {
-      const response = await apiFetch(`/purchase-requests/${encodeURIComponent(id)}/accept`, { method: 'PATCH' });
+      const response = await apiFetch(`/purchase-requests/${encodeURIComponent(id)}/${operation}`, {
+        method: 'PATCH',
+        ...(operation === 'reject' ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: reason.trim() }) } : {}),
+      });
       if (response.status === 409) {
         await reload();
         onChanged?.();
         setAction('Заявка изменилась. Данные обновлены.');
         return;
       }
-      if (!response.ok) throw new Error(await workingError(response, 'Не удалось принять заявку.'));
+      if (!response.ok) throw new Error(await workingError(response, 'Не удалось обработать заявку.'));
       setRequest(await response.json() as Request);
-      setAccepted(true);
+      setAccepted(operation === 'accept');
+      setRejecting(false);
+      setReason('');
       onChanged?.();
     } catch (error) {
       setAction(error instanceof TypeError ? 'Подтверждение не получено. Проверяем состояние заявки.' :
-        error instanceof Error ? error.message : 'Не удалось принять заявку.');
+        error instanceof Error ? error.message : 'Не удалось обработать заявку.');
       await reload();
     } finally { lock.current = false; setBusy(false); }
   }
 
   if (error) return <LoadError message={error} retry={() => void reload()} />;
   if (!request) return <Skeleton label="Загрузка заявки" />;
+  const canManage = user.role !== 'EMPLOYEE';
+  const canProcess = canManage && (!request.assignedTo || request.assignedTo.id === user.id || user.role === 'ADMIN');
+  const pending = ['NEW', 'IN_REVIEW', 'NEEDS_CLARIFICATION'].includes(request.status);
   return <div className="min-w-0 space-y-4 [overflow-wrap:anywhere]">
     <Card className="space-y-3 p-4">
       <div className="flex flex-wrap items-center gap-2"><Badge>№{request.number}</Badge>
@@ -129,9 +144,22 @@ export default function RequestDetails({ id, back, onChanged }: { id: string; ba
       </dl>
       {request.description && <p className="whitespace-pre-wrap text-sm">{request.description}</p>}
       {request.notes && <p className="whitespace-pre-wrap text-sm">{request.notes}</p>}
-      {request.task
-        ? <Link className="ui-button ui-button--outline" href={workingLink(`/tasks/${request.task.id}`, back)}>Закупка №{request.task.number}</Link>
-        : !['REJECTED', 'CANCELLED'].includes(request.status) && <Button loading={busy} onClick={() => void accept()}>Принять в работу</Button>}
+      {canManage && request.task && <Link className="ui-button ui-button--outline"
+        href={workingLink(`/tasks/${request.task.id}`, back)}>Закупка №{request.task.number}</Link>}
+      {canProcess && !request.task && (pending || request.status === 'APPROVED') && <>
+        <div className="flex flex-wrap gap-2">
+          {request.status === 'NEW' && <Button variant="outline" disabled={busy} onClick={() => void process('review')}>Взять на рассмотрение</Button>}
+          <Button loading={busy} onClick={() => void process('accept')}>Принять в работу</Button>
+          {pending && <Button variant="outline" disabled={busy} onClick={() => setRejecting(value => !value)}>Отклонить</Button>}
+        </div>
+        {pending && rejecting && <div className="space-y-2">
+          <Field id={`reject-reason-${id}`} label="Причина отклонения заявки">
+            <Textarea id={`reject-reason-${id}`} value={reason} rows={3} maxLength={1500}
+              onChange={event => setReason(event.target.value)} />
+          </Field>
+          <Button disabled={busy || reason.trim().length < 5} onClick={() => void process('reject')}>Подтвердить отклонение</Button>
+        </div>}
+      </>}
       {accepted && <Alert tone="success">Заявка принята в работу.</Alert>}
       {action && <Alert tone="danger">{action}</Alert>}
       {busy && <span className="sr-only"><Spinner /> Обрабатываем заявку</span>}
@@ -149,6 +177,15 @@ export default function RequestDetails({ id, back, onChanged }: { id: string; ba
       <h3 className="font-semibold">Обработка заявки</h3>
       {request.processedAt ? <p className="text-sm">{workingDate(request.processedAt)} · {request.processedBy?.fullName ?? 'Ответственный не указан'}</p>
         : <p className="text-sm text-muted">Данные об обработке пока отсутствуют.</p>}
+      {request.assignedTo && <p className="text-sm">На рассмотрении у {request.assignedTo.fullName}</p>}
+      {request.history?.length ? <ol className="space-y-2" aria-label="История заявки">
+        {request.history.map(entry => <li key={entry.id} className="rounded-lg bg-surface-subtle p-3 text-sm">
+          <strong>{({ CREATED: 'Заявка создана', START_REVIEW: 'Начато рассмотрение', REJECTED: 'Заявка отклонена',
+            ACCEPTED: 'Создана закупка' } as Record<string, string>)[entry.action] ?? entry.action}</strong>
+          <p className="text-muted">{entry.actorName ?? 'Система'} · {workingDate(entry.createdAt)}</p>
+          {entry.comment && <p className="whitespace-pre-wrap">{entry.comment}</p>}
+        </li>)}
+      </ol> : null}
       {request.decisionComment && <p className="whitespace-pre-wrap text-sm">{request.decisionComment}</p>}
     </Card>
   </div>;

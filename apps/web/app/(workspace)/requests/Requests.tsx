@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { Suspense, useState } from 'react';
+import { useSession } from '@/app/components/AuthGate';
 import PageLayout from '@/app/components/PageLayout';
 import { Modal } from '@/app/components/Modal';
 import { StatusBadge, requestStatusLabels } from '@/app/components/StatusBadge';
@@ -14,13 +15,15 @@ const statuses = Object.entries(requestStatusLabels).filter(([status]) => status
 
 function Requests() {
   const list = useWorkingList<RequestRow>('requests');
+  const { user } = useSession();
+  const title = user.role === 'EMPLOYEE' ? 'Мои заявки' : 'Входящие заявки';
   const [selected, setSelected] = useState<RequestRow | null>(null);
-  return <PageLayout title="Входящие заявки"
+  return <PageLayout title={title}
     subtitle={list.page ? `Заявок по текущему виду: ${list.page.total}` : undefined}
     action={<Link href="/request" className="ui-button ui-button--outline">Подать заявку</Link>}>
     <div className="min-w-0 space-y-4">
-      <WorkingTableControls list={list} statuses={statuses} />
-      <WorkingTable list={list} label="Входящие заявки" empty="Заявок по текущему виду нет"
+      <WorkingTableControls list={list} statuses={statuses} entity="requests" />
+      <WorkingTable list={list} label={title} empty="Заявок по текущему виду нет"
         headers={['Заявка', 'Заявитель', 'Создана', 'Позиции', 'Приоритет', 'Статус', 'Действия']}>
         {list.page?.items.map((request) => <tr key={request.id} className="hover:bg-accent-soft/50">
           <th scope="row" className="min-w-52 text-left [overflow-wrap:anywhere]">

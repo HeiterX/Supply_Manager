@@ -7,6 +7,7 @@ import { Modal, ModalActions } from '@/app/components/Modal';
 import { StatusBadge, taskStatusLabels } from '@/app/components/StatusBadge';
 import { WorkingTable, WorkingTableControls } from '@/app/components/WorkingTable';
 import { Alert, Button, Field, Input, Select, Skeleton, Textarea, Toast } from '@/app/components/ui';
+import { useCoreResource } from '@/lib/discovery';
 import { apiFetch } from '@/lib/api-client';
 import { priorityLabels, useWorkingList, workingDate, workingError, workingLink } from '@/lib/working-list';
 
@@ -78,13 +79,30 @@ function CreatePurchase({ close, onCreated }: { close: () => void; onCreated: (t
 
 function Purchases() {
   const list = useWorkingList<TaskRow>('tasks');
+  const overview = useCoreResource<{
+    active: number; attention: number; overdue: number; inTransit: number; attentionTasks: TaskRow[];
+  }>('/discovery/task-overview');
   const [create, setCreate] = useState(false);
   const [created, setCreated] = useState<TaskRow | null>(null);
 
   return <PageLayout title="Закупки" subtitle={list.page ? `Закупок по текущему виду: ${list.page.total}` : undefined}
     action={<Button onClick={() => setCreate(true)}>Создать закупку</Button>}>
     <div className="min-w-0 space-y-4">
-      <WorkingTableControls list={list} statuses={Object.entries(taskStatusLabels)} purchases />
+      {overview.data && <section aria-label="Сводка закупок" className="space-y-2">
+        <dl className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+          {([['Активные', 'active'], ['Требуют внимания', 'attention'],
+            ['Просрочены', 'overdue'], ['В поставке', 'inTransit']] as const).map(([label, key]) =>
+            <div key={key} className="ui-card p-3"><dt className="text-muted">{label}</dt>
+              <dd className="text-xl font-semibold">{overview.data?.[key]}</dd></div>)}
+        </dl>
+        {overview.data.attentionTasks.length > 0 && <details className="ui-card p-3">
+          <summary>Закупки, требующие внимания</summary>
+          <ul className="mt-2 space-y-1">{overview.data.attentionTasks.map(task =>
+            <li key={task.id}><Link className="text-accent underline" href={workingLink(`/tasks/${task.id}`, list.href)}>
+              №{task.number} · {task.title}</Link></li>)}</ul>
+        </details>}
+      </section>}
+      <WorkingTableControls list={list} statuses={Object.entries(taskStatusLabels)} purchases entity="tasks" />
       <WorkingTable list={list} label="Закупки" empty="Закупок по текущему виду нет"
         headers={['Закупка', 'Статус', 'Приоритет', 'Создана', 'Срок', 'Следующее действие']}>
         {list.page?.items.map((task) => <tr key={task.id} className="hover:bg-accent-soft/50">

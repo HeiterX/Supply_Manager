@@ -110,7 +110,7 @@ today is 2026-10-04 and is colored in #FFF3CD
 
 -- ЭТАП 5. TELEGRAM И ОПЕРАТИВНЫЕ УВЕДОМЛЕНИЯ --
 
-[Telegram-бот и безопасная привязка пользователя] as [TGBOT] starts 2026-10-19 and ends 2026-10-20
+[Telegram-бот: webhook, web-подтверждение, PostgreSQL outbox] as [TGBOT] starts 2026-10-19 and ends 2026-10-20
 [TGBOT] is colored in LightBlue/Blue
 
 [Уведомление снабжения о новой заявке] as [TGNEW] starts 2026-10-20 and ends 2026-10-21
@@ -119,7 +119,7 @@ today is 2026-10-04 and is colored in #FFF3CD
 [Уведомления сотрудника об изменении статуса] as [TGSTATUS] starts 2026-10-21 and ends 2026-10-22
 [TGSTATUS] is colored in LightBlue/Blue
 
-[Напоминания по оплате, отгрузке и ожидаемой доставке] as [TGREMIND] starts 2026-10-22 and ends 2026-10-24
+[CORE-09 → backend → Telegram: контракт напоминаний, ожидает API] as [TGREMIND] starts 2026-10-22 and ends 2026-10-24
 [TGREMIND] is colored in LightBlue/Blue
 
 [Проверка Telegram-сценариев] as [TGTEST] starts 2026-10-24 and ends 2026-10-25

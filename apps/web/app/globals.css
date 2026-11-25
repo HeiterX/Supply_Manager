@@ -144,9 +144,13 @@ body { background: var(--background); color: var(--foreground); font-family: var
 .app-nav-link svg, .app-header svg { flex: none; }
 .app-nav-link:hover { background: var(--surface-subtle); color: var(--foreground); }
 .app-nav-link[aria-current] { color: var(--accent-hover); background: var(--accent-soft); font-weight: 650; }
-.app-header { position: sticky; top: 0; z-index: var(--z-sticky); display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .375rem var(--page-gutter); min-height: var(--header); border-bottom: 1px solid var(--border); background: var(--surface); }
+.app-header { position: sticky; top: 0; z-index: var(--z-sticky); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; padding: .375rem var(--page-gutter); min-height: var(--header); border-bottom: 1px solid var(--border); background: var(--surface); }
 .app-header-context, .app-header-tools, .app-crumbs { display: flex; align-items: center; gap: .5rem; min-width: 0; }
 .app-header-tools { flex: none; }
+.app-header-search { order: 1; flex: 0 0 100%; min-width: 0; }
+@media (min-width: 1024px) {
+  .app-header-search { order: 0; flex: 1 1 12rem; max-width: 28rem; }
+}
 .app-crumbs { font-size: .875rem; color: var(--muted); }
 .app-crumbs a:hover { text-decoration: underline; }
 .app-crumbs [aria-current] { color: var(--foreground); font-weight: 600; }

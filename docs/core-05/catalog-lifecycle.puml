@@ -1,0 +1,38 @@
+@startuml
+title CORE-05 — Номенклатура, закупка и движение количества
+skinparam shadowing false
+
+actor "Снабженец" as P
+participant "Каталог" as C
+participant "TaskItem" as I
+participant "SupplierOfferItem" as O
+participant "PurchaseOrderItem" as R
+database "История" as H
+
+P -> C : Поиск / создание карточки
+C --> P : Карточка + fingerprint
+P -> I : Создать позицию из карточки
+I -> H : CREATED + originalSnapshot
+P -> I : Изменить до КП
+I -> H : UPDATED + oldValue/newValue
+P -> O : Получить КП по позиции
+O -> I : Ссылка на неизменяемую спецификацию
+P -> I : Изменить / удалить после КП
+I --> P : HTTP 409
+P -> R : Оформить заказ по строке КП
+R -> I : Ссылка на исходную позицию
+R -> H : Отслеживание статусов в заказе
+
+note right of I
+  catalogItemId — ссылка, а не замена оригинала.
+  sourceRequestItemId и originalSnapshot
+  сохраняют требования сотрудника.
+  Аналог требует отдельного технического согласования.
+end note
+
+note right of R
+  Прогресс: требуется / предложено /
+  заказано / получено / передано.
+  Отменённые заказы не учитываются.
+end note
+@enduml
