@@ -5,6 +5,25 @@ import { FormEvent, useRef, useState } from 'react';
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000/api/v1';
 
+const PUBLIC_REQUEST_DRAFT_KEY =
+  'supply-manager:public-request-draft:v1';
+
+type StoredDraftItem = {
+  name: string;
+  quantity: string;
+  unit: string;
+  description: string;
+};
+
+type StoredRequestDraft = {
+  version: 1;
+  savedAt: string;
+  requesterName: string;
+  priority: string;
+  requiredAt: string;
+  items: StoredDraftItem[];
+};
+
 type RequestItem = {
   key: string;
   name: string;
@@ -58,8 +77,66 @@ function getErrorMessage(data: unknown) {
   return 'Не удалось отправить заявку';
 }
 
+function parseStoredDraft(raw: string): StoredRequestDraft {
+  const parsed: unknown = JSON.parse(raw);
+
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error('Сохранённый черновик повреждён');
+  }
+
+  const draft = parsed as Partial<StoredRequestDraft>;
+
+  const allowedPriorities = [
+    'LOW',
+    'NORMAL',
+    'HIGH',
+    'URGENT',
+  ];
+
+  const validItems =
+    Array.isArray(draft.items) &&
+    draft.items.length >= 1 &&
+    draft.items.length <= 20 &&
+    draft.items.every((entry: unknown) => {
+      if (!entry || typeof entry !== 'object') {
+        return false;
+      }
+
+      const item = entry as Record<string, unknown>;
+
+      return (
+        typeof item.name === 'string' &&
+        item.name.length <= 250 &&
+        typeof item.quantity === 'string' &&
+        item.quantity.length <= 50 &&
+        typeof item.unit === 'string' &&
+        item.unit.length <= 50 &&
+        typeof item.description === 'string' &&
+        item.description.length <= 3000
+      );
+    });
+
+  if (
+    draft.version !== 1 ||
+    typeof draft.savedAt !== 'string' ||
+    typeof draft.requesterName !== 'string' ||
+    draft.requesterName.length > 120 ||
+    typeof draft.priority !== 'string' ||
+    !allowedPriorities.includes(draft.priority) ||
+    typeof draft.requiredAt !== 'string' ||
+    !/^(|\\d{4}-\\d{2}-\\d{2})$/.test(draft.requiredAt) ||
+    !validItems
+  ) {
+    throw new Error('Сохранённый черновик имеет неверный формат');
+  }
+
+  return draft as StoredRequestDraft;
+}
+
 export default function RequestPage() {
   const [requesterName, setRequesterName] = useState('');
+  const [priority, setPriority] = useState('NORMAL');
+  const [requiredAt, setRequiredAt] = useState('');
   const [items, setItems] = useState<RequestItem[]>([
     createEmptyItem('initial-item'),
   ]);
@@ -68,6 +145,134 @@ export default function RequestPage() {
   const [createdRequest, setCreatedRequest] =
     useState<CreatedRequest | null>(null);
   const [photoWarning, setPhotoWarning] = useState('');
+  const [draftMessage, setDraftMessage] = useState('');
+
+  function saveDraft() {
+    try {
+      const draft: StoredRequestDraft = {
+        version: 1,
+        savedAt: new Date().toISOString(),
+        requesterName,
+        priority,
+        requiredAt,
+        items: items.map((item) => ({
+          name: item.name,
+          quantity: item.quantity,
+          unit: item.unit,
+          description: item.description,
+        })),
+      };
+
+      // Файлы, File-объекты и URL превью не сохраняются.
+      window.localStorage.setItem(
+        PUBLIC_REQUEST_DRAFT_KEY,
+        JSON.stringify(draft),
+      );
+
+      setDraftMessage(
+        'Черновик сохранён на этом устройстве. ' +
+        'Фотографии в него не включены.',
+      );
+    } catch {
+      setDraftMessage(
+        'Не удалось сохранить черновик. Проверьте настройки браузера.',
+      );
+    }
+  }
+
+  function restoreDraft() {
+    try {
+      const raw = window.localStorage.getItem(
+        PUBLIC_REQUEST_DRAFT_KEY,
+      );
+
+      if (!raw) {
+        setDraftMessage('Сохранённый черновик не найден.');
+        return;
+      }
+
+      const draft = parseStoredDraft(raw);
+
+      const hasCurrentData =
+        requesterName.trim() !== '' ||
+        priority !== 'NORMAL' ||
+        requiredAt !== '' ||
+        items.some(
+          (item) =>
+            item.name.trim() !== '' ||
+            item.description.trim() !== '' ||
+            item.quantity !== '1' ||
+            item.unit !== 'шт.' ||
+            item.photo !== null,
+        );
+
+      if (
+        hasCurrentData &&
+        !window.confirm(
+          'Заменить текущие поля сохранённым черновиком? ' +
+          'Несохранённые изменения и выбранные фотографии будут потеряны.',
+        )
+      ) {
+        return;
+      }
+
+      // Освобождаем объектные URL текущих фотографий.
+      for (const item of items) {
+        if (item.photoPreview) {
+          URL.revokeObjectURL(item.photoPreview);
+        }
+      }
+
+      setRequesterName(draft.requesterName);
+      setPriority(draft.priority);
+      setRequiredAt(draft.requiredAt);
+
+      setItems(
+        draft.items.map((item) => ({
+          ...createEmptyItem(),
+          name: item.name,
+          quantity: item.quantity,
+          unit: item.unit,
+          description: item.description,
+        })),
+      );
+
+      setError('');
+      setPhotoWarning('');
+      setDraftMessage(
+        'Черновик восстановлен. При необходимости ' +
+        'прикрепите фотографии заново.',
+      );
+    } catch (error) {
+      setDraftMessage(
+        error instanceof Error
+          ? error.message
+          : 'Не удалось восстановить черновик',
+      );
+    }
+  }
+
+  function deleteDraft() {
+    if (
+      !window.confirm(
+        'Удалить сохранённый черновик с этого устройства?',
+      )
+    ) {
+      return;
+    }
+
+    try {
+      window.localStorage.removeItem(
+        PUBLIC_REQUEST_DRAFT_KEY,
+      );
+      setDraftMessage(
+        'Сохранённый черновик удалён. ' +
+        'Текущие поля формы не изменены.',
+      );
+    } catch {
+      setDraftMessage('Не удалось удалить черновик.');
+    }
+  }
 
   function updateItem(
     key: string,
@@ -216,6 +421,14 @@ export default function RequestPage() {
       return;
     }
 
+    if (
+      requiredAt &&
+      new Date(`${requiredAt}T23:59:59`).getTime() <= Date.now()
+    ) {
+      setError('Укажите будущую дату потребности');
+      return;
+    }
+
     for (let index = 0; index < items.length; index += 1) {
       const item = items[index];
 
@@ -251,6 +464,10 @@ export default function RequestPage() {
           },
           body: JSON.stringify({
             requesterName: normalizedName,
+            priority,
+            requiredAt: requiredAt
+              ? new Date(`${requiredAt}T23:59:59`).toISOString()
+              : undefined,
             items: submittedItems.map((item) => ({
               name: item.name.trim(),
               quantity: Number(item.quantity.replace(',', '.')),
@@ -295,6 +512,15 @@ export default function RequestPage() {
         );
       }
 
+      // Успешно созданная заявка больше не является черновиком.
+      try {
+        window.localStorage.removeItem(
+          PUBLIC_REQUEST_DRAFT_KEY,
+        );
+      } catch {
+        // Сбой локального хранилища не отменяет создание заявки.
+      }
+
       // Do not retain the short-lived upload credential in React state.
       setCreatedRequest({
         id: request.id,
@@ -325,9 +551,12 @@ export default function RequestPage() {
     });
 
     setRequesterName('');
+    setPriority('NORMAL');
+    setRequiredAt('');
     setItems([createEmptyItem()]);
     setCreatedRequest(null);
     setPhotoWarning('');
+    setDraftMessage('');
     setError('');
 
     window.scrollTo({
@@ -439,6 +668,62 @@ export default function RequestPage() {
         </section>
 
         <form onSubmit={handleSubmit}>
+          <section className="mb-5 rounded-[24px] border border-blue-100 bg-white p-4 shadow-sm sm:p-6">
+            <h2 className="text-base font-semibold text-slate-900">
+              Черновик заявки
+            </h2>
+
+            <p className="mt-2 text-sm leading-6 text-slate-500">
+              Сохраните незаполненную заявку, чтобы продолжить позднее
+              на этом устройстве и в этом браузере.
+              Фотографии не сохраняются.
+            </p>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={saveDraft}
+                disabled={isSubmitting}
+                className="min-h-11 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-50"
+              >
+                Сохранить черновик
+              </button>
+
+              <button
+                type="button"
+                onClick={restoreDraft}
+                disabled={isSubmitting}
+                className="min-h-11 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+              >
+                Восстановить
+              </button>
+
+              <button
+                type="button"
+                onClick={deleteDraft}
+                disabled={isSubmitting}
+                className="min-h-11 rounded-xl border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 disabled:opacity-50"
+              >
+                Удалить черновик
+              </button>
+            </div>
+
+            {draftMessage && (
+              <p
+                role="status"
+                aria-live="polite"
+                className="mt-3 text-sm text-slate-600"
+              >
+                {draftMessage}
+              </p>
+            )}
+
+            <p className="mt-3 text-xs leading-5 text-amber-700">
+              На общем компьютере другие пользователи этого профиля
+              браузера могут увидеть сохранённый текст.
+            </p>
+          </section>
+
           <section className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
             <label className="block">
               <span className="mb-2 block text-sm font-semibold text-slate-800">
@@ -459,6 +744,47 @@ export default function RequestPage() {
                 className="h-13 w-full rounded-xl border border-slate-200 bg-white px-4 text-base text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-[#6d89f7] focus:ring-4 focus:ring-[#3d66f5]/10"
               />
             </label>
+          </section>
+
+          <section className="mt-5 rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+            <h2 className="text-sm font-semibold text-slate-800">
+              Сроки и приоритет
+            </h2>
+
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <label className="block">
+                <span className="mb-2 block text-sm font-medium text-slate-700">
+                  Приоритет
+                </span>
+                <select
+                  value={priority}
+                  onChange={(event) => setPriority(event.target.value)}
+                  className="h-12 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-blue-400"
+                >
+                  <option value="LOW">Низкий</option>
+                  <option value="NORMAL">Обычный</option>
+                  <option value="HIGH">Высокий</option>
+                  <option value="URGENT">Срочный</option>
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="mb-2 block text-sm font-medium text-slate-700">
+                  Необходимо до
+                </span>
+                <input
+                  type="date"
+                  value={requiredAt}
+                  onChange={(event) => setRequiredAt(event.target.value)}
+                  className="h-12 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-blue-400"
+                />
+              </label>
+            </div>
+
+            <p className="mt-3 text-xs text-slate-500">
+              Если точная дата неизвестна, оставьте поле пустым.
+              Приоритет будет проверен отделом снабжения.
+            </p>
           </section>
 
           <div className="mt-5 space-y-4">

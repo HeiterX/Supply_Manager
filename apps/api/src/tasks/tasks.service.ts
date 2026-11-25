@@ -48,6 +48,27 @@ export class TasksService {
     const task = await this.prisma.task.findUnique({
       where: { id },
       include: {
+        sourceRequest: {
+          select: {
+            id: true,
+            number: true,
+            items: {
+              where: {
+                photoPath: { not: null },
+              },
+              select: {
+                id: true,
+                name: true,
+                photoPath: true,
+                photoOriginalName: true,
+              },
+              orderBy: [
+                { sortOrder: 'asc' },
+                { createdAt: 'asc' },
+              ],
+            },
+          },
+        },
         items: {
           orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
         },

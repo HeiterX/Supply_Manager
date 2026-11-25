@@ -1,7 +1,8 @@
 'use client';
 
 import AuthGate from '../../components/AuthGate';
-import { apiFetch } from '../../../lib/api-client';
+import { API_BASE_URL, apiFetch } from '../../../lib/api-client';
+import Image from 'next/image';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useCallback, useMemo, useState, type FormEvent, type ReactNode } from 'react';
@@ -18,6 +19,16 @@ type Task = {
   deadline: string | null; nextAction: string | null; reminderAt: string | null; createdAt: string; updatedAt: string; closedAt: string | null;
   selectedOfferId: string | null; selectedOffer: SupplierOffer | null; activities: Activity[]; items: TaskItem[]; supplierOffers: SupplierOffer[];
   purchaseOrder: PurchaseOrder | null; purchaseOrders?: PurchaseOrder[];
+  sourceRequest?: {
+    id: string;
+    number: number;
+    items: Array<{
+      id: string;
+      name: string;
+      photoPath: string | null;
+      photoOriginalName: string | null;
+    }>;
+  } | null;
 };
 
 type Tab = 'overview' | 'items' | 'offers' | 'order' | 'history';
@@ -695,6 +706,61 @@ function TaskContent({ taskId }: { taskId: string }) {
 
       {activeTab === 'items' && (
         <section className="space-y-5">
+          {task.sourceRequest && (
+            <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
+              <h3 className="text-base font-semibold text-slate-900">
+                Фотографии из исходной заявки №{task.sourceRequest.number}
+              </h3>
+              <p className="mt-1 text-sm text-slate-500">
+                Исходные фотографии сохраняются вместе с заявкой
+                и остаются доступны после создания закупки.
+              </p>
+
+              {task.sourceRequest.items.length > 0 ? (
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  {task.sourceRequest.items.map((item) => {
+                    const photoUrl =
+                      `${API_BASE_URL}/purchase-requests/public/items/${item.id}/photo`;
+
+                    return (
+                      <a
+                        key={item.id}
+                        href={photoUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center gap-3 rounded-xl border border-slate-200 p-3 transition hover:border-blue-300 hover:bg-blue-50/40"
+                      >
+                        <Image
+                          unoptimized
+                          width={80}
+                          height={80}
+                          crossOrigin="use-credentials"
+                          src={photoUrl}
+                          alt={`Фото: ${item.name}`}
+                          className="h-20 w-20 shrink-0 rounded-lg bg-slate-100 object-cover"
+                        />
+                        <div className="min-w-0">
+                          <div className="font-semibold text-slate-800">
+                            {item.name}
+                          </div>
+                          <div className="mt-1 truncate text-xs text-slate-500">
+                            {item.photoOriginalName ?? 'Фото позиции'}
+                          </div>
+                          <div className="mt-2 text-xs font-medium text-blue-600">
+                            Открыть фотографию
+                          </div>
+                        </div>
+                      </a>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="mt-3 text-sm text-slate-500">
+                  У исходной заявки нет прикреплённых фотографий.
+                </p>
+              )}
+            </div>
+          )}
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <h2 className="text-lg font-semibold text-slate-950">Позиции закупки</h2>

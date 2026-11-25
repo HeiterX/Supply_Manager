@@ -350,6 +350,8 @@ model User {
   // Заявки, обработанные снабженцем / администратором
   processedPurchaseRequests PurchaseRequest[] @relation("ProcessedPurchaseRequests")
 
+  assignedPurchaseRequests PurchaseRequest[] @relation("AssignedPurchaseRequests")
+
   @@index([fullName])
   @@index([department])
   @@index([role])
@@ -385,8 +387,15 @@ model PurchaseRequest {
   processedBy   User?     @relation("ProcessedPurchaseRequests", fields: [processedById], references: [id], onDelete: SetNull)
   processedAt   DateTime?
 
+  // Ответственный за рассмотрение заявки
+  assignedToId String?
+  assignedTo   User?   @relation("AssignedPurchaseRequests", fields: [assignedToId], references: [id], onDelete: SetNull)
+
   // Позиции внутри заявки
   items PurchaseRequestItem[]
+
+  // История решений по заявке
+  history PurchaseRequestHistory[]
 
   // Если заявка принята и превращена в закупку
   taskId String? @unique
@@ -397,6 +406,7 @@ model PurchaseRequest {
 
   @@index([requesterId])
   @@index([processedById])
+  @@index([assignedToId])
   @@index([status])
   @@index([priority])
   @@index([requiredAt])
@@ -495,14 +505,34 @@ model PurchaseOrderItem {
 }
 
 model SecurityAuditEvent {
-  id           String   @id @default(uuid())
+  id String @id @default(uuid())
 
   actorId      String
   targetUserId String
   action       String
 
-  createdAt    DateTime @default(now())
+  createdAt DateTime @default(now())
 
   @@index([actorId, createdAt])
   @@index([targetUserId, createdAt])
+}
+
+// Неизменяемая история действий по заявке.
+model PurchaseRequestHistory {
+  id String @id @default(uuid())
+
+  requestId String
+  request   PurchaseRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  actorId   String?
+  actorName String?
+
+  action     String
+  fromStatus PurchaseRequestStatus?
+  toStatus   PurchaseRequestStatus
+  comment    String?
+
+  createdAt DateTime @default(now())
+
+  @@index([requestId, createdAt])
 }

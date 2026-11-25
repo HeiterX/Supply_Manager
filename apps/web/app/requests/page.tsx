@@ -26,6 +26,16 @@ type RequestUser = {
   username: string;
 };
 
+type RequestHistory = {
+  id: string;
+  actorName: string | null;
+  action: string;
+  fromStatus: string | null;
+  toStatus: string;
+  comment: string | null;
+  createdAt: string;
+};
+
 type PurchaseRequest = {
   id: string;
   number: number;
@@ -35,7 +45,12 @@ type PurchaseRequest = {
   description: string | null;
   priority: string;
   status: string;
+  requiredAt: string | null;
   notes: string | null;
+  assignedTo: RequestUser | null;
+  processedBy: RequestUser | null;
+  decisionComment: string | null;
+  history: RequestHistory[];
   createdAt: string;
   items: RequestItem[];
   task: {
@@ -48,6 +63,8 @@ type PurchaseRequest = {
 
 const statusLabels: Record<string, string> = {
   NEW: 'Новая',
+  IN_REVIEW: 'На рассмотрении',
+  NEEDS_CLARIFICATION: 'Требует уточнения',
   ACCEPTED: 'Принята',
   APPROVED: 'Принята',
   IN_PROGRESS: 'В работе',
@@ -58,6 +75,8 @@ const statusLabels: Record<string, string> = {
 
 const statusStyles: Record<string, string> = {
   NEW: 'bg-blue-50 text-blue-700 ring-blue-100',
+  IN_REVIEW: 'bg-amber-50 text-amber-700 ring-amber-100',
+  NEEDS_CLARIFICATION: 'bg-orange-50 text-orange-700 ring-orange-100',
   ACCEPTED: 'bg-emerald-50 text-emerald-700 ring-emerald-100',
   APPROVED: 'bg-emerald-50 text-emerald-700 ring-emerald-100',
   IN_PROGRESS: 'bg-violet-50 text-violet-700 ring-violet-100',
@@ -65,6 +84,28 @@ const statusStyles: Record<string, string> = {
   REJECTED: 'bg-rose-50 text-rose-700 ring-rose-100',
   CANCELLED: 'bg-slate-100 text-slate-600 ring-slate-200',
 };
+
+const priorityLabels: Record<string, string> = {
+  LOW: 'Низкий',
+  NORMAL: 'Обычный',
+  HIGH: 'Высокий',
+  URGENT: 'Срочный',
+};
+
+const priorityStyles: Record<string, string> = {
+  LOW: 'bg-slate-100 text-slate-600',
+  NORMAL: 'bg-slate-100 text-slate-700',
+  HIGH: 'bg-amber-50 text-amber-700',
+  URGENT: 'bg-rose-50 text-rose-700',
+};
+
+function formatRequestDate(value: string) {
+  return new Intl.DateTimeFormat('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(new Date(value));
+}
 
 function formatDateTime(value: string) {
   return new Intl.DateTimeFormat('ru-RU', {
@@ -268,7 +309,7 @@ function RequestsContent() {
             <RequestCard
               key={request.id}
               request={request}
-              onAccepted={(updatedRequest) => {
+              onUpdated={(updatedRequest) => {
                 setRequests((current) =>
                   current.map((item) =>
                     item.id === updatedRequest.id ? updatedRequest : item,
@@ -310,47 +351,96 @@ function StatCard({
 
 function RequestCard({
   request,
-  onAccepted,
+  onUpdated,
 }: {
   request: PurchaseRequest;
-  onAccepted: (request: PurchaseRequest) => void;
+  onUpdated: (request: PurchaseRequest) => void;
 }) {
   const [expanded, setExpanded] = useState(request.status === 'NEW');
-  const [accepting, setAccepting] = useState(false);
-  const [acceptError, setAcceptError] = useState('');
+  const [busyAction, setBusyAction] = useState<
+    'review' | 'accept' | 'reject' | null
+  >(null);
+  const [actionError, setActionError] = useState('');
+  const [showRejectForm, setShowRejectForm] = useState(false);
+  const [reason, setReason] = useState('');
 
-  async function handleAccept() {
-    if (accepting) return;
-    setAccepting(true);
-    setAcceptError('');
+  const canAccept =
+    !request.task &&
+    ['NEW', 'IN_REVIEW', 'NEEDS_CLARIFICATION', 'APPROVED'].includes(
+      request.status,
+    );
+
+  const canReject =
+    !request.task &&
+    ['NEW', 'IN_REVIEW', 'NEEDS_CLARIFICATION'].includes(
+      request.status,
+    );
+
+  async function handleAction(
+    action: 'review' | 'accept' | 'reject',
+  ) {
+    if (busyAction) return;
+
+    if (action === 'reject' && reason.trim().length < 5) {
+      setActionError('Укажите причину отказа: минимум 5 символов.');
+      return;
+    }
+
+    setBusyAction(action);
+    setActionError('');
 
     try {
+      const options: RequestInit = {
+        method: 'PATCH',
+      };
+
+      if (action === 'reject') {
+        options.headers = {
+          'Content-Type': 'application/json',
+        };
+        options.body = JSON.stringify({
+          reason: reason.trim(),
+        });
+      }
+
       const response = await apiFetch(
-        `/purchase-requests/${request.id}/accept`,
-        { method: 'PATCH' },
+        `/purchase-requests/${request.id}/${action}`,
+        options,
       );
 
       if (response.status === 401) {
         throw new Error('Сессия истекла. Войдите повторно.');
       }
-      if (response.status === 403) {
-        throw new Error('Недостаточно прав для принятия заявки.');
-      }
 
-      const data = (await response.json().catch(() => null)) as unknown;
+      const data: unknown = await response
+        .json()
+        .catch(() => null);
+
       if (!response.ok) {
-        throw new Error(getErrorMessage(data, 'Не удалось принять заявку в работу'));
+        throw new Error(
+          getErrorMessage(data, 'Не удалось обработать заявку'),
+        );
       }
 
-      onAccepted(data as PurchaseRequest);
-    } catch (requestError) {
-      setAcceptError(
-        requestError instanceof Error
-          ? requestError.message
-          : 'Не удалось принять заявку в работу',
+      if (
+        !data ||
+        typeof data !== 'object' ||
+        !('id' in data)
+      ) {
+        throw new Error('Сервер вернул некорректный ответ');
+      }
+
+      onUpdated(data as PurchaseRequest);
+      setShowRejectForm(false);
+      setReason('');
+    } catch (error) {
+      setActionError(
+        error instanceof Error
+          ? error.message
+          : 'Не удалось обработать заявку',
       );
     } finally {
-      setAccepting(false);
+      setBusyAction(null);
     }
   }
 
@@ -375,12 +465,25 @@ function RequestCard({
             >
               {statusLabels[request.status] ?? request.status}
             </span>
+            <span
+              className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                priorityStyles[request.priority] ??
+                'bg-slate-100 text-slate-700'
+              }`}
+            >
+              {priorityLabels[request.priority] ?? request.priority}
+            </span>
           </div>
           <div className="mt-2 text-base font-semibold text-slate-900">
             {requesterLabel(request)}
           </div>
           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-400">
             <span>{formatDateTime(request.createdAt)}</span>
+            <span>
+              {request.requiredAt
+                ? `Необходимо до: ${formatRequestDate(request.requiredAt)}`
+                : 'Срок не указан'}
+            </span>
             <span>
               {request.items.length}{' '}
               {request.items.length === 1 ? 'позиция' : 'позиций'}
@@ -458,35 +561,171 @@ function RequestCard({
             ))}
           </div>
 
-          {request.task ? (
+          {request.assignedTo && (
+            <div className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              Ответственный: <strong>{request.assignedTo.fullName}</strong>
+            </div>
+          )}
+
+          {request.status === 'REJECTED' && request.decisionComment && (
+            <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-4">
+              <div className="text-sm font-semibold text-rose-800">
+                Причина отказа
+              </div>
+              <p className="mt-2 whitespace-pre-wrap text-sm text-rose-700">
+                {request.decisionComment}
+              </p>
+              {request.processedBy && (
+                <p className="mt-2 text-xs text-rose-600">
+                  Решение: {request.processedBy.fullName}
+                </p>
+              )}
+            </div>
+          )}
+
+          {request.task && (
             <a
               href={`/tasks/${request.task.id}`}
               className="mt-4 flex h-11 w-full items-center justify-center rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 sm:ml-auto sm:w-auto sm:px-5"
             >
               Перейти к закупке №{request.task.number}
             </a>
-          ) : (
-            <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-xs leading-5 text-slate-400">
-                Следующий этап — принятие заявки и создание закупки.
-              </p>
-              <div className="sm:text-right">
-                <button
-                  type="button"
-                  onClick={() => void handleAccept()}
-                  disabled={accepting}
-                  className="h-11 w-full rounded-xl bg-blue-600 px-5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
-                >
-                  {accepting ? 'Принимаем...' : 'Принять в работу'}
-                </button>
-                {acceptError && (
-                  <p className="mt-2 max-w-sm text-sm leading-5 text-red-600">
-                    {acceptError}
-                  </p>
+          )}
+
+          {(canAccept || canReject) && (
+            <div className="mt-4 space-y-3 border-t border-slate-100 pt-4">
+              <div className="flex flex-wrap gap-2">
+                {request.status === 'NEW' && (
+                  <button
+                    type="button"
+                    disabled={busyAction !== null}
+                    onClick={() => void handleAction('review')}
+                    className="min-h-11 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-100 disabled:opacity-50"
+                  >
+                    {busyAction === 'review'
+                      ? 'Назначаем...'
+                      : 'Взять на рассмотрение'}
+                  </button>
+                )}
+
+                {canAccept && (
+                  <button
+                    type="button"
+                    disabled={busyAction !== null}
+                    onClick={() => void handleAction('accept')}
+                    className="min-h-11 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {busyAction === 'accept'
+                      ? 'Создаём закупку...'
+                      : 'Принять и создать закупку'}
+                  </button>
+                )}
+
+                {canReject && (
+                  <button
+                    type="button"
+                    disabled={busyAction !== null}
+                    onClick={() => {
+                      setActionError('');
+                      setShowRejectForm((value) => !value);
+                    }}
+                    className="min-h-11 rounded-xl border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 disabled:opacity-50"
+                  >
+                    {showRejectForm
+                      ? 'Отмена отказа'
+                      : 'Отклонить'}
+                  </button>
                 )}
               </div>
+
+              {showRejectForm && canReject && (
+                <div className="rounded-2xl border border-rose-200 bg-rose-50/50 p-4">
+                  <label
+                    htmlFor={`reject-reason-${request.id}`}
+                    className="block text-sm font-semibold text-slate-800"
+                  >
+                    Причина отклонения заявки
+                  </label>
+
+                  <textarea
+                    id={`reject-reason-${request.id}`}
+                    value={reason}
+                    onChange={(event) => setReason(event.target.value)}
+                    minLength={5}
+                    maxLength={1500}
+                    rows={3}
+                    placeholder="Например: требуется уточнить технические характеристики комплектующих"
+                    className="mt-2 w-full rounded-xl border border-slate-200 bg-white p-3 text-sm outline-none focus:border-rose-400"
+                  />
+
+                  <p className="mt-1 text-xs text-slate-500">
+                    Минимум 5 символов. Причина будет доступна автору заявки.
+                  </p>
+
+                  <button
+                    type="button"
+                    disabled={busyAction !== null || reason.trim().length < 5}
+                    onClick={() => void handleAction('reject')}
+                    className="mt-3 min-h-11 rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {busyAction === 'reject'
+                      ? 'Отклоняем...'
+                      : 'Подтвердить отклонение'}
+                  </button>
+                </div>
+              )}
+
+              {actionError && (
+                <p role="alert" className="text-sm text-rose-600">
+                  {actionError}
+                </p>
+              )}
             </div>
           )}
+
+          <div className="mt-5 border-t border-slate-100 pt-4">
+            <h3 className="text-sm font-semibold text-slate-900">
+              История заявки
+            </h3>
+
+            {request.history?.length ? (
+              <ol className="mt-3 space-y-3">
+                {request.history.map((entry) => (
+                  <li
+                    key={entry.id}
+                    className="rounded-xl bg-slate-50 px-3 py-3 text-sm"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-semibold text-slate-800">
+                        {({
+                          CREATED: 'Заявка создана',
+                          START_REVIEW: 'Начато рассмотрение',
+                          REJECTED: 'Заявка отклонена',
+                          ACCEPTED: 'Создана закупка',
+                        } as Record<string, string>)[entry.action] ??
+                          entry.action}
+                      </span>
+                      <span className="text-xs text-slate-400">
+                        {formatDateTime(entry.createdAt)}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {entry.actorName ?? 'Система'}
+                    </p>
+                    {entry.comment && (
+                      <p className="mt-2 whitespace-pre-wrap text-slate-700">
+                        {entry.comment}
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="mt-2 text-sm text-slate-400">
+                История действий пока отсутствует.
+              </p>
+            )}
+          </div>
         </div>
       )}
     </article>

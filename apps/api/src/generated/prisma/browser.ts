@@ -6,7 +6,7 @@
 /*
  * This file should be your main import to use Prisma-related types and utilities in a browser. 
  * Use it to get access to models, enums, and input types.
- * 
+ *
  * This file does not contain a `PrismaClient` class, nor several other helpers that are intended as server-side only.
  * See `client.ts` for the standard, server-side entry point.
  *
@@ -19,61 +19,66 @@ export * as $Enums from './enums.js'
 export * from './enums.js';
 /**
  * Model Task
- * 
+ *
  */
 export type Task = Prisma.TaskModel
 /**
  * Model TaskItem
- * 
+ *
  */
 export type TaskItem = Prisma.TaskItemModel
 /**
  * Model TaskActivity
- * 
+ *
  */
 export type TaskActivity = Prisma.TaskActivityModel
 /**
  * Model Supplier
- * 
+ *
  */
 export type Supplier = Prisma.SupplierModel
 /**
  * Model SupplierOffer
- * 
+ *
  */
 export type SupplierOffer = Prisma.SupplierOfferModel
 /**
  * Model PurchaseOrder
- * 
+ *
  */
 export type PurchaseOrder = Prisma.PurchaseOrderModel
 /**
  * Model User
- * 
+ *
  */
 export type User = Prisma.UserModel
 /**
  * Model PurchaseRequest
- * 
+ *
  */
 export type PurchaseRequest = Prisma.PurchaseRequestModel
 /**
  * Model PurchaseRequestItem
- * 
+ *
  */
 export type PurchaseRequestItem = Prisma.PurchaseRequestItemModel
 /**
  * Model SupplierOfferItem
- * 
+ *
  */
 export type SupplierOfferItem = Prisma.SupplierOfferItemModel
 /**
  * Model PurchaseOrderItem
- * 
+ *
  */
 export type PurchaseOrderItem = Prisma.PurchaseOrderItemModel
 /**
  * Model SecurityAuditEvent
- * 
+ *
  */
 export type SecurityAuditEvent = Prisma.SecurityAuditEventModel
+/**
+ * Model PurchaseRequestHistory
+ *
+ */
+export type PurchaseRequestHistory = Prisma.PurchaseRequestHistoryModel
