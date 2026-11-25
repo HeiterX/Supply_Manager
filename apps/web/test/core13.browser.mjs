@@ -151,6 +151,7 @@ test('CORE-13 working screens on the production Next.js build', { timeout: 10500
     assert.doesNotMatch(await page.evaluate(() => localStorage.getItem('supply-manager:procurement-view')), /стенд/);
     await button(page, 'Сбросить').click();
     await button(page, 'Мой вид').click();
+    await page.waitForURL(url => url.searchParams.get('overdue') === 'true');
     assert.equal(new URL(page.url()).searchParams.get('overdue'), 'true');
     await button(page, 'Далее').click();
     assert.equal(new URL(page.url()).searchParams.get('page'), '2');
@@ -509,11 +510,11 @@ test('CORE-13 on real NestJS, cookies and the isolated PostgreSQL fixture', {
   const api = 'http://127.0.0.1:3390/api/v1';
   const { Client } = require('../../api/node_modules/pg');
   const sharp = require('../../api/node_modules/sharp');
-  const connectionString = process.env.CORE13_DATABASE_URL ||
+  const connectionString = process.env.CORE13_DATABASE_URL || process.env.DATABASE_URL ||
     'postgresql://core13_local:core13_local@127.0.0.1:55433/core13_local?schema=e2e';
   const database = new URL(connectionString);
   if (database.protocol !== 'postgresql:' || database.hostname !== '127.0.0.1' ||
-    !['55433/core13_local', '55434/core14_local'].includes(database.port + database.pathname) ||
+    !['55433/core13_local', '55434/core14_local', '55441/core1314'].includes(database.port + database.pathname) ||
     database.searchParams.get('schema') !== 'e2e') throw new Error('The browser regression requires the isolated local E2E database.');
   const db = new Client({ connectionString });
   await db.connect();
@@ -566,11 +567,17 @@ test('CORE-13 on real NestJS, cookies and the isolated PostgreSQL fixture', {
   for (const [supplierName, unitPrice] of [['Поставщик QA 1', '1200'], ['Поставщик QA 2', '1300']]) {
     await page.getByRole('button', { name: /Добавить КП/ }).click();
     const form = page.getByRole('dialog', { name: 'Новое коммерческое предложение' });
-    await form.getByLabel(/Поставщик/).fill(supplierName);
-    await form.getByLabel('Цена за единицу, ₽').fill(unitPrice);
+    await form.getByLabel(/Поставщик/).fill(supplierName + ' ' + username);
+    await form.getByLabel(/Цена за единицу/).fill(unitPrice);
     await form.getByLabel('Срок поставки, дней').fill('3');
     await form.getByRole('button', { name: 'Сохранить КП' }).click();
     await form.waitFor({ state: 'hidden' });
+    const offerCard = page.getByRole('article').filter({ has: page.getByRole('heading', { name: supplierName + ' ' + username, exact: true }) });
+    await offerCard.getByRole('button', { name: 'Выбрать КП с причиной' }).click();
+    const decision = page.getByRole('dialog', { name: /Ручной выбор КП/ });
+    await decision.getByLabel(/Причина выбора/).fill('Синтетическая проверка выбора предложения');
+    await decision.getByRole('button', { name: 'Зафиксировать решение' }).click();
+    await decision.waitFor({ state: 'hidden' });
   }
   await page.getByRole('region', { name: 'Сравнение коммерческих предложений' }).waitFor();
   await text(page, '· Цена отличается');
