@@ -51,7 +51,9 @@ export function useWorkingList<T>(entity: Entity) {
   useAbortableLoad(load);
 
   function change(next: URLSearchParams) {
-    if (next.toString() !== key) window.history.pushState(null, '', next.size ? `${pathname}?${next}` : pathname);
+    if (next.toString() !== new URLSearchParams(window.location.search).toString()) {
+      window.history.pushState(null, '', next.size ? `${pathname}?${next}` : pathname);
+    }
   }
 
   const current = result?.key === requestKey;
