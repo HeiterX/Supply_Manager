@@ -102,3 +102,8 @@ export type SupplierOfferItem = Prisma.SupplierOfferItemModel
  * 
  */
 export type PurchaseOrderItem = Prisma.PurchaseOrderItemModel
+/**
+ * Model SecurityAuditEvent
+ * 
+ */
+export type SecurityAuditEvent = Prisma.SecurityAuditEventModel

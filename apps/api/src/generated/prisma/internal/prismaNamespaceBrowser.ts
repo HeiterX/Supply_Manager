@@ -67,7 +67,8 @@ export const ModelName = {
   PurchaseRequest: 'PurchaseRequest',
   PurchaseRequestItem: 'PurchaseRequestItem',
   SupplierOfferItem: 'SupplierOfferItem',
-  PurchaseOrderItem: 'PurchaseOrderItem'
+  PurchaseOrderItem: 'PurchaseOrderItem',
+  SecurityAuditEvent: 'SecurityAuditEvent'
 } as const
 
 export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -368,6 +369,17 @@ export const PurchaseOrderItemScalarFieldEnum = {
 } as const
 
 export type PurchaseOrderItemScalarFieldEnum = (typeof PurchaseOrderItemScalarFieldEnum)[keyof typeof PurchaseOrderItemScalarFieldEnum]
+
+
+export const SecurityAuditEventScalarFieldEnum = {
+  id: 'id',
+  actorId: 'actorId',
+  targetUserId: 'targetUserId',
+  action: 'action',
+  createdAt: 'createdAt'
+} as const
+
+export type SecurityAuditEventScalarFieldEnum = (typeof SecurityAuditEventScalarFieldEnum)[keyof typeof SecurityAuditEventScalarFieldEnum]
 
 
 export const SortOrder = {

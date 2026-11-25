@@ -357,6 +357,16 @@ export interface PrismaClient<
     * ```
     */
   get purchaseOrderItem(): Prisma.PurchaseOrderItemDelegate<ExtArgs, { omit: OmitOpts }>;
+
+  /**
+   * `prisma.securityAuditEvent`: Exposes CRUD operations for the **SecurityAuditEvent** model.
+    * Example usage:
+    * ```ts
+    * // Fetch zero or more SecurityAuditEvents
+    * const securityAuditEvents = await prisma.securityAuditEvent.findMany()
+    * ```
+    */
+  get securityAuditEvent(): Prisma.SecurityAuditEventDelegate<ExtArgs, { omit: OmitOpts }>;
 }
 
 export function getPrismaClientClass(): PrismaClientConstructor {

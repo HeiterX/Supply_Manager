@@ -97,9 +97,15 @@ describe('Auth (e2e)', () => {
     expect(meResponse.body.id).toBe(userId);
     expect(meResponse.body.username).toBe(username.toLowerCase());
 
+    const csrfResponse = await request(app.getHttpServer())
+      .get('/api/v1/auth/csrf')
+      .set('Cookie', cookie)
+      .expect(200);
+
     await request(app.getHttpServer())
       .post('/api/v1/auth/logout')
       .set('Cookie', cookie)
+      .set('X-CSRF-Token', csrfResponse.body.csrfToken as string)
       .expect(204);
   });
 
