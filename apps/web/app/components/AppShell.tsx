@@ -75,6 +75,7 @@ function Breadcrumbs({ current, pathname, canSeeSection }: { current: Current; p
   if (!current || current.href === '/dashboard') return <span className="text-sm font-semibold">Главная</span>;
   const details = pathname.startsWith('/tasks/') ? 'Карточка закупки' :
     pathname.startsWith('/requests/') ? 'Карточка заявки' :
+    pathname === '/suppliers/manage' ? 'Справочник поставщиков' :
     pathname.startsWith('/suppliers/') ? 'Карточка поставщика' : undefined;
   return <nav aria-label="Хлебные крошки" className="app-crumbs">
     <Link href="/dashboard">Главная</Link><span aria-hidden="true">›</span>

@@ -5,6 +5,8 @@ import {
   IsBoolean,
   IsEmail,
   IsInt,
+  IsISO8601,
+  Matches,
   IsNumber,
   IsOptional,
   IsString,
@@ -46,10 +48,38 @@ export class CreateSupplierOfferItemDto {
 }
 
 export class CreateSupplierOfferDto {
+  @IsOptional()
+  @IsUUID()
+  supplierId?: string;
+
+  @IsOptional()
   @IsString()
-  @MinLength(1)
+  @MinLength(2)
   @MaxLength(300)
-  supplierName!: string;
+  supplierName?: string;
+
+  @IsOptional()
+  @Matches(/^[A-Z]{3}$/)
+  currency?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  validUntil?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  paymentTerms?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  deliveryTerms?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  expectedVersion?: number;
 
   @IsOptional()
   @IsString()

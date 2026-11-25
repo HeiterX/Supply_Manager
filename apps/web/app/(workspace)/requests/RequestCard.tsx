@@ -6,7 +6,7 @@ import { API_BASE_URL, apiFetch } from '@/lib/api-client';
 import { reportTimeZone, useCoreResource } from '@/lib/discovery';
 import { useSession } from '@/app/components/AuthGate';
 import { StatusBadge } from '@/app/components/StatusBadge';
-import { Button } from '@/app/components/ui';
+import { Button, Field, Textarea } from '@/app/components/ui';
 
 type RequestItem = {
   id: string;
@@ -27,6 +27,23 @@ type RequestUser = {
   username: string;
 };
 
+type RequestHistory = {
+  id: string;
+  actorName: string | null;
+  action: string;
+  comment: string | null;
+  createdAt: string;
+};
+
+const historyLabels: Record<string, string> = {
+  CREATED: 'Заявка создана',
+  START_REVIEW: 'Начато рассмотрение',
+  REJECTED: 'Заявка отклонена',
+  ACCEPTED: 'Создана закупка',
+};
+
+type RequestAction = 'review' | 'accept' | 'reject';
+
 export type PurchaseRequest = {
   id: string;
   number: number;
@@ -38,6 +55,10 @@ export type PurchaseRequest = {
   status: string;
   notes: string | null;
   createdAt: string;
+  requiredAt?: string | null;
+  assignedTo?: RequestUser | null;
+  decisionComment?: string | null;
+  history?: RequestHistory[];
   items?: RequestItem[];
   _count?: { items: number };
   task: {
@@ -80,15 +101,19 @@ function getErrorMessage(data: unknown, fallback: string): string {
 export default function RequestCard({
   request,
   onAccepted,
+  onUpdated = onAccepted,
   initiallyExpanded = false,
 }: {
   request: PurchaseRequest;
   onAccepted: () => void;
+  onUpdated?: () => void;
   initiallyExpanded?: boolean;
 }) {
   const [expanded, setExpanded] = useState(initiallyExpanded);
-  const [accepting, setAccepting] = useState(false);
-  const [acceptError, setAcceptError] = useState('');
+  const [busyAction, setBusyAction] = useState<RequestAction | null>(null);
+  const [actionError, setActionError] = useState('');
+  const [showRejectForm, setShowRejectForm] = useState(false);
+  const [reason, setReason] = useState('');
 
   const { user } = useSession();
   const canManage = user.role !== 'EMPLOYEE';
@@ -97,39 +122,36 @@ export default function RequestCard({
   const fullRequest = details.data ?? request;
   const itemCount = request._count?.items ?? request.items?.length ?? 0;
 
-  async function handleAccept() {
-    if (accepting) return;
-    setAccepting(true);
-    setAcceptError('');
+  const mayProcess = canManage && !details.loading && !details.error && !fullRequest.task &&
+    (!fullRequest.assignedTo || fullRequest.assignedTo.id === user.id || user.role === 'ADMIN');
+  const mayReject = mayProcess && ['NEW', 'IN_REVIEW', 'NEEDS_CLARIFICATION'].includes(fullRequest.status);
+  const mayAccept = mayProcess && (mayReject || fullRequest.status === 'APPROVED');
 
+  async function handleAction(action: RequestAction) {
+    if (busyAction || (action === 'reject' && reason.trim().length < 5)) return;
+    setBusyAction(action);
+    setActionError('');
     try {
-      const response = await apiFetch(
-        `/purchase-requests/${request.id}/accept`,
-        { method: 'PATCH' },
-      );
-
-      if (response.status === 401) {
-        throw new Error('Сессия истекла. Войдите повторно.');
-      }
-      if (response.status === 403) {
-        throw new Error('Недостаточно прав для принятия заявки.');
-      }
-
-      const data = (await response.json().catch(() => null)) as unknown;
+      const response = await apiFetch(`/purchase-requests/${request.id}/${action}`, {
+        method: 'PATCH',
+        ...(action === 'reject' ? {
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason: reason.trim() }),
+        } : {}),
+      });
       if (!response.ok) {
-        throw new Error(getErrorMessage(data, 'Не удалось принять заявку в работу'));
+        const data: unknown = await response.json().catch(() => null);
+        throw new Error(getErrorMessage(data, 'Не удалось обработать заявку'));
       }
-
-      onAccepted();
+      if (action === 'accept') onAccepted();
+      else onUpdated();
       void details.reload();
-    } catch (requestError) {
-      setAcceptError(
-        requestError instanceof Error
-          ? requestError.message
-          : 'Не удалось принять заявку в работу',
-      );
+      setShowRejectForm(false);
+      setReason('');
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Не удалось обработать заявку');
     } finally {
-      setAccepting(false);
+      setBusyAction(null);
     }
   }
 
@@ -241,30 +263,51 @@ export default function RequestCard({
             ))}
           </div>
 
-          {canManage && fullRequest.task ? (
-            <a
-              href={`/tasks/${fullRequest.task.id}`}
-              className="mt-4 flex h-11 w-full items-center justify-center rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 sm:ml-auto sm:w-auto sm:px-5"
-            >
+          {fullRequest.requiredAt && <p className="mt-3 text-sm">Требуется до {formatDateTime(fullRequest.requiredAt)}</p>}
+          {fullRequest.assignedTo && <p className="mt-2 text-sm">На рассмотрении у {fullRequest.assignedTo.fullName}</p>}
+          {fullRequest.decisionComment && <p className="mt-3 whitespace-pre-wrap text-sm">{fullRequest.decisionComment}</p>}
+
+          {canManage && fullRequest.task && (
+            <a href={`/tasks/${fullRequest.task.id}`} className="ui-button ui-button--primary mt-4">
               Перейти к закупке №{fullRequest.task.number}
             </a>
-          ) : canManage && !details.loading && !details.error && ['NEW', 'IN_REVIEW', 'NEEDS_CLARIFICATION', 'APPROVED'].includes(request.status) ? (
-            <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-xs leading-5 text-slate-400">
-                Следующий этап — принятие заявки и создание закупки.
-              </p>
-              <div className="sm:text-right">
-                <Button loading={accepting} className="w-full sm:w-auto" onClick={() => void handleAccept()}>
-                  {accepting ? 'Принимаем…' : 'Принять в работу'}
-                </Button>
-                {acceptError && (
-                  <p className="mt-2 max-w-sm text-sm leading-5 text-red-600">
-                    {acceptError}
-                  </p>
-                )}
+          )}
+          {(mayAccept || mayReject) && (
+            <div className="mt-4 space-y-3 border-t border-slate-100 pt-4">
+              <div className="flex flex-wrap gap-2">
+                {fullRequest.status === 'NEW' && <Button variant="outline" disabled={busyAction !== null}
+                  onClick={() => void handleAction('review')}>Взять на рассмотрение</Button>}
+                {mayAccept && <Button disabled={busyAction !== null}
+                  onClick={() => void handleAction('accept')}>Принять и создать закупку</Button>}
+                {mayReject && <Button variant="outline" disabled={busyAction !== null}
+                  onClick={() => { setActionError(''); setShowRejectForm(value => !value); }}>
+                  {showRejectForm ? 'Отмена отказа' : 'Отклонить'}
+                </Button>}
               </div>
+              {showRejectForm && mayReject && <div className="space-y-2">
+                <Field id={`reject-reason-${request.id}`} label="Причина отклонения заявки">
+                  <Textarea id={`reject-reason-${request.id}`} value={reason}
+                    onChange={event => setReason(event.target.value)} maxLength={1500} rows={3} />
+                </Field>
+                <Button disabled={busyAction !== null || reason.trim().length < 5}
+                  onClick={() => void handleAction('reject')}>Подтвердить отклонение</Button>
+              </div>}
             </div>
-          ) : null}
+          )}
+          {actionError && <p role="alert" className="mt-3 text-sm text-rose-700">{actionError}</p>}
+
+          {fullRequest.history && <section className="mt-5 border-t border-slate-100 pt-4">
+            <h3 className="text-sm font-semibold">История заявки</h3>
+            {fullRequest.history.length ? <ol className="mt-3 space-y-2">
+              {fullRequest.history.map(entry => (
+                <li key={entry.id} className="rounded-xl bg-slate-50 p-3 text-sm">
+                  <span className="font-semibold">{historyLabels[entry.action] ?? entry.action}</span>
+                  <p className="text-muted">{entry.actorName ?? 'Система'} · {formatDateTime(entry.createdAt)}</p>
+                  {entry.comment && <p className="mt-1 whitespace-pre-wrap">{entry.comment}</p>}
+                </li>
+              ))}
+            </ol> : <p className="mt-2 text-sm text-muted">История действий пока отсутствует.</p>}
+          </section>}
         </div>
       )}
     </article>

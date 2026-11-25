@@ -19,6 +19,10 @@ function isProtectedResource(path: string): boolean {
   return (
     path.startsWith('/telegram/') ||
     path.startsWith('/discovery/') ||
+    path === '/suppliers' ||
+    path.startsWith('/suppliers/') ||
+    path === '/catalog' ||
+    path.startsWith('/catalog/') ||
     path === '/tasks' ||
     path.startsWith('/tasks/') ||
     path === '/purchase-requests' ||

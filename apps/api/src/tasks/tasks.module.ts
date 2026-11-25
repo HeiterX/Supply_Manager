@@ -6,11 +6,19 @@ import { TasksController } from './tasks.controller.js';
 import { TasksService } from './tasks.service.js';
 import { MultiOrdersService } from './multi-orders.service.js';
 import { TelegramModule } from '../telegram/telegram.module.js';
+import { CatalogController } from './catalog.controller.js';
+import { CatalogService } from './catalog.service.js';
+import { SuppliersService } from './suppliers.service.js';
+import { SuppliersController } from './suppliers.controller.js';
+import { OfferDocumentsService } from './offer-documents.service.js';
+
+import { FulfillmentController } from './fulfillment.controller.js';
+import { FulfillmentService } from './fulfillment.service.js';
 
 @Module({
   imports: [PrismaModule, AuthModule, TelegramModule],
-  controllers: [TasksController],
-  providers: [TasksService, MultiOrdersService],
+  controllers: [TasksController, CatalogController, SuppliersController, FulfillmentController],
+  providers: [TasksService, MultiOrdersService, CatalogService, SuppliersService, OfferDocumentsService, FulfillmentService],
   exports: [TasksService],
 })
 export class TasksModule {}

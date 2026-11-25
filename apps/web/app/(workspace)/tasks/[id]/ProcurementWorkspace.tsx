@@ -4,16 +4,27 @@ import OfferComparison from './OfferComparison';
 import { useConfirmation } from '@/app/components/use-confirmation';
 import { Modal as Dialog } from '@/app/components/Modal';
 
-import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { apiFetch, API_BASE_URL } from '@/lib/api-client';
+import FulfillmentPanel from './FulfillmentPanel';
 
 export type Supplier = {
   id: string; name: string; contact: string | null; phone: string | null;
   email: string | null; website: string | null; notes: string | null;
+  status?: 'ACTIVE' | 'PAUSED' | 'BLOCKED';
+  taxId?: string | null; categories?: string[];
 };
 export type TaskItem = {
   id: string; taskId: string; name: string; partNumber: string | null;
   quantity: string | number; unit: string; unitPrice: string | number | null;
   currency: string; notes: string | null; sortOrder: number;
+  catalogItemId?: string | null;
+  catalogItem?: { id: string; name: string; category: string; partNumber: string | null } | null;
+  technicalParameters?: Record<string, string> | null;
+  requiredAt?: string | null;
+  sourceRequestItemId?: string | null;
+  originalSnapshot?: unknown;
+  progress?: { required: number; offered: number; ordered: number; reserved?: number; cancelled?: number; available?: number; received: number; handedOver: number };
   createdAt: string; updatedAt: string;
 };
 export type SupplierOfferItem = {
@@ -26,6 +37,11 @@ export type SupplierOffer = {
   id: string; status: string; price: string | null; deliveryPrice: string | null;
   deliveryDays: number | null; inStock: boolean | null; notes: string | null;
   requestedAt: string; receivedAt: string | null; supplier: Supplier;
+  supplierId: string; version: number; currency: string | null;
+  validUntil: string | null; paymentTerms: string | null; deliveryTerms: string | null;
+  decisionReason: string | null; decidedAt: string | null;
+  documents?: Array<{ id: string; version: number; originalName: string; createdAt: string; size: number }>;
+  revisions?: Array<{ id: string; version: number; action: string; snapshot: unknown; createdAt: string }>;
   items: SupplierOfferItem[];
 };
 export type PurchaseOrderItem = {
@@ -43,6 +59,9 @@ export type PurchaseOrder = {
   readyForPickupAt: string | null; receivedAt: string | null;
   handedOverAt: string | null; handedOverTo: string | null;
   cancelledAt: string | null; cancelReason: string | null;
+  version?: number;
+  ledgerEnabled?: boolean;
+  revisions?: Array<{ id: string; action: string; version: number; actorId: string | null; before: unknown; after: unknown; createdAt: string }>;
   createdAt: string; updatedAt: string; supplier: Supplier;
   supplierOffer: SupplierOffer; items: PurchaseOrderItem[];
 };
@@ -58,6 +77,10 @@ type ActionForm = { order: PurchaseOrder; action: ActionName };
 
 const money = (v: string | number | null) => v === null || !Number.isFinite(Number(v)) ? '—' :
   new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 2 }).format(Number(v));
+const quoteMoney = (v: string | number | null, currency: string | null) =>
+  v === null || !currency ? 'Не указано' : Number.isFinite(Number(v))
+    ? `${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2, minimumFractionDigits: 2 }).format(Number(v))} ${currency}`
+    : 'Не указано';
 const qty = (v: string | number) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 3 }).format(Number(v));
 const date = (v: string | null) => v ? new Date(v).toLocaleString('ru-RU') : '—';
 const localDate = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
@@ -94,11 +117,22 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
   const [offerOpen, setOfferOpen] = useState(false);
   const [editingOffer, setEditingOffer] = useState<SupplierOffer | null>(null);
   const [supplier, setSupplier] = useState({ name: '', contact: '', phone: '', email: '', website: '' });
+  const [supplierId, setSupplierId] = useState('');
+  const [supplierQuery, setSupplierQuery] = useState('');
+  const [supplierMatches, setSupplierMatches] = useState<Supplier[]>([]);
+  const [offerCurrency, setOfferCurrency] = useState('RUB');
+  const [validUntil, setValidUntil] = useState('');
+  const [paymentTerms, setPaymentTerms] = useState('');
+  const [deliveryTerms, setDeliveryTerms] = useState('');
+  const [decisionOffer, setDecisionOffer] = useState<SupplierOffer | null>(null);
+  const [decisionReason, setDecisionReason] = useState('');
   const [deliveryPrice, setDeliveryPrice] = useState('');
   const [deliveryDays, setDeliveryDays] = useState('');
   const [offerNotes, setOfferNotes] = useState('');
   const [draft, setDraft] = useState<Record<string, Draft>>({});
   const [orderOffer, setOrderOffer] = useState<SupplierOffer | null>(null);
+  const [editingOrder, setEditingOrder] = useState<PurchaseOrder | null>(null);
+  const orderRequestKey = useRef<string | null>(null);
   const [orderDraft, setOrderDraft] = useState<Record<string, OrderDraft>>({});
   const [invoice, setInvoice] = useState('');
   const [invoiceDate, setInvoiceDate] = useState(localDate());
@@ -125,7 +159,7 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
     return result;
   }, [active]);
   const allAllocated = task.items.length > 0 && task.items.every(i => (allocation.get(i.id)?.ordered ?? 0) >= milli(i.quantity));
-  const allHanded = task.items.length > 0 && task.items.every(i => (allocation.get(i.id)?.handed ?? 0) >= milli(i.quantity));
+  const allHanded = task.items.length > 0 && task.items.every(i => (i.progress ? milli(i.progress.handedOver) : allocation.get(i.id)?.handed ?? 0) >= milli(i.quantity));
   const isClosed = task.status === 'CLOSED' || task.status === 'CANCELLED';
   const orderByOffer = (id: string) => active.some(o => o.supplierOfferId === id);
   const available = (id: string) => Math.max(0, milli(task.items.find(i => i.id === id)?.quantity ?? 0) - (allocation.get(id)?.ordered ?? 0)) / 1000;
@@ -137,14 +171,63 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
     const row = orderDraft[item.id]; return sum + (row?.selected ? Number(row.quantity || 0) * Number(item.unitPrice ?? 0) : 0);
   }, 0) ?? 0;
 
+  async function searchSuppliers() {
+    setLocalError('');
+    try {
+      const response = await apiFetch(`/suppliers?q=${encodeURIComponent(supplierQuery.trim())}`, { cache: 'no-store' });
+      if (!response.ok) throw new Error('Поиск поставщиков недоступен');
+      setSupplierMatches(await response.json() as Supplier[]);
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : 'Ошибка поиска');
+    }
+  }
+
+  function pickSupplier(value: Supplier) {
+    setSupplierId(value.id);
+    setSupplier({
+      name: value.name, contact: value.contact ?? '', phone: value.phone ?? '',
+      email: value.email ?? '', website: value.website ?? '',
+    });
+    setSupplierMatches([]);
+  }
+
+  async function selectOfferManually(event: FormEvent) {
+    event.preventDefault();
+    if (!decisionOffer) return;
+    const ok = await onAction(`/supplier-offers/${decisionOffer.id}/decision`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: decisionReason.trim() }),
+    }, 'Выбор КП и его причина сохранены', setLocalError);
+    if (ok) { setDecisionOffer(null); setDecisionReason(''); }
+  }
+
+  async function uploadOfferDocument(offer: SupplierOffer, file: File | undefined) {
+    if (!file) return;
+    const form = new FormData();
+    form.append('file', file);
+    await onAction(`/supplier-offers/${offer.id}/documents`, {
+      method: 'POST', body: form,
+    }, `Документ «${file.name}» прикреплён к КП`, setLocalError);
+  }
+
   function openOffer() {
     setEditingOffer(null);
+    setSupplierId(''); setSupplierQuery(''); setSupplierMatches([]);
+    setSupplier({ name: '', contact: '', phone: '', email: '', website: '' });
+    setOfferCurrency('RUB'); setValidUntil(''); setPaymentTerms(''); setDeliveryTerms('');
+    setDeliveryPrice(''); setDeliveryDays(''); setOfferNotes('');
     setLocalError('');
     setDraft(Object.fromEntries(task.items.map(i => [i.id, { selected: true, quantity: String(i.quantity), price: '', inStock: true, notes: '' }])));
     setOfferOpen(true);
   }
   function openEditOffer(offer: SupplierOffer) {
     setEditingOffer(offer); setLocalError('');
+    setSupplierId(offer.supplierId);
+    setSupplierMatches([]); setSupplierQuery('');
+    setOfferCurrency(offer.currency ?? '');
+    setValidUntil(offer.validUntil ? offer.validUntil.slice(0, 10) : '');
+    setPaymentTerms(offer.paymentTerms ?? '');
+    setDeliveryTerms(offer.deliveryTerms ?? '');
     setSupplier({ name: offer.supplier.name, contact: offer.supplier.contact ?? '',
       phone: offer.supplier.phone ?? '', email: offer.supplier.email ?? '', website: offer.supplier.website ?? '' });
     setDeliveryPrice(offer.deliveryPrice === null ? '' : String(offer.deliveryPrice));
@@ -159,20 +242,47 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
     })));
     setOfferOpen(true);
   }
+  function remainingForOrder(taskItemId: string) {
+    const currently = editingOrder?.items
+      .filter(line => line.taskItemId === taskItemId)
+      .reduce((sum, line) => sum + milli(line.quantity), 0) ?? 0;
+    return available(taskItemId) + currently / 1000;
+  }
   function openOrder(offer: SupplierOffer) {
+    setEditingOrder(null);
+    orderRequestKey.current = crypto.randomUUID();
     setLocalError(''); setOrderOffer(offer); setInvoice(''); setInvoiceDate(localDate()); setOrderNotes('');
     setOrderDraft(Object.fromEntries(offer.items.map(i => {
       const amount = Math.min(Number(i.quantity), available(i.taskItemId));
       return [i.id, { selected: amount > 0, quantity: amount > 0 ? String(amount) : '0' }];
     })));
   }
+  function openEditOrder(order: PurchaseOrder) {
+    const offer = task.supplierOffers.find(entry => entry.id === order.supplierOfferId);
+    if (!offer) { setLocalError('Исходное КП не найдено. Редактирование невозможно.'); return; }
+    if (!order.items.length || !['ORDERED', 'WAITING_PAYMENT'].includes(order.status)) return;
+    setLocalError('');
+    setEditingOrder(order); setOrderOffer(offer); orderRequestKey.current = null;
+    setInvoice(order.invoiceNumber ?? '');
+    const invoiceDateValue = order.invoiceDate ? new Date(order.invoiceDate) : new Date();
+    setInvoiceDate(new Date(invoiceDateValue.getTime() - invoiceDateValue.getTimezoneOffset() * 60000).toISOString().slice(0, 16));
+    setOrderNotes(order.notes ?? '');
+    const previous = new Map(order.items.map(line => [line.supplierOfferItemId, line]));
+    setOrderDraft(Object.fromEntries(offer.items.map(line => {
+      const existing = previous.get(line.id);
+      return [line.id, { selected: Boolean(existing), quantity: existing ? String(existing.quantity) : '0' }];
+    })));
+  }
   function updateDraft(id: string, patch: Partial<Draft>) { setDraft(prev => ({ ...prev, [id]: { ...prev[id], ...patch } })); }
-  function updateOrderDraft(id: string, patch: Partial<OrderDraft>) { setOrderDraft(prev => ({ ...prev, [id]: { ...prev[id], ...patch } })); }
+  function updateOrderDraft(id: string, patch: Partial<OrderDraft>) {
+    if (!editingOrder) orderRequestKey.current = crypto.randomUUID();
+    setOrderDraft(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }));
+  }
 
   async function saveOffer(event: FormEvent) {
     event.preventDefault(); setLocalError('');
     const selected = task.items.filter(i => draft[i.id]?.selected);
-    if (!supplier.name.trim() || !selected.length) { setLocalError('Укажите поставщика и выберите позиции'); return; }
+    if ((!supplierId && !supplier.name.trim()) || !selected.length) { setLocalError('Укажите поставщика и выберите позиции'); return; }
     for (const item of selected) {
       const row = draft[item.id]; const amount = Number(row.quantity);
       if (!Number.isFinite(amount) || amount <= 0 || milli(amount) > milli(item.quantity) || Math.abs(amount * 1000 - milli(amount)) > 1e-6) {
@@ -184,39 +294,53 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
     }
     const ok = await onAction(editingOffer ? `/supplier-offers/${editingOffer.id}` : '/supplier-offers', { method: editingOffer ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        supplierId: supplierId || undefined,
         supplierName: supplier.name.trim(), contact: supplier.contact.trim() || undefined,
         phone: supplier.phone.trim() || undefined, email: supplier.email.trim() || undefined,
         website: supplier.website.trim() || undefined,
+        currency: offerCurrency || undefined,
+        validUntil: validUntil ? new Date(`${validUntil}T23:59:59`).toISOString() : undefined,
+        paymentTerms: paymentTerms.trim() || undefined,
+        deliveryTerms: deliveryTerms.trim() || undefined,
+        expectedVersion: editingOffer?.version,
         deliveryPrice: deliveryPrice === '' ? undefined : Number(deliveryPrice),
         deliveryDays: deliveryDays === '' ? undefined : Number(deliveryDays), notes: offerNotes.trim() || undefined,
         items: selected.map(i => ({ taskItemId: i.id, quantity: Number(draft[i.id].quantity),
           unitPrice: draft[i.id].price === '' ? undefined : Number(draft[i.id].price),
-          currency: 'RUB', inStock: draft[i.id].inStock, notes: draft[i.id].notes.trim() || undefined })),
+          currency: offerCurrency || undefined, inStock: draft[i.id].inStock, notes: draft[i.id].notes.trim() || undefined })),
       }),
     }, editingOffer ? 'КП обновлено' : 'Коммерческое предложение сохранено', setLocalError);
-    if (ok) { setOfferOpen(false); setEditingOffer(null); setSupplier({ name: '', contact: '', phone: '', email: '', website: '' }); setDeliveryPrice(''); setDeliveryDays(''); setOfferNotes(''); }
+    if (ok) { setOfferOpen(false); setEditingOffer(null); setSupplierId(''); setSupplier({ name: '', contact: '', phone: '', email: '', website: '' }); setDeliveryPrice(''); setDeliveryDays(''); setOfferNotes(''); }
   }
 
   async function saveOrder(event: FormEvent) {
-    event.preventDefault(); if (!orderOffer) return;
+    event.preventDefault(); if (!orderOffer || busy) return;
     setLocalError('');
     const selected = orderOffer.items.filter(i => orderDraft[i.id]?.selected);
     if (!selected.length) { setLocalError('Выберите позиции для заказа'); return; }
     for (const item of selected) {
       const amount = Number(orderDraft[item.id].quantity);
-      if (!Number.isFinite(amount) || amount <= 0 || milli(amount) > milli(item.quantity) || milli(amount) > milli(available(item.taskItemId)) || Math.abs(amount * 1000 - milli(amount)) > 1e-6) {
-        setLocalError(`Проверьте количество «${item.taskItem.name}». Доступно ${qty(available(item.taskItemId))} ${item.taskItem.unit}`); return;
+      if (!Number.isFinite(amount) || amount <= 0 || milli(amount) > milli(item.quantity) || milli(amount) > milli(remainingForOrder(item.taskItemId)) || Math.abs(amount * 1000 - milli(amount)) > 1e-6) {
+        setLocalError(`Проверьте количество «${item.taskItem.name}». Доступно ${qty(remainingForOrder(item.taskItemId))} ${item.taskItem.unit}`); return;
       }
     }
     if (!invoice.trim() || !invoiceDate) { setLocalError('Укажите номер и дату счёта'); return; }
-    const ok = await onAction(`/supplier-offers/${orderOffer.id}/purchase-order`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ invoiceNumber: invoice.trim(), invoiceDate: new Date(invoiceDate).toISOString(),
+    if (!editingOrder && !orderRequestKey.current) {
+      orderRequestKey.current = crypto.randomUUID();
+    }
+    const ok = await onAction(editingOrder ? `/orders/${editingOrder.id}` : `/supplier-offers/${orderOffer.id}/purchase-order`, {
+      method: editingOrder ? 'PATCH' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        invoiceNumber: invoice.trim(), invoiceDate: new Date(invoiceDate).toISOString(),
         notes: orderNotes.trim() || undefined,
+        expectedVersion: editingOrder?.version,
+        idempotencyKey: editingOrder ? undefined : orderRequestKey.current,
         items: selected.map(i => ({ supplierOfferItemId: i.id, quantity: Number(orderDraft[i.id].quantity) })),
       }),
-    }, `Заказ у «${orderOffer.supplier.name}» оформлен`, setLocalError);
-    if (ok) { setOrderOffer(null); onNavigate('orders'); }
+    }, editingOrder ? 'Заказ изменён. Если счёт отправлялся на оплату, передайте его повторно.' :
+      `Заказ у «${orderOffer.supplier.name}» оформлен`, setLocalError);
+    if (ok) { setOrderOffer(null); setEditingOrder(null); orderRequestKey.current = null; onNavigate('orders'); }
   }
 
   function beginAction(order: PurchaseOrder, action: ActionName) {
@@ -256,11 +380,35 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
         const ordered = (allocation.get(item.id)?.ordered ?? 0) / 1000;
         const handed = (allocation.get(item.id)?.handed ?? 0) / 1000;
         const required = Number(item.quantity);
+        const reserved = item.progress?.reserved ?? active
+          .filter(o => ['ORDERED', 'WAITING_PAYMENT'].includes(o.status))
+          .flatMap(o => o.items).filter(line => line.taskItemId === item.id)
+          .reduce((sum, line) => sum + Number(line.quantity), 0);
+        const cancelled = item.progress?.cancelled ?? orders
+          .filter(o => o.cancelledAt || o.status === 'CANCELLED')
+          .flatMap(o => o.items).filter(line => line.taskItemId === item.id)
+          .reduce((sum, line) => sum + Number(line.quantity), 0);
         return <div key={item.id}>
           <div className="flex flex-wrap items-baseline justify-between gap-2 text-sm"><div className="font-medium text-slate-800">{item.name} <span className="text-xs font-normal text-slate-400">{item.partNumber ?? ''}</span></div>
             <div className="text-xs text-slate-500">Заказано {qty(ordered)} / {qty(required)} {item.unit} · Передано {qty(handed)}</div></div>
           <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-blue-500" style={{ width: `${Math.min(100, (ordered / required) * 100)}%` }} /></div>
-          <div className="mt-1 text-xs text-slate-400">Осталось заказать: {qty(available(item.id))} {item.unit}</div>
+          <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-600">
+            <span className="rounded-lg bg-indigo-50 px-2 py-1">Резерв до оплаты: {qty(reserved)} {item.unit}</span>
+            <span className="rounded-lg bg-blue-50 px-2 py-1">Заказано всего (включая резерв): {qty(ordered)} {item.unit}</span>
+            <span className="rounded-lg bg-rose-50 px-2 py-1">Отменено за историю: {qty(cancelled)} {item.unit}</span>
+            <span className="rounded-lg bg-emerald-50 px-2 py-1 font-semibold">Доступно: {qty(available(item.id))} {item.unit}</span>
+          </div>
+          {orders.some(o => o.items.some(line => line.taskItemId === item.id)) && (
+            <div className="mt-2 space-y-1 text-xs text-slate-500">
+              {orders.filter(o => o.items.some(line => line.taskItemId === item.id)).map(o => (
+                <p key={o.id}>
+                  {o.supplier.name} · {o.invoiceNumber ?? 'счёт не указан'} ·
+                  {' '}{qty(o.items.filter(line => line.taskItemId === item.id).reduce((sum, line) => sum + Number(line.quantity), 0))} {item.unit} ·
+                  {' '}{orderLabels[o.status] ?? o.status}
+                </p>
+              ))}
+            </div>
+          )}
         </div>;
       })}</div>}
   </section>;
@@ -275,37 +423,89 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
       </div>
       {!task.supplierOffers.length ? <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500">Пока нет предложений поставщиков. Добавьте первое КП.</div> :
         <>
-        <OfferComparison offers={task.supplierOffers} offerAnchor={offerAnchor} />
+        <OfferComparison offers={task.supplierOffers} items={task.items} offerAnchor={offerAnchor}
+          formatMoney={quoteMoney} formatQuantity={qty} formatDate={date} />
         <div className="grid gap-4 xl:grid-cols-2">{task.supplierOffers.map(offer => {
           const ordered = orderByOffer(offer.id);
           const known = offer.price !== null;
           return <article key={offer.id} id={offerAnchor(offer.id)} tabIndex={-1} className="ui-card scroll-mt-24 p-5">
             <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-semibold text-slate-950">{offer.supplier.name}</h3>
               <p className="mt-1 text-xs text-slate-500">{[offer.supplier.contact, offer.supplier.phone, offer.supplier.email].filter(Boolean).join(' · ') || 'Контакты не указаны'}</p></div>
-              {ordered && <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">Заказ оформлен</span>}</div>
+              <div className="flex flex-wrap gap-2">
+                {ordered && <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">Заказ оформлен</span>}
+                {offer.decisionReason && <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">Выбрано вручную</span>}
+                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs">Версия {offer.version}</span>
+              </div></div>
             {!offer.items?.length ? <div className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-700">КП старого формата без позиций. Для многопоставочного заказа добавьте новое КП с позициями.</div> :
               <div className="mt-4 space-y-2">{offer.items.map(item => <div key={item.id} className="rounded-xl bg-slate-50 p-3">
                 <div className="flex flex-wrap items-start justify-between gap-2"><div className="text-sm font-medium text-slate-800">{item.taskItem.name}</div>
-                  <div className="text-sm font-semibold text-slate-800">{item.unitPrice === null ? 'Цена не указана' : money(Number(item.unitPrice) * Number(item.quantity))}</div></div>
-                <p className="mt-1 text-xs text-slate-500">{qty(item.quantity)} {item.taskItem.unit} · {money(item.unitPrice)} / {item.taskItem.unit} · {item.inStock === true ? 'В наличии' : item.inStock === false ? 'Под заказ' : 'Наличие не указано'}</p>
+                  <div className="text-sm font-semibold text-slate-800">{item.unitPrice === null ? 'Цена не указана' : quoteMoney(Number(item.unitPrice) * Number(item.quantity), offer.currency)}</div></div>
+                <p className="mt-1 text-xs text-slate-500">{qty(item.quantity)} {item.taskItem.unit} · {quoteMoney(item.unitPrice, offer.currency)} / {item.taskItem.unit} · {item.inStock === true ? 'В наличии' : item.inStock === false ? 'Под заказ' : 'Наличие не указано'}</p>
                 {item.notes && <p className="mt-1 text-xs text-slate-500">{item.notes}</p>}
               </div>)}</div>}
-            <div className="mt-4 flex flex-wrap justify-between gap-3 border-t border-slate-100 pt-4 text-sm"><div><span className="text-slate-500">Товары: </span><b>{money(offer.price)}</b>
-              <div className="text-xs text-slate-500">Доставка: {money(offer.deliveryPrice)} · Срок: {offer.deliveryDays ?? '—'} дн.</div></div>
-              <div className="text-right"><span className="text-xs text-slate-400">Итого по КП</span><div className="font-bold">{known ? money(Number(offer.price) + Number(offer.deliveryPrice ?? 0)) : 'Не рассчитано'}</div></div></div>
+            <div className="mt-4 flex flex-wrap justify-between gap-3 border-t border-slate-100 pt-4 text-sm">
+              <div><span className="text-slate-500">Товары: </span><b>{quoteMoney(offer.price, offer.currency)}</b>
+                <div className="text-xs text-slate-500">Доставка: {quoteMoney(offer.deliveryPrice, offer.currency)} · Срок: {offer.deliveryDays === null ? 'не указан' : `${offer.deliveryDays} дн.`}</div>
+                <div className="text-xs text-slate-500">Действует до: {offer.validUntil ? date(offer.validUntil) : 'не указано'}</div>
+                <div className="mt-1 text-xs text-slate-500">Оплата: {offer.paymentTerms || 'не указана'}</div>
+                <div className="text-xs text-slate-500">Доставка: {offer.deliveryTerms || 'условия не указаны'}</div>
+              </div>
+              <div className="text-right"><span className="text-xs text-slate-400">Итого по КП</span>
+                <div className="font-bold">{known && offer.currency && offer.deliveryPrice !== null
+                  ? quoteMoney(Number(offer.price) + Number(offer.deliveryPrice), offer.currency)
+                  : 'Не рассчитано'}</div>
+              </div>
+            </div>
             {offer.notes && <p className="mt-3 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">{offer.notes}</p>}
+            {offer.decisionReason && <p className="mt-3 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">Причина ручного выбора: {offer.decisionReason}</p>}
+            <div className="mt-3 rounded-xl border border-slate-100 p-3">
+              <h4 className="text-xs font-semibold">Документы КП</h4>
+              {(offer.documents ?? []).length === 0 && <p className="mt-2 text-xs text-slate-500">Файл пока не прикреплён</p>}
+              {(offer.documents ?? []).map(doc => (
+                <a key={doc.id} href={`${API_BASE_URL}/tasks/${task.id}/supplier-offers/${offer.id}/documents/${doc.id}`}
+                  target="_blank" rel="noreferrer" className="mt-2 block text-xs font-semibold text-blue-700 hover:underline">
+                  {doc.originalName} · версия {doc.version}
+                </a>
+              ))}
+              {!isClosed && <label className="mt-3 block text-xs text-slate-600">
+                Прикрепить PDF/PNG/JPEG (до 8 МБ)
+                <input type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
+                  className="mt-1 block w-full text-xs" disabled={busy}
+                  onChange={e => { void uploadOfferDocument(offer, e.target.files?.[0]); e.target.value = ''; }} />
+              </label>}
+            </div>
+            {(offer.revisions ?? []).length > 0 && <details className="mt-3 rounded-xl bg-slate-50 p-3 text-xs">
+              <summary className="cursor-pointer font-semibold">История версий и решений ({offer.revisions?.length})</summary>
+              <div className="mt-3 space-y-2">{offer.revisions?.map(rev => (
+                <details key={rev.id} className="rounded-lg border border-slate-200 bg-white p-2">
+                  <summary className="cursor-pointer">v{rev.version} · {rev.action} · {date(rev.createdAt)}</summary>
+                  <pre className="mt-2 overflow-x-auto whitespace-pre-wrap">{JSON.stringify(rev.snapshot, null, 2)}</pre>
+                </details>
+              ))}</div>
+            </details>}
             {!isClosed && !orders.some(order => order.supplierOfferId === offer.id) && <button disabled={busy} onClick={() => openEditOffer(offer)} className={`mt-4 ${secondaryClass}`}>Изменить КП</button>}
-            {!ordered && offer.items?.length > 0 && !isClosed && <button disabled={busy || offer.items.every(i => available(i.taskItemId) <= 0)} onClick={() => openOrder(offer)} className={`mt-4 w-full ${primaryClass}`}>Оформить заказ у поставщика →</button>}
+            {!orders.some(order => order.supplierOfferId === offer.id) && offer.items.length > 0 && !isClosed &&
+              <button disabled={busy || Boolean(offer.validUntil && new Date(offer.validUntil) < new Date())}
+                onClick={() => { setDecisionOffer(offer); setDecisionReason(offer.decisionReason ?? ''); setLocalError(''); }}
+                className={`ml-2 mt-4 ${secondaryClass}`}>Выбрать КП с причиной</button>}
+            {!ordered && offer.items?.length > 0 && !isClosed && <button
+              disabled={busy || !offer.decisionReason || offer.currency !== 'RUB' ||
+                Boolean(offer.validUntil && new Date(offer.validUntil) < new Date()) ||
+                offer.items.every(i => available(i.taskItemId) <= 0)}
+              onClick={() => openOrder(offer)} className={`mt-4 w-full ${primaryClass}`}>Оформить заказ у поставщика →</button>}
+            {!offer.decisionReason && <p className="mt-2 text-xs text-amber-700">Перед заказом требуется ручное решение с причиной.</p>}
+            {offer.currency && offer.currency !== 'RUB' && <p className="mt-2 text-xs text-amber-700">Заказы в {offer.currency} пока не поддержаны; валюты не пересчитываются автоматически.</p>}
           </article>;
         })}</div></>}
     </> : <>
       <div className="flex flex-wrap items-end justify-between gap-3"><div><h2 className="text-lg font-semibold text-slate-950">Заказы поставщикам</h2>
-        <p className="mt-1 text-sm text-slate-500">У каждого заказа свой счёт, оплата, доставка и передача. Отменённые заказы остаются в истории.</p></div>
+        <p className="mt-1 text-sm text-slate-500">Счета, партии, приёмка и передача по каждому поставщику.</p></div>
         {!isClosed && !allAllocated && <button onClick={() => onNavigate('offers')} className={primaryClass}>＋ Оформить ещё заказ</button>}
       </div>
       {!orders.length ? <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500">Заказов пока нет. Перейдите к КП и оформите первый заказ.</div> :
         <div className="space-y-4">{orders.map(order => <article key={order.id} id={`order-${order.id}`} className={`scroll-mt-40 rounded-2xl border bg-white p-5 shadow-sm ${order.cancelledAt ? 'border-rose-100 opacity-75' : 'border-slate-200'}`}>
           <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-semibold text-slate-950">{order.supplier.name}</h3>
+            <p className="mt-1 text-xs text-slate-500">Закупка → КП v{order.supplierOffer?.version ?? '—'} → Заказ v{order.version ?? 1}</p>
             <p className="mt-1 text-xs text-slate-500">Счёт № {order.invoiceNumber ?? 'не указан'} · {date(order.invoiceDate)} · {qty(order.items?.length ?? 0)} поз.</p></div>
             <span className={`rounded-full px-3 py-1.5 text-xs font-semibold ${orderColors[order.status] ?? 'bg-slate-100 text-slate-700'}`}>{orderLabels[order.status] ?? order.status}</span></div>
           <div className="mt-4 space-y-2">{order.items?.length ? order.items.map(line => <div key={line.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 p-3 text-sm">
@@ -314,31 +514,101 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
           <div className="mt-3 grid gap-3 text-sm sm:grid-cols-3"><div><span className="text-slate-400">Товары</span><div className="font-semibold">{money(order.price)}</div></div>
             <div><span className="text-slate-400">Доставка</span><div className="font-semibold">{money(order.deliveryPrice)}</div></div>
             <div><span className="text-slate-400">Итого</span><div className="font-bold">{money(order.totalPrice)}</div></div></div>
-          {order.shippedAt && <p className="mt-3 text-xs text-slate-500">Отгружено {date(order.shippedAt)} · {order.carrier ?? '—'}{order.trackingNumber ? ` · ТТН ${order.trackingNumber}` : ''}{order.expectedDeliveryAt ? ` · Ожидается ${date(order.expectedDeliveryAt)}` : ''}</p>}
-          {order.handedOverAt && <p className="mt-2 text-xs text-emerald-700">Передано: {order.handedOverTo} · {date(order.handedOverAt)}</p>}
+          {!order.ledgerEnabled && order.shippedAt && <p className="mt-3 text-xs text-slate-500">Отгружено {date(order.shippedAt)} · {order.carrier ?? '—'}{order.trackingNumber ? ` · ТТН ${order.trackingNumber}` : ''}{order.expectedDeliveryAt ? ` · Ожидается ${date(order.expectedDeliveryAt)}` : ''}</p>}
+          {!order.ledgerEnabled && order.handedOverAt && <p className="mt-2 text-xs text-emerald-700">Передано: {order.handedOverTo} · {date(order.handedOverAt)}</p>}
           {order.cancelledAt && <p className="mt-2 text-xs text-rose-600">Отменён: {order.cancelReason ?? 'причина не указана'}</p>}
           {order.notes && <p className="mt-3 rounded-xl bg-slate-50 p-3 text-xs text-slate-600">{order.notes}</p>}
+          {(order.revisions?.length ?? 0) > 0 && (
+            <details className="mt-3 rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs">
+              <summary className="cursor-pointer font-semibold text-slate-700">
+                История заказа: {order.revisions?.length} событий
+              </summary>
+              <div className="mt-3 space-y-2">
+                {order.revisions?.map(rev => (
+                  <details key={rev.id} className="rounded-lg bg-white p-2">
+                    <summary className="cursor-pointer">
+                      v{rev.version} · {rev.action} · {date(rev.createdAt)}
+                    </summary>
+                    {rev.before !== null && <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-slate-500">
+                      До: {JSON.stringify(rev.before, null, 2)}
+                    </pre>}
+                    <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-slate-700">
+                      После: {JSON.stringify(rev.after, null, 2)}
+                    </pre>
+                  </details>
+                ))}
+              </div>
+            </details>
+          )}
           {!order.cancelledAt && !isClosed && <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
-            {order.status === 'ORDERED' && <button disabled={busy} onClick={() => beginAction(order, 'send-to-payment')} className={primaryClass}>Передать счёт на оплату</button>}
-            {order.status === 'WAITING_PAYMENT' && <button disabled={busy} onClick={() => beginAction(order, 'confirm-payment')} className={primaryClass}>Подтвердить оплату</button>}
-            {order.status === 'WAITING_SHIPMENT' && <button disabled={busy} onClick={() => beginAction(order, 'ship')} className={primaryClass}>Подтвердить отгрузку</button>}
-            {order.status === 'IN_TRANSIT' && <button disabled={busy} onClick={() => beginAction(order, 'ready-for-pickup')} className={primaryClass}>Груз прибыл</button>}
-            {order.status === 'READY_FOR_PICKUP' && <button disabled={busy} onClick={() => beginAction(order, 'receive')} className={primaryClass}>Подтвердить получение</button>}
-            {order.status === 'RECEIVED' && <button disabled={busy} onClick={() => beginAction(order, 'hand-over')} className={primaryClass}>Передать товар</button>}
+            {['ORDERED', 'WAITING_PAYMENT'].includes(order.status) && order.items.length > 0 &&
+              <button disabled={busy} onClick={() => openEditOrder(order)} className={secondaryClass}>
+                Изменить до оплаты
+              </button>}
+            {!order.ledgerEnabled && order.status === 'ORDERED' && <button disabled={busy} onClick={() => beginAction(order, 'send-to-payment')} className={primaryClass}>Передать счёт на оплату</button>}
+            {!order.ledgerEnabled && order.status === 'WAITING_PAYMENT' && <button disabled={busy} onClick={() => beginAction(order, 'confirm-payment')} className={primaryClass}>Подтвердить оплату</button>}
+            {!order.ledgerEnabled && order.status === 'WAITING_SHIPMENT' && <button disabled={busy} onClick={() => beginAction(order, 'ship')} className={primaryClass}>Подтвердить отгрузку</button>}
+            {!order.ledgerEnabled && order.status === 'IN_TRANSIT' && <button disabled={busy} onClick={() => beginAction(order, 'ready-for-pickup')} className={primaryClass}>Груз прибыл</button>}
+            {!order.ledgerEnabled && order.status === 'READY_FOR_PICKUP' && <button disabled={busy} onClick={() => beginAction(order, 'receive')} className={primaryClass}>Подтвердить получение</button>}
+            {!order.ledgerEnabled && order.status === 'RECEIVED' && <button disabled={busy} onClick={() => beginAction(order, 'hand-over')} className={primaryClass}>Передать товар</button>}
             {['ORDERED', 'WAITING_PAYMENT'].includes(order.status) && <button disabled={busy} onClick={() => beginAction(order, 'cancel')} className="rounded-xl border border-rose-200 px-4 py-2.5 text-sm font-semibold text-rose-700 hover:bg-rose-50">Отменить заказ</button>}
           </div>}
         </article>)}</div>}
-      {allHanded && !isClosed && <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5"><div className="font-semibold text-emerald-800">Все необходимые позиции переданы получателям</div>
+      {orders.length > 0 && <FulfillmentPanel taskId={task.id} taskStatus={task.status} orders={orders} busy={busy} onAction={onAction} />}
+      {allHanded && !isClosed && !orders.some(order => order.ledgerEnabled) && <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5"><div className="font-semibold text-emerald-800">Все необходимые позиции переданы получателям</div>
         <p className="mt-1 text-sm text-emerald-700">Теперь закупку можно закрыть.</p><button disabled={busy} onClick={closeTask} className="mt-3 rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40">Закрыть закупку</button></div>}
     </>}
 
     {offerOpen && <Dialog busy={busy} title={editingOffer ? "Редактировать КП" : "Новое коммерческое предложение"} onClose={() => setOfferOpen(false)}>
       <form onSubmit={saveOffer} className="space-y-5"><div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Поставщик *"><input autoFocus required className={inputClass} value={supplier.name} onChange={e => setSupplier(s => ({ ...s, name: e.target.value }))} placeholder="ООО «ПромСнаб»" /></Field>
+        <Field label="Поставщик *">
+          <input autoFocus required readOnly={Boolean(supplierId)} className={inputClass} value={supplier.name}
+            onChange={e => setSupplier(s => ({ ...s, name: e.target.value }))}
+            placeholder="ООО «ПромСнаб»" />
+          {supplierId && <button type="button" className="mt-2 text-xs text-blue-600" onClick={() => {
+            setSupplierId(''); setSupplier({ name: '', contact: '', phone: '', email: '', website: '' });
+          }}>Выбрать другого поставщика</button>}
+        </Field>
         <Field label="Контактное лицо"><input className={inputClass} value={supplier.contact} onChange={e => setSupplier(s => ({ ...s, contact: e.target.value }))} /></Field>
         <Field label="Телефон"><input className={inputClass} value={supplier.phone} onChange={e => setSupplier(s => ({ ...s, phone: e.target.value }))} /></Field>
         <Field label="Email"><input type="email" className={inputClass} value={supplier.email} onChange={e => setSupplier(s => ({ ...s, email: e.target.value }))} /></Field>
         <Field label="Сайт (с https://)"><input type="url" className={inputClass} value={supplier.website} onChange={e => setSupplier(s => ({ ...s, website: e.target.value }))} placeholder="https://example.ru" /></Field>
+      </div>
+      <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-3">
+        <h4 className="text-xs font-semibold text-slate-700">Найти поставщика в едином справочнике</h4>
+        <div className="mt-2 flex gap-2">
+          <input value={supplierQuery} className={inputClass} onChange={e => setSupplierQuery(e.target.value)}
+            placeholder="Название, ИНН, контакт" />
+          <button type="button" onClick={() => void searchSuppliers()} className={secondaryClass}>Найти</button>
+        </div>
+        {supplierMatches.length > 0 && <div className="mt-2 max-h-44 space-y-1 overflow-y-auto">
+          {supplierMatches.map(s => <button key={s.id} type="button"
+            disabled={s.status === 'BLOCKED' || s.status === 'PAUSED'} onClick={() => pickSupplier(s)}
+            className="block w-full rounded-lg bg-white p-2 text-left text-xs text-slate-700 hover:bg-blue-100 disabled:opacity-40">
+            <b>{s.name}</b> · {s.taxId ?? 'ИНН не указан'} · {s.status ?? 'ACTIVE'}
+          </button>)}
+        </div>}
+        <p className="mt-2 text-xs text-slate-500">Новый поставщик с уникальным названием будет добавлен в справочник при сохранении КП. Существующая карточка не изменяется из формы КП.</p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Валюта КП">
+          <select value={offerCurrency} onChange={e => setOfferCurrency(e.target.value)} className={inputClass}>
+            <option value="">Не указана</option>
+            <option value="RUB">RUB · рубли</option>
+            <option value="EUR">EUR · евро</option>
+            <option value="USD">USD · доллары</option>
+            <option value="CNY">CNY · юани</option>
+          </select>
+        </Field>
+        <Field label="Действует до">
+          <input type="date" value={validUntil} onChange={e => setValidUntil(e.target.value)} className={inputClass} />
+        </Field>
+        <Field label="Условия оплаты">
+          <textarea rows={2} maxLength={2000} value={paymentTerms} onChange={e => setPaymentTerms(e.target.value)} className={inputClass} placeholder="Например: 50% предоплата" />
+        </Field>
+        <Field label="Условия доставки">
+          <textarea rows={2} maxLength={2000} value={deliveryTerms} onChange={e => setDeliveryTerms(e.target.value)} className={inputClass} placeholder="Самовывоз, ТК, включена..." />
+        </Field>
       </div>
       <div><h3 className="font-semibold text-slate-900">Позиции предложения</h3><p className="mt-1 text-xs text-slate-500">Снимите галочку с позиций, которые поставщик не предлагает. Можно указать частичное количество.</p>
         <div className="mt-3 space-y-3">{task.items.map(item => {
@@ -346,28 +616,51 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
           return <div key={item.id} className="rounded-xl border border-slate-200 p-3">
             <label className="flex items-center gap-3 text-sm font-semibold"><input type="checkbox" className="ui-choice" checked={row.selected} onChange={e => updateDraft(item.id, { selected: e.target.checked })} />{item.name} <span className="font-normal text-slate-400">нужно {qty(item.quantity)} {item.unit}</span></label>
             {row.selected && <div className="mt-3 grid gap-3 sm:grid-cols-2"><Field label={`Количество, ${item.unit} *`}><input required type="number" min="0.001" max={Number(item.quantity)} step="0.001" className={inputClass} value={row.quantity} onChange={e => updateDraft(item.id, { quantity: e.target.value })} /></Field>
-              <Field label="Цена за единицу, ₽"><input type="number" min="0" step="0.01" className={inputClass} value={row.price} onChange={e => updateDraft(item.id, { price: e.target.value })} placeholder="Можно оставить пустым" /></Field>
+              <Field label={`Цена за единицу, ${offerCurrency || 'валюта не указана'}`}><input type="number" min="0" step="0.01" className={inputClass} value={row.price} onChange={e => updateDraft(item.id, { price: e.target.value })} placeholder="Можно оставить пустым" /></Field>
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="ui-choice" checked={row.inStock} onChange={e => updateDraft(item.id, { inStock: e.target.checked })} />В наличии</label>
-              <div className="text-right text-sm font-semibold">Сумма: {row.price === '' ? '—' : money(Number(row.price) * Number(row.quantity))}</div>
+              <div className="text-right text-sm font-semibold">Сумма: {row.price === '' ? 'не указана' : quoteMoney(Number(row.price) * Number(row.quantity), offerCurrency || null)}</div>
               <div className="sm:col-span-2"><input className={inputClass} value={row.notes} onChange={e => updateDraft(item.id, { notes: e.target.value })} placeholder="Комментарий по позиции" /></div>
             </div>}
           </div>;
         })}</div></div>
-      <div className="grid gap-3 sm:grid-cols-2"><Field label="Стоимость доставки, ₽"><input type="number" min="0" step="0.01" className={inputClass} value={deliveryPrice} onChange={e => setDeliveryPrice(e.target.value)} /></Field>
+      <div className="grid gap-3 sm:grid-cols-2"><Field label={`Стоимость доставки, ${offerCurrency || 'валюта не указана'}`}><input type="number" min="0" step="0.01" className={inputClass} value={deliveryPrice} onChange={e => setDeliveryPrice(e.target.value)} /></Field>
         <Field label="Срок поставки, дней"><input type="number" min="0" step="1" className={inputClass} value={deliveryDays} onChange={e => setDeliveryDays(e.target.value)} /></Field></div>
-      <div className="rounded-xl bg-blue-50 p-4 text-sm"><div className="flex justify-between"><span>Товары</span><b>{offeredPriced ? money(offeredTotal) : 'Не все цены указаны'}</b></div>
-        <div className="mt-2 flex justify-between"><span>Итого с доставкой</span><b>{offeredPriced ? money(offeredTotal + Number(deliveryPrice || 0)) : '—'}</b></div></div>
+      <div className="rounded-xl bg-blue-50 p-4 text-sm">
+        <div className="flex justify-between"><span>Товары</span><b>{offeredPriced ? quoteMoney(offeredTotal, offerCurrency || null) : 'Не все цены указаны'}</b></div>
+        <div className="mt-2 flex justify-between"><span>Итого с доставкой</span>
+          <b>{offeredPriced && deliveryPrice !== '' ? quoteMoney(offeredTotal + Number(deliveryPrice), offerCurrency || null) : 'Не рассчитано'}</b>
+        </div>
+        <p className="mt-2 text-xs text-blue-800">Если цена, валюта или доставка неизвестны — итог не рассчитывается.</p>
+      </div>
       <Field label="Комментарий к КП"><textarea rows={3} className={inputClass} value={offerNotes} onChange={e => setOfferNotes(e.target.value)} /></Field>
       {localError && <p className="text-sm text-rose-600">{localError}</p>}
       <div className="flex flex-wrap justify-end gap-2"><button type="button" onClick={() => setOfferOpen(false)} className={secondaryClass}>Отмена</button><button disabled={busy || !task.items.some(i => draft[i.id]?.selected)} className={primaryClass}>{editingOffer ? "Сохранить изменения" : "Сохранить КП"}</button></div>
       </form>
     </Dialog>}
 
-    {orderOffer && <Dialog busy={busy} title={`Оформить заказ у «${orderOffer.supplier.name}»`} onClose={() => setOrderOffer(null)}>
+    {decisionOffer && <Dialog busy={busy} title={`Ручной выбор КП «${decisionOffer.supplier.name}»`} onClose={() => setDecisionOffer(null)}>
+      <form onSubmit={selectOfferManually} className="space-y-4">
+        <p className="text-sm text-slate-600">Версия {decisionOffer.version} · цена {quoteMoney(decisionOffer.price, decisionOffer.currency)}.
+          Система не выбирает поставщиков автоматически. Решение попадёт в историю.</p>
+        <Field label="Причина выбора (не менее 10 символов) *">
+          <textarea required minLength={10} maxLength={2000} rows={4}
+            className={inputClass} value={decisionReason} onChange={e => setDecisionReason(e.target.value)}
+            placeholder="Почему выбрано это КП: техническое соответствие, срок, цена и условия" />
+        </Field>
+        {localError && <p className="text-sm text-rose-600">{localError}</p>}
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={() => setDecisionOffer(null)} className={secondaryClass}>Отмена</button>
+          <button disabled={busy || decisionReason.trim().length < 10} className={primaryClass}>Зафиксировать решение</button>
+        </div>
+      </form>
+    </Dialog>}
+
+    {orderOffer && <Dialog busy={busy} title={editingOrder ? `Изменить заказ у «${orderOffer.supplier.name}»` : `Оформить заказ у «${orderOffer.supplier.name}»`}
+      onClose={() => { setOrderOffer(null); setEditingOrder(null); }}>
       <form onSubmit={saveOrder} className="space-y-5"><p className="text-sm text-slate-500">Укажите, сколько из предложенного количества заказываем сейчас. Система не позволит превысить остаток закупки.</p>
         <div className="space-y-3">{orderOffer.items.map(item => {
           const row = orderDraft[item.id]; if (!row) return null;
-          const remaining = available(item.taskItemId);
+          const remaining = remainingForOrder(item.taskItemId);
           return <div key={item.id} className="rounded-xl border border-slate-200 p-3">
             <label className="flex items-center gap-2 text-sm font-semibold"><input type="checkbox" className="ui-choice" disabled={remaining <= 0} checked={row.selected} onChange={e => updateOrderDraft(item.id, { selected: e.target.checked })} />{item.taskItem.name}</label>
             <p className="mt-1 text-xs text-slate-500">Предложено {qty(item.quantity)} · осталось заказать {qty(remaining)} {item.taskItem.unit} · цена {money(item.unitPrice)} / {item.taskItem.unit}</p>
@@ -375,14 +668,16 @@ export default function ProcurementWorkspace({ task, mode, busy, onAction, onNav
               <div className="text-sm font-semibold">Сумма: {item.unitPrice === null ? '—' : money(Number(row.quantity) * Number(item.unitPrice))}</div></div>}
           </div>;
         })}</div>
-        <div className="grid gap-3 sm:grid-cols-2"><Field label="Номер счёта *"><input required className={inputClass} value={invoice} onChange={e => setInvoice(e.target.value)} /></Field>
-          <Field label="Дата счёта *"><input required type="datetime-local" className={inputClass} value={invoiceDate} onChange={e => setInvoiceDate(e.target.value)} /></Field></div>
-        <Field label="Примечание"><textarea rows={2} className={inputClass} value={orderNotes} onChange={e => setOrderNotes(e.target.value)} /></Field>
+        <div className="grid gap-3 sm:grid-cols-2"><Field label="Номер счёта *"><input required className={inputClass} value={invoice} onChange={e => { setInvoice(e.target.value); if (!editingOrder) orderRequestKey.current = crypto.randomUUID(); }} /></Field>
+          <Field label="Дата счёта *"><input required type="datetime-local" className={inputClass} value={invoiceDate} onChange={e => { setInvoiceDate(e.target.value); if (!editingOrder) orderRequestKey.current = crypto.randomUUID(); }} /></Field></div>
+        <Field label="Примечание"><textarea rows={2} className={inputClass} value={orderNotes} onChange={e => { setOrderNotes(e.target.value); if (!editingOrder) orderRequestKey.current = crypto.randomUUID(); }} /></Field>
         <div className="rounded-xl bg-blue-50 p-4 text-sm"><div className="flex justify-between"><span>Товары по заказу</span><b>{money(orderPrice)}</b></div>
           <div className="mt-2 flex justify-between"><span>Доставка по КП</span><b>{money(orderOffer.deliveryPrice)}</b></div>
           <div className="mt-2 flex justify-between font-semibold"><span>Итого</span><span>{orderOffer.items.filter(i => orderDraft[i.id]?.selected).some(i => i.unitPrice === null) ? 'Не все цены известны' : money(orderPrice + Number(orderOffer.deliveryPrice ?? 0))}</span></div></div>
         {localError && <p className="text-sm text-rose-600">{localError}</p>}
-        <div className="flex justify-end gap-2"><button type="button" onClick={() => setOrderOffer(null)} className={secondaryClass}>Отмена</button><button disabled={busy || !orderOffer.items.some(i => orderDraft[i.id]?.selected)} className={primaryClass}>Оформить заказ</button></div>
+        <div className="flex justify-end gap-2"><button type="button" onClick={() => setOrderOffer(null)} className={secondaryClass}>Отмена</button><button disabled={busy || !orderOffer.items.some(i => orderDraft[i.id]?.selected)} className={primaryClass}>
+          {editingOrder ? 'Сохранить изменения' : 'Оформить заказ'}
+        </button></div>
       </form>
     </Dialog>}
 

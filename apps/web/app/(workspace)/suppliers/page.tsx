@@ -12,7 +12,7 @@ function SuppliersContent() {
   const list = useDiscoveryList<Supplier>('suppliers');
   const { data, loading, error } = list;
   return (
-    <PageLayout title="Поставщики">
+    <PageLayout title="Поставщики" action={<Link href="/suppliers/manage" className="ui-button ui-button--outline">Справочник поставщиков</Link>}>
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <DiscoveryControls entity="suppliers" {...list} total={data?.total} />
         {loading && <p role="status" className="p-5 text-sm text-slate-500">Загружаем поставщиков…</p>}

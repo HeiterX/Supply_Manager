@@ -51,6 +51,10 @@ const userSelect = {
 const requestInclude = {
   requester: { select: userSelect },
   processedBy: { select: userSelect },
+  assignedTo: { select: userSelect },
+  history: {
+    orderBy: { createdAt: 'asc' as const },
+  },
   items: {
     orderBy: [
       { sortOrder: 'asc' as const },
@@ -89,6 +93,14 @@ export class PurchaseRequestsService {
           priority: dto.priority ?? 'NORMAL',
           requiredAt,
           notes: this.optionalText(dto.notes),
+          history: {
+            create: {
+              actorId: user.id,
+              actorName: user.fullName,
+              action: 'CREATED',
+              toStatus: 'NEW',
+            },
+          },
           items: {
             create: dto.items.map((item, index) => ({
               name: item.name.trim(),
@@ -113,6 +125,16 @@ export class PurchaseRequestsService {
   async createPublic(dto: CreatePublicPurchaseRequestDto) {
     const firstItem = dto.items[0];
 
+    const requiredAt = dto.requiredAt
+      ? new Date(dto.requiredAt)
+      : null;
+
+    if (requiredAt && requiredAt.getTime() <= Date.now()) {
+      throw new BadRequestException(
+        'Срок потребности должен быть в будущем',
+      );
+    }
+
     const purchaseRequest = await this.prisma.$transaction(async (tx) => {
       const created = await tx.purchaseRequest.create({
         data: {
@@ -125,8 +147,17 @@ export class PurchaseRequestsService {
            */
           title: firstItem.name.trim(),
 
-          priority: 'NORMAL',
+          priority: dto.priority ?? 'NORMAL',
+          requiredAt,
           status: 'NEW',
+
+          history: {
+            create: {
+              actorName: dto.requesterName.trim(),
+              action: 'CREATED',
+              toStatus: 'NEW',
+            },
+          },
 
           items: {
             create: dto.items.map((item, index) => ({
@@ -373,6 +404,122 @@ export class PurchaseRequestsService {
     };
   }
 
+
+  async review(user: AuthUser, id: string) {
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockRequest(tx, id);
+
+      const request = await tx.purchaseRequest.findUnique({
+        where: { id },
+      });
+
+      if (!request) {
+        throw new NotFoundException('Заявка не найдена');
+      }
+
+      if (request.status === 'IN_REVIEW') {
+        if (request.assignedToId !== user.id) {
+          throw new ConflictException(
+            'Заявка уже рассматривается другим сотрудником',
+          );
+        }
+
+        return tx.purchaseRequest.findUnique({
+          where: { id },
+          include: requestInclude,
+        });
+      }
+
+      if (request.taskId || request.status !== 'NEW') {
+        throw new ConflictException(
+          'Заявку нельзя взять на рассмотрение',
+        );
+      }
+
+      return tx.purchaseRequest.update({
+        where: { id },
+        data: {
+          status: 'IN_REVIEW',
+          assignedToId: user.id,
+          history: {
+            create: {
+              actorId: user.id,
+              actorName: user.fullName,
+              action: 'START_REVIEW',
+              fromStatus: request.status,
+              toStatus: 'IN_REVIEW',
+            },
+          },
+        },
+        include: requestInclude,
+      });
+    });
+  }
+
+  async reject(user: AuthUser, id: string, reason: string) {
+    const comment = reason?.trim();
+
+    if (!comment || comment.length < 5) {
+      throw new BadRequestException(
+        'Укажите причину отказа (минимум 5 символов)',
+      );
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockRequest(tx, id);
+
+      const request = await tx.purchaseRequest.findUnique({
+        where: { id },
+      });
+
+      if (!request) {
+        throw new NotFoundException('Заявка не найдена');
+      }
+
+      if (
+        request.taskId ||
+        !['NEW', 'IN_REVIEW', 'NEEDS_CLARIFICATION'].includes(
+          request.status,
+        )
+      ) {
+        throw new ConflictException(
+          'Заявку нельзя отклонить на текущем этапе',
+        );
+      }
+
+      if (
+        request.assignedToId &&
+        request.assignedToId !== user.id &&
+        user.role !== 'ADMIN'
+      ) {
+        throw new ConflictException(
+          'Заявка закреплена за другим сотрудником',
+        );
+      }
+
+      return tx.purchaseRequest.update({
+        where: { id },
+        data: {
+          status: 'REJECTED',
+          decisionComment: comment,
+          processedById: user.id,
+          processedAt: new Date(),
+          history: {
+            create: {
+              actorId: user.id,
+              actorName: user.fullName,
+              action: 'REJECTED',
+              fromStatus: request.status,
+              toStatus: 'REJECTED',
+              comment,
+            },
+          },
+        },
+        include: requestInclude,
+      });
+    });
+  }
+
   async accept(user: AuthUser, id: string) {
     return this.prisma.$transaction(async (tx) => {
       await this.lockRequest(tx, id);
@@ -411,6 +558,17 @@ export class PurchaseRequestsService {
         throw new ConflictException('Эту заявку нельзя принять в работу');
       }
 
+      if (
+        purchaseRequest.status === 'IN_REVIEW' &&
+        purchaseRequest.assignedToId &&
+        purchaseRequest.assignedToId !== user.id &&
+        user.role !== 'ADMIN'
+      ) {
+        throw new ConflictException(
+          'Заявка закреплена за другим сотрудником',
+        );
+      }
+
       const requesterName =
         purchaseRequest.requesterName?.trim() ||
         purchaseRequest.requester?.fullName ||
@@ -440,6 +598,20 @@ export class PurchaseRequestsService {
               unit: item.unit,
               notes: item.notes,
               sortOrder: item.sortOrder,
+              sourceRequestItemId: item.id,
+              requiredAt: purchaseRequest.requiredAt,
+              technicalParameters: {},
+              originalSnapshot: {
+                sourceRequestId: purchaseRequest.id,
+                sourceRequestItemId: item.id,
+                name: item.name,
+                partNumber: item.partNumber,
+                quantity: item.quantity.toString(),
+                unit: item.unit,
+                notes: item.notes,
+                requiredAt: purchaseRequest.requiredAt?.toISOString() ?? null,
+                photoOriginalName: item.photoOriginalName,
+              },
             })),
           },
 
@@ -460,6 +632,15 @@ export class PurchaseRequestsService {
           taskId: task.id,
           processedById: user.id,
           processedAt: new Date(),
+          history: {
+            create: {
+              actorId: user.id,
+              actorName: user.fullName,
+              action: 'ACCEPTED',
+              fromStatus: purchaseRequest.status,
+              toStatus: 'CONVERTED',
+            },
+          },
         },
         include: requestInclude,
       });
