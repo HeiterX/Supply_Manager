@@ -100,6 +100,13 @@ export class NextActionsService implements OnModuleInit, OnModuleDestroy {
     if (user.role === 'EMPLOYEE' || (user.role !== 'ADMIN' && row.assigneeId !== user.id && row.assigneeId !== null))
       throw new NotFoundException('Действие не найдено');
   }
+  async assignees() {
+    return this.prisma.user.findMany({
+      where: { status: 'ACTIVE', role: { in: ['PROCUREMENT', 'ADMIN'] } },
+      select: { id: true, fullName: true, role: true },
+      orderBy: { fullName: 'asc' }, take: 500,
+    });
+  }
   async list(user: AuthUser, scope = 'mine', filter = 'all', q = '', page = 1, limit = 20) {
     if (!['mine','all','unassigned'].includes(scope)) throw new BadRequestException('Неверная область действий');
     if (scope === 'all' && user.role !== 'ADMIN') throw new ForbiddenException('Полный список доступен администратору');
