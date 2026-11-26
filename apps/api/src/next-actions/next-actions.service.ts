@@ -20,8 +20,8 @@ function todayRange(now: Date) {
   const start = new Date(iso + 'T00:00:00+03:00');
   return { start, end: new Date(start.getTime() + 86_400_000) };
 }
-const activeTask = { status: { notIn: ['CLOSED', 'CANCELLED'] as const } };
-const waiting = { supplierOffers: { some: { status: { in: ['REQUESTED', 'WAITING_RESPONSE'] as const } } } };
+const activeTask: Prisma.TaskWhereInput = { status: { notIn: ['CLOSED', 'CANCELLED'] } };
+const waiting: Prisma.TaskWhereInput = { supplierOffers: { some: { status: { in: ['REQUESTED', 'WAITING_RESPONSE'] } } } };
 
 type ActionRow = NextAction & {
   task: { id: string; number: number; title: string; priority: string; status: string; supplierOffers?: { id: string }[] };
@@ -156,7 +156,12 @@ export class NextActionsService implements OnModuleInit, OnModuleDestroy {
       where: { taskId, status: 'ACTIVE' }, include: viewInclude,
     });
     if (action) this.verifyAccess(action as ActionRow, user);
-    return { action: action ? this.toView(action as ActionRow, user) : null, timeZone: TIME_ZONE };
+    const lastAction = action ? null : await this.prisma.nextAction.findFirst({
+      where: { taskId, ...(user.role === 'ADMIN' ? {} : { OR: [{ assigneeId: user.id }, { assigneeId: null }] }) },
+      select: { id: true }, orderBy: { createdAt: 'desc' },
+    });
+    return { action: action ? this.toView(action as ActionRow, user) : null,
+      lastActionId: lastAction?.id ?? null, timeZone: TIME_ZONE };
   }
   async history(user: AuthUser, id: string) {
     const row = await this.prisma.nextAction.findUnique({ where: { id }, include: viewInclude });
@@ -255,7 +260,7 @@ export class NextActionsService implements OnModuleInit, OnModuleDestroy {
       }
       const result = this.toView(updated as ActionRow, user);
       await tx.nextActionMutation.create({
-        data: { actionId: id, key: operationKey, fingerprint, response: result as Prisma.InputJsonValue },
+        data: { actionId: id, key: operationKey, fingerprint, response: result as unknown as Prisma.InputJsonValue },
       });
       return result;
     });
