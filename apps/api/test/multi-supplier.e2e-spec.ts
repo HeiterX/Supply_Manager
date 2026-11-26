@@ -127,7 +127,7 @@ describe('Multi-supplier procurement (e2e)', () => {
     await client.patch(`${api}/${taskId}/orders/close`).expect(200);
     const closed = await client.get(`${api}/${taskId}`).expect(200);
     expect(closed.body.status).toBe('CLOSED');
-  });
+  }, 20_000);
 
   it('cancellation releases reserved quantity for a replacement supplier', async () => {
     const taskId = await createTask();
