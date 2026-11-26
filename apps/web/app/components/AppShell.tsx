@@ -6,6 +6,7 @@ import { useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useSession } from './AuthGate';
 import { Dialog } from './Dialog';
 import GlobalSearch from './GlobalSearch';
+import { NotificationBell } from './core09/NotificationCenter';
 import { getCurrentSection, navigation, roleLabels } from './navigation';
 import PageLayout from './PageLayout';
 import { Alert, Avatar, Button, EmptyState, Input } from './ui';
@@ -174,6 +175,7 @@ export default function AppShell({ children, tools }: { children: ReactNode; too
         <div className="app-header-tools" key={pathname}>
           <SectionSearch entries={entries} />
           {tools}
+          {user.role !== 'EMPLOYEE' && <NotificationBell />}
           <UserMenu />
         </div>
       </header>
