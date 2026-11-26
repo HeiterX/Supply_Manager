@@ -1,5 +1,5 @@
 import {
-  BadRequestException, ConflictException, ForbiddenException, Injectable,
+  BadRequestException, ConflictException, ForbiddenException, Injectable, Logger,
   NotFoundException, OnModuleDestroy, OnModuleInit,
 } from '@nestjs/common';
 import { createHash } from 'node:crypto';
@@ -74,6 +74,7 @@ const viewInclude = {
 export class NextActionsService implements OnModuleInit, OnModuleDestroy {
   private timer?: ReturnType<typeof setTimeout>;
   private stopping = false;
+  private readonly logger = new Logger(NextActionsService.name);
   constructor(private readonly prisma: PrismaService, private readonly telegram: TelegramDeliveryService) {}
   onModuleInit() {
     if (process.env.NODE_ENV !== 'test') this.plan();
@@ -81,7 +82,7 @@ export class NextActionsService implements OnModuleInit, OnModuleDestroy {
   onModuleDestroy() { this.stopping = true; clearTimeout(this.timer); }
   private plan() {
     this.timer = setTimeout(() => {
-      void this.dispatchDue().catch(() => { /* worker retries next tick; never fail the web request */ })
+      void this.dispatchDue().catch(() => this.logger.warn('CORE-09 scheduler failed; retrying on next interval'))
         .finally(() => { if (!this.stopping) this.plan(); });
     }, 60_000);
     this.timer.unref();
@@ -265,10 +266,12 @@ export class NextActionsService implements OnModuleInit, OnModuleDestroy {
         where: { eventKey: { startsWith: 'core09:' + id + ':' }, status: 'PENDING' },
         data: { status: 'CANCELLED' },
       });
-      if (updated.assigneeId && (updated.assigneeId !== row.assigneeId || complete)) {
+      if (updated.assigneeId && (updated.assigneeId !== row.assigneeId || complete || event === 'RESCHEDULED')) {
         await this.notice(tx, id, updated.assigneeId, 'core09:' + id + ':' + updated.version + ':' + event,
-          complete ? 'ACTION_COMPLETED' : 'ASSIGNEE_CHANGED',
-          complete ? 'Действие выполнено: ' + updated.title : 'Вам назначено действие: ' + updated.title,
+          complete ? 'ACTION_COMPLETED' : event === 'RESCHEDULED' ? 'DUE_DATE_CHANGED' : 'ASSIGNEE_CHANGED',
+          complete ? 'Действие выполнено: ' + updated.title
+            : event === 'RESCHEDULED' ? 'Изменён срок действия: ' + updated.title
+            : 'Вам назначено действие: ' + updated.title,
           null, '/tasks/' + updated.taskId);
       }
       const result = this.toView(updated as ActionRow, user);
@@ -311,6 +314,7 @@ export class NextActionsService implements OnModuleInit, OnModuleDestroy {
   }
   // Idempotent scheduler across NestJS replicas: action lock + (action, version, kind) unique receipt.
   async dispatchDue(now = new Date()) {
+    const overdueReceiptKind = 'ACTION_OVERDUE:' + day(now);
     const actionTable = Prisma.raw('"' + sqlSchema() + '"."NextAction"');
     const taskTable = Prisma.raw('"' + sqlSchema() + '"."Task"');
     const receiptTable = Prisma.raw('"' + sqlSchema() + '"."NextActionScheduleReceipt"');
@@ -324,7 +328,7 @@ export class NextActionsService implements OnModuleInit, OnModuleDestroy {
              WHERE r."actionId"=a."id" AND r."version"=a."version" AND r."kind"='ACTION_DUE'))
           OR (a."dueAt" < ${now} AND NOT EXISTS
             (SELECT 1 FROM ${receiptTable} r
-             WHERE r."actionId"=a."id" AND r."version"=a."version" AND r."kind"='ACTION_OVERDUE'))
+             WHERE r."actionId"=a."id" AND r."version"=a."version" AND r."kind"=${overdueReceiptKind}))
         ) ORDER BY COALESCE(a."reminderAt",a."dueAt") ASC LIMIT 50
     `);
     for (const { id } of ids) {
@@ -339,17 +343,17 @@ export class NextActionsService implements OnModuleInit, OnModuleDestroy {
           where: { id: action.assigneeId }, select: { id: true, status: true, role: true },
         });
         if (target?.status !== 'ACTIVE' || !['ADMIN','PROCUREMENT'].includes(target.role ?? '')) return;
-        const types = [
-          action.reminderAt && action.reminderAt <= now ? 'ACTION_DUE' : null,
-          action.dueAt && action.dueAt < now ? 'ACTION_OVERDUE' : null,
-        ].filter((kind): kind is string => kind !== null);
-        for (const kind of types) {
+        const events = [
+          action.reminderAt && action.reminderAt <= now ? { type: 'ACTION_DUE', receipt: 'ACTION_DUE' } : null,
+          action.dueAt && action.dueAt < now ? { type: 'ACTION_OVERDUE', receipt: overdueReceiptKind } : null,
+        ].filter((value): value is { type: string; receipt: string } => value !== null);
+        for (const event of events) {
           const inserted = await tx.nextActionScheduleReceipt.createMany({
-            data: [{ actionId: id, version: action.version, kind }], skipDuplicates: true,
+            data: [{ actionId: id, version: action.version, kind: event.receipt }], skipDuplicates: true,
           });
           if (!inserted.count) continue;
-          await this.notice(tx, id, target.id, 'core09:' + id + ':' + action.version + ':' + kind,
-            kind, kind === 'ACTION_OVERDUE' ? 'Просрочено: ' + action.title : 'Напоминание: ' + action.title,
+          await this.notice(tx, id, target.id, 'core09:' + id + ':' + action.version + ':' + event.receipt,
+            event.type, event.type === 'ACTION_OVERDUE' ? 'Просрочено: ' + action.title : 'Напоминание: ' + action.title,
             null, '/tasks/' + action.taskId);
         }
       }, { timeout: 15000 });
