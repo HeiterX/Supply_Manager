@@ -461,9 +461,15 @@ test('CORE-14 keyboard, error handling and axe checks', { timeout: 105000 }, asy
       assert.equal(await dialog.locator('form form').count(), 0);
       const search = dialog.getByRole('textbox', { name: 'Название или артикул для поиска' });
       await search.fill('QA-10');
+      const firstLookup = page.waitForResponse(response =>
+        response.url().includes('/catalog?q=QA-10') && response.request().method() === 'GET');
       await search.press('Enter');
+      await firstLookup;
+      const secondLookup = page.waitForResponse(response =>
+        response.url().includes('/catalog?q=QA-10') && response.request().method() === 'GET');
       await dialog.getByRole('search', { name: 'Поиск номенклатуры' }).getByRole('button', { name: 'Найти' }).click();
-      await page.waitForFunction(() => document.querySelector('[role="dialog"]') !== null);
+      await secondLookup;
+      assert.equal(await dialog.isVisible(), true);
       assert.equal(lookups, 2, 'Enter and Find must trigger only catalog lookups');
       assert.equal(saves, 0, 'Catalog search must not submit an item');
       assert.deepEqual(hydrationErrors, []);
