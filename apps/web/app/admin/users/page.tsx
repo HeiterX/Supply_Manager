@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import AppShell from '../../components/AppShell';
+import { NotificationProvider } from '../../components/core09/NotificationCenter';
 import AuthGate from '../../components/AuthGate';
 import PageLayout from '../../components/PageLayout';
 
@@ -537,7 +538,9 @@ function AdminUsersContent() {
 export default function AdminUsersPage() {
   return (
     <AuthGate>
-      <AppShell><AdminUsersContent /></AppShell>
+      <NotificationProvider>
+        <AppShell><AdminUsersContent /></AppShell>
+      </NotificationProvider>
     </AuthGate>
   );
 }

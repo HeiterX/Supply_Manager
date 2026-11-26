@@ -49,6 +49,7 @@ async function setup(browser, role = 'PROCUREMENT') {
     if (method === 'OPTIONS') return route.fulfill({ headers, status: 204 });
     if (path === '/auth/csrf') return respond({ csrfToken: 'a'.repeat(64) });
     if (path === '/auth/me') return respond({ ...user, role });
+    if (path === '/admin/users') return respond([{ ...user, role, status: 'ACTIVE', createdAt: date }]);
     if (path === '/auth/register') {
       calls.registrations.push(route.request().postDataJSON());
       return calls.registrations.length === 1 ? respond({ message: ['email must be an email'] }, 422) : respond({}, 201);
@@ -136,6 +137,18 @@ test('CORE-13 working screens on the production Next.js build', { timeout: 10500
   suite.after(() => browser.close());
   const { page, context, calls, failures } = await setup(browser);
   suite.after(() => context.close());
+
+  await suite.test('admin users page renders with CORE-09 notification bell and no provider crash', async () => {
+    const admin = await setup(browser, 'ADMIN');
+    try {
+      await goto(admin.page, '/admin/users');
+      await admin.page.getByRole('heading', { name: 'Управление пользователями' }).waitFor();
+      await admin.page.getByRole('button', { name: /Уведомления/ }).waitFor();
+      assert.equal(admin.failures.length, 0, admin.failures.join('; '));
+    } finally {
+      await admin.context.close();
+    }
+  });
 
   await suite.test('server query, saved view, pagination and return context', async () => {
     await goto(page);
