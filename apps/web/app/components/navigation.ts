@@ -24,6 +24,8 @@ export const navigation: readonly NavigationEntry[] = [
   { href: '/registry', label: 'Реестр позиций', icon: 'registry', roles: procurement },
   { href: '/suppliers', label: 'Поставщики', icon: 'suppliers', roles: procurement },
   { href: '/orders', label: 'Заказы', icon: 'purchases', roles: procurement },
+  { href: '/actions', label: 'Мои действия', icon: 'purchases', roles: procurement },
+  { href: '/notifications', label: 'Уведомления', icon: 'requests', roles: procurement },
   { href: '/analytics', label: 'Аналитика', icon: 'analytics', roles: procurement },
   { href: '/my-requests', label: 'Мои заявки', icon: 'requests', roles: ['EMPLOYEE'] },
   { href: '/request', label: 'Подать заявку', icon: 'plus', roles: everyone },
