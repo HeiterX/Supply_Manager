@@ -104,7 +104,7 @@ export default function WorkNextAction({ id, history, fallback, children, taskSt
   }
   const terminal = taskStatus === 'CLOSED' || taskStatus === 'CANCELLED';
   const own = user.role === 'ADMIN' || !action?.assignee || action.assignee.id === user.id;
-  const allowed = action?.allowedOperations.includes('UPDATE') ?? false;
+  const allowed = action?.allowedOperations?.includes('UPDATE') ?? false;
   const historyId = action?.id ?? state.data?.lastActionId;
   return <Card className="space-y-4 p-5 [overflow-wrap:anywhere]" aria-label="Следующее действие по закупке">
     <div className="flex flex-wrap justify-between gap-2">
@@ -136,7 +136,7 @@ export default function WorkNextAction({ id, history, fallback, children, taskSt
           }
           setEditing(value => !value); setError('');
         }}>{editing ? 'Отменить редактирование' : action ? 'Изменить действие' : 'Создать действие'}</Button>}
-        {action?.allowedOperations.includes('COMPLETE') && <Button variant="outline" loading={busy} onClick={() => void complete()}>Выполнено</Button>}
+        {action?.allowedOperations?.includes('COMPLETE') && <Button variant="outline" loading={busy} onClick={() => void complete()}>Выполнено</Button>}
       </div>}
       {editing && !terminal && (!action || allowed) && <form className="grid gap-3 border-t border-slate-100 pt-4" onSubmit={persist}>
         <label className="text-sm font-medium">Следующее действие
