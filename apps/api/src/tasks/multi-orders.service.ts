@@ -84,7 +84,7 @@ export class MultiOrdersService {
       : 'Контролировать оплату и поставку по заказам';
     await tx.task.update({
       where: { id: taskId },
-      data: { status: status as 'SEARCHING' | 'HANDED_OVER' | 'ORDERED' | 'WAITING_PAYMENT' | 'WAITING_SHIPMENT' | 'IN_TRANSIT' | 'READY_FOR_PICKUP' | 'RECEIVED', nextAction, reminderAt: null },
+      data: { status: status as 'SEARCHING' | 'HANDED_OVER' | 'ORDERED' | 'WAITING_PAYMENT' | 'WAITING_SHIPMENT' | 'IN_TRANSIT' | 'READY_FOR_PICKUP' | 'RECEIVED', nextAction },
     });
     await this.telegramDelivery.taskChanged(tx, taskId);
   }
