@@ -158,7 +158,8 @@ describe('CORE-09: owned actions, optimistic updates, schedules and notification
     expect(changed.body.version).toBe(3);
     const inbox = await other.client.get('/api/v1/notifications').expect(200);
     expect(inbox.body.items.some((n: { type: string }) => n.type === 'DUE_DATE_CHANGED')).toBe(true);
-    expect((await owner.client.get('/api/v1/notifications').expect(200)).body.unreadCount).toBe(0);
+    const previousOwnerInbox = await owner.client.get('/api/v1/notifications').expect(200);
+    expect(previousOwnerInbox.body.items.some((n: { task: { id: string } }) => n.task.id === taskId)).toBe(false);
     const all = await admin.client.get(api + '?scope=all').expect(200);
     expect(all.body.items.some((a: { id: string }) => a.id === actionId)).toBe(true);
   });
