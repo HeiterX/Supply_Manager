@@ -51,12 +51,6 @@ export default function WorkNextAction({ id, history, fallback, children, taskSt
   const saving = useRef(false);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    setTitle(action?.title ?? '');
-    setDueAt(localDateTime(action?.dueAt ?? null));
-    setReminderAt(localDateTime(action?.reminderAt ?? null));
-    setAssigneeId(action?.assignee?.id ?? '');
-  }, [action?.id, action?.version, action?.title, action?.dueAt, action?.reminderAt, action?.assignee?.id]);
 
   useEffect(() => {
     if (user.role !== 'ADMIN') return;
@@ -133,7 +127,15 @@ export default function WorkNextAction({ id, history, fallback, children, taskSt
         {(!action.assignee || !action.dueAt) && <p className="text-sm text-amber-700">Для полноценного контроля назначьте ответственного и срок действия.</p>}
       </> : <p className="text-sm text-muted">{terminal ? 'Закупка завершена' : 'Активного следующего действия нет. Создайте новое.'}</p>}
       {!terminal && own && <div className="flex flex-wrap gap-2">
-        {(!action || allowed) && <Button variant="outline" onClick={() => { setEditing(value => !value); setError(''); }}>{editing ? 'Отменить редактирование' : action ? 'Изменить действие' : 'Создать действие'}</Button>}
+        {(!action || allowed) && <Button variant="outline" onClick={() => {
+          if (!editing) {
+            setTitle(action?.title ?? '');
+            setDueAt(localDateTime(action?.dueAt ?? null));
+            setReminderAt(localDateTime(action?.reminderAt ?? null));
+            setAssigneeId(action?.assignee?.id ?? '');
+          }
+          setEditing(value => !value); setError('');
+        }}>{editing ? 'Отменить редактирование' : action ? 'Изменить действие' : 'Создать действие'}</Button>}
         {action?.allowedOperations.includes('COMPLETE') && <Button variant="outline" loading={busy} onClick={() => void complete()}>Выполнено</Button>}
       </div>}
       {editing && !terminal && (!action || allowed) && <form className="grid gap-3 border-t border-slate-100 pt-4" onSubmit={persist}>
