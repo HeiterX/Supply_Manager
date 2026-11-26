@@ -30,14 +30,26 @@ export class TasksService {
     private readonly telegramDelivery: TelegramDeliveryService,
   ) {}
 
-  create(dto: CreateTaskDto) {
-    return this.prisma.task.create({
-      data: {
-        title: dto.title,
-        description: dto.description,
-        priority: dto.priority,
-        deadline: dto.deadline ? new Date(dto.deadline) : undefined,
-      },
+  create(dto: CreateTaskDto, actorId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const task = await tx.task.create({
+        data: {
+          title: dto.title,
+          description: dto.description,
+          priority: dto.priority,
+          deadline: dto.deadline ? new Date(dto.deadline) : undefined,
+          nextAction: 'Определить следующий шаг закупки',
+        },
+      });
+      await tx.nextAction.create({
+        data: {
+          taskId: task.id,
+          title: 'Определить следующий шаг закупки',
+          assigneeId: actorId,
+          history: { create: { actorId, type: 'CREATED' } },
+        },
+      });
+      return task;
     });
   }
 
