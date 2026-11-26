@@ -248,7 +248,6 @@ function TaskContent({ taskId }: { taskId: string }) {
   const [priority, setPriority] = useState('NORMAL');
   const [nextAction, setNextAction] = useState('');
   const [reminderAt, setReminderAt] = useState('');
-  const [editNextAction, setEditNextAction] = useState(false);
   const [overviewConflict, setOverviewConflict] = useState(false);
 
   const [itemFormOpen, setItemFormOpen] = useState(false);
@@ -849,7 +848,7 @@ function TaskContent({ taskId }: { taskId: string }) {
       {activeTab === 'overview' && (
         <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
           <div className="min-w-0 space-y-5">
-            <WorkNextAction id={task.id} history={() => setActiveTab('history')} fallback={<>
+            <WorkNextAction id={task.id} taskStatus={task.status} history={() => setActiveTab('history')} fallback={<>
               <p className="text-lg font-semibold">{task.nextAction || (task.status === 'CLOSED' ? 'Закупка завершена' : 'Действие не задано')}</p>
               {task.reminderAt && <p className="text-sm text-muted">Напоминание · {formatDateTime(task.reminderAt)}</p>}
             </>}>
@@ -857,17 +856,15 @@ function TaskContent({ taskId }: { taskId: string }) {
             </WorkNextAction>
 
             <section className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
-              <div className="mb-5"><h2 className="font-semibold">Основная информация</h2><p className="mt-1 text-sm text-slate-500">Приоритет и напоминание по текущей закупке</p></div>
+              <div className="mb-5"><h2 className="font-semibold">Основная информация</h2><p className="mt-1 text-sm text-slate-500">Приоритет закупки; действие, срок и напоминания редактируются выше</p></div>
               <form onSubmit={saveOverview} className="grid gap-4 md:grid-cols-2">
                 <label><span className="mb-1.5 block text-sm font-medium">Приоритет</span><Select value={priority} onChange={(e) => setPriority(e.target.value)}><option value="LOW">Низкий</option><option value="NORMAL">Обычный</option><option value="HIGH">Высокий</option><option value="URGENT">Срочный</option></Select></label>
-                <label><span className="mb-1.5 block text-sm font-medium">Напоминание</span><Input type="datetime-local" value={reminderAt} onChange={(e) => setReminderAt(e.target.value)} /></label>
-                {editNextAction && <label className="md:col-span-2"><span className="mb-1.5 block text-sm font-medium">Следующее действие</span><Textarea rows={2} maxLength={1000} value={nextAction} onChange={(e) => setNextAction(e.target.value)} /><p className="mt-1.5 text-xs text-muted">Обычно действие меняется автоматически при переходе между этапами. Редактируйте его вручную только при необходимости.</p></label>}
                 {overviewConflict && <div className="md:col-span-2">
                   <Alert tone="warning">Сейчас в закупке: {priorityLabels[task.priority] ?? task.priority} · {task.nextAction || 'Действие не задано'} · {task.reminderAt ? formatDateTime(task.reminderAt) : 'Без напоминания'}.</Alert>
                   <Button className="mt-2" variant="outline" onClick={() => { setOverview(task); setActionError(''); }}>Заменить черновик актуальными данными</Button>
                 </div>}
                 <div className="md:col-span-2 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
-                  <button type="button" onClick={() => setEditNextAction((value) => !value)} className="text-sm font-medium text-slate-500 transition hover:text-blue-700">{editNextAction ? 'Скрыть ручное редактирование' : 'Изменить следующее действие'}</button>
+                  <span className="text-sm text-muted">Следующее действие настраивается в карточке выше.</span>
                   <Button type="submit" variant="outline" loading={busy} disabled={overviewConflict}>Сохранить изменения</Button>
                 </div>
               </form>
