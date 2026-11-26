@@ -12,6 +12,17 @@ import { ActionInputDto } from './action-input.dto.js';
 // A consistent server-owned definition of "today" for the procurement workspace.
 // Europe/Moscow has remained UTC+3 since 2014; IANA zone is returned to clients.
 const TIME_ZONE = 'Europe/Moscow';
+function sqlSchema() {
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error('DATABASE_URL is not defined');
+  const schema = new URL(url).searchParams.get('schema') ?? 'public';
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(schema)) throw new Error('Invalid PostgreSQL schema identifier');
+  return schema;
+}
+async function actionSearchPath(tx: Prisma.TransactionClient) {
+  const path = '"' + sqlSchema() + '", public';
+  await tx.$queryRaw`SELECT pg_catalog.set_config('search_path', ${path}, true)`;
+}
 const day = (now: Date) => new Intl.DateTimeFormat('en-CA', {
   timeZone: TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
 }).format(now);
@@ -206,6 +217,7 @@ export class NextActionsService implements OnModuleInit, OnModuleDestroy {
   }
   async create(user: AuthUser, taskId: string, dto: ActionInputDto) {
     return this.prisma.$transaction(async tx => {
+      await actionSearchPath(tx);
       await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "Task" WHERE "id" = ${taskId} FOR UPDATE`);
       const task = await tx.task.findUnique({ where: { id: taskId } });
       if (!task) throw new NotFoundException('Закупка не найдена');
@@ -226,6 +238,7 @@ export class NextActionsService implements OnModuleInit, OnModuleDestroy {
     const expected = readVersion(match), operationKey = checkKey(key);
     const fingerprint = createHash('sha256').update(JSON.stringify([complete, dto])).digest('hex');
     return this.prisma.$transaction(async tx => {
+      await actionSearchPath(tx);
       await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "NextAction" WHERE "id" = ${id} FOR UPDATE`);
       const row = await tx.nextAction.findUnique({ where: { id }, include: viewInclude });
       if (!row) throw new NotFoundException('Действие не найдено');
@@ -298,13 +311,16 @@ export class NextActionsService implements OnModuleInit, OnModuleDestroy {
   }
   // Idempotent scheduler across NestJS replicas: action lock + (action, version, kind) unique receipt.
   async dispatchDue(now = new Date()) {
+    const actionTable = Prisma.raw('"' + sqlSchema() + '"."NextAction"');
+    const taskTable = Prisma.raw('"' + sqlSchema() + '"."Task"');
+    const receiptTable = Prisma.raw('"' + sqlSchema() + '"."NextActionScheduleReceipt"');
     const ids = await this.prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-      SELECT a."id" FROM "NextAction" a JOIN "Task" t ON t."id"=a."taskId"
+      SELECT a."id" FROM ${actionTable} a JOIN ${taskTable} t ON t."id"=a."taskId"
       WHERE a."status"='ACTIVE' AND a."assigneeId" IS NOT NULL
         AND t."status" NOT IN ('CLOSED','CANCELLED')
         AND (
           (a."reminderAt" <= ${now} AND NOT EXISTS
-            (SELECT 1 FROM "NextActionScheduleReceipt" r
+            (SELECT 1 FROM ${receiptTable} r
              WHERE r."actionId"=a."id" AND r."version"=a."version" AND r."kind"='ACTION_DUE'))
           OR (a."dueAt" < ${now} AND NOT EXISTS
             (SELECT 1 FROM "NextActionScheduleReceipt" r
@@ -314,7 +330,8 @@ export class NextActionsService implements OnModuleInit, OnModuleDestroy {
     for (const { id } of ids) {
       if (this.stopping) break;
       await this.prisma.$transaction(async tx => {
-        await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "NextAction" WHERE "id" = ${id} FOR UPDATE`);
+        await actionSearchPath(tx);
+      await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "NextAction" WHERE "id" = ${id} FOR UPDATE`);
         const action = await tx.nextAction.findUnique({ where: { id }, include: viewInclude });
         if (!action || action.status !== 'ACTIVE' || !action.assigneeId ||
           ['CLOSED','CANCELLED'].includes(action.task.status)) return;
