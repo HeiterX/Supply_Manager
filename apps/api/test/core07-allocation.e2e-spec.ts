@@ -98,6 +98,29 @@ describe('CORE-07: multi-supplier quantity reservation, idempotency and safe edi
     return row;
   }
 
+  it('preserves an explicit CORE-09 reminder across order lifecycle transitions', async () => {
+    const { taskId, taskItemId } = await fixture(3);
+    const offer = await quote(taskId, taskItemId, 3);
+    const reminder = '2027-02-01T11:00:00.000Z';
+
+    await procurement.client.patch(`${api}/${taskId}`)
+      .send({ reminderAt: reminder }).expect(200);
+
+    const created = await procurement.client.post(
+      `${api}/${taskId}/supplier-offers/${offer.id}/purchase-order`,
+    ).send(newOrder(offer, 3, randomUUID())).expect(201);
+
+    let task = await procurement.client.get(`${api}/${taskId}`).expect(200);
+    expect(task.body.reminderAt).toBe(reminder);
+
+    await procurement.client.patch(
+      `${api}/${taskId}/orders/${created.body.id as string}/cancel`,
+    ).send({ reason: 'Отмена заказа до оплаты, действие остаётся запланировано' }).expect(200);
+
+    task = await procurement.client.get(`${api}/${taskId}`).expect(200);
+    expect(task.body.reminderAt).toBe(reminder);
+  });
+
   it('reserves partial amounts from two suppliers without exceeding requirement', async () => {
     const { taskId, taskItemId } = await fixture(10);
     const a = await quote(taskId, taskItemId, 6);
