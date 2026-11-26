@@ -589,6 +589,11 @@ export class PurchaseRequestsService {
           priority: purchaseRequest.priority,
           deadline: purchaseRequest.requiredAt,
           nextAction: 'Начать поиск поставщиков',
+          nextActions: { create: {
+            title: 'Начать поиск поставщиков',
+            assigneeId: user.id,
+            history: { create: { type: 'CREATED', actorId: user.id } },
+          } },
 
           items: {
             create: purchaseRequest.items.map((item) => ({
