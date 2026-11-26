@@ -3,7 +3,7 @@ import {
   NotFoundException, OnModuleDestroy, OnModuleInit,
 } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import { Prisma, type NextAction, type User } from '../generated/prisma/client.js';
+import { Prisma, type NextAction } from '../generated/prisma/client.js';
 import type { AuthUser } from '../auth/auth.types.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { TelegramDeliveryService } from '../telegram/telegram-delivery.service.js';
@@ -55,9 +55,9 @@ function visibleWhere(user: AuthUser, scope: string) {
 }
 const viewInclude = {
   task: { select: { id: true, number: true, title: true, status: true, priority: true,
-    supplierOffers: { where: { status: { in: ['REQUESTED', 'WAITING_RESPONSE'] as const } }, select: { id: true }, take: 1 } } },
+    supplierOffers: { where: { status: { in: ['REQUESTED', 'WAITING_RESPONSE'] } }, select: { id: true }, take: 1 } } },
   assignee: { select: { id: true, fullName: true } },
-} as const;
+} satisfies Prisma.NextActionInclude;
 
 @Injectable()
 export class NextActionsService implements OnModuleInit, OnModuleDestroy {
