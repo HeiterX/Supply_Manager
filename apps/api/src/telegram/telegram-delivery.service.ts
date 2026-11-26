@@ -252,7 +252,7 @@ export class TelegramDeliveryService implements OnModuleInit, OnModuleDestroy {
     if (row.eventKey.startsWith('core09:')) {
       const parts = row.eventKey.split(':');
       const version = Number(parts[2]);
-      const action = parts.length === 4 && Number.isSafeInteger(version)
+      const action = (parts.length === 4 || (parts.length === 5 && parts[3] === 'ACTION_OVERDUE')) && Number.isSafeInteger(version)
         ? await this.prisma.nextAction.findUnique({
             where: { id: parts[1] },
             include: { task: { select: { status: true } } },
