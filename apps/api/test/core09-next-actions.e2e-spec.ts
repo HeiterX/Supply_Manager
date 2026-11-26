@@ -118,6 +118,10 @@ describe('CORE-09: owned actions, optimistic updates, schedules and notification
     await other.client.patch('/api/v1/notifications/' + id + '/read').expect(404);
     const after = await owner.client.get('/api/v1/notifications?filter=unread').expect(200);
     expect(after.body.unreadCount).toBe(1);
+    await service.dispatchDue(new Date(now + 86_400_000 + 420_000));
+    await service.dispatchDue(new Date(now + 86_400_000 + 420_000));
+    const tomorrow = await owner.client.get('/api/v1/notifications').expect(200);
+    expect(tomorrow.body.items.filter((n: { type: string }) => n.type === 'ACTION_OVERDUE')).toHaveLength(2);
   });
 
   it('allows completion, preserves immutable history and creates a successor', async () => {
@@ -148,6 +152,13 @@ describe('CORE-09: owned actions, optimistic updates, schedules and notification
     expect(transfer.body.assignee.id).toBe(other.userId);
     await owner.client.get(api + '/by-task/' + taskId).expect(404);
     await other.client.get(api + '/by-task/' + taskId).expect(200);
+    const changed = await admin.client.patch(api + '/' + actionId)
+      .set('If-Match', '"2"').set('Idempotency-Key', randomUUID())
+      .send({ dueAt: '2027-02-10T12:00:00.000Z' }).expect(200);
+    expect(changed.body.version).toBe(3);
+    const inbox = await other.client.get('/api/v1/notifications').expect(200);
+    expect(inbox.body.items.some((n: { type: string }) => n.type === 'DUE_DATE_CHANGED')).toBe(true);
+    expect((await owner.client.get('/api/v1/notifications').expect(200)).body.unreadCount).toBe(0);
     const all = await admin.client.get(api + '?scope=all').expect(200);
     expect(all.body.items.some((a: { id: string }) => a.id === actionId)).toBe(true);
   });
