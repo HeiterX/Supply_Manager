@@ -270,7 +270,7 @@ export class NextActionsService implements OnModuleInit, OnModuleDestroy {
     if (!Number.isInteger(page) || page < 1 || page > 100000 || !Number.isInteger(limit) || limit < 1 || limit > 100)
       throw new BadRequestException('Неверная пагинация');
     const where: Prisma.NextActionNotificationWhereInput = {
-      userId: user.id, ...(filter === 'read' ? { readAt: { not: null } } : filter === 'unread' ? { readAt: null } : {}),
+      userId: user.id, action: { assigneeId: user.id }, ...(filter === 'read' ? { readAt: { not: null } } : filter === 'unread' ? { readAt: null } : {}),
     };
     const [items, total, unreadCount] = await this.prisma.$transaction([
       this.prisma.nextActionNotification.findMany({
@@ -278,7 +278,7 @@ export class NextActionsService implements OnModuleInit, OnModuleDestroy {
         orderBy: { createdAt: 'desc' }, skip: (page - 1) * limit, take: limit,
       }),
       this.prisma.nextActionNotification.count({ where }),
-      this.prisma.nextActionNotification.count({ where: { userId: user.id, readAt: null } }),
+      this.prisma.nextActionNotification.count({ where: { userId: user.id, action: { assigneeId: user.id }, readAt: null } }),
     ]);
     return {
       items: items.map(item => ({ id: item.id, type: item.type, title: item.title,
@@ -288,10 +288,10 @@ export class NextActionsService implements OnModuleInit, OnModuleDestroy {
   }
   async readNotification(user: AuthUser, id: string) {
     const changed = await this.prisma.nextActionNotification.updateMany({
-      where: { id, userId: user.id, readAt: null }, data: { readAt: new Date() },
+      where: { id, userId: user.id, action: { assigneeId: user.id }, readAt: null }, data: { readAt: new Date() },
     });
     if (!changed.count) {
-      const exists = await this.prisma.nextActionNotification.findFirst({ where: { id, userId: user.id }, select: { id: true } });
+      const exists = await this.prisma.nextActionNotification.findFirst({ where: { id, userId: user.id, action: { assigneeId: user.id } }, select: { id: true } });
       if (!exists) throw new NotFoundException('Уведомление не найдено');
     }
     return { ok: true };
