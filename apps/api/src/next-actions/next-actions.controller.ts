@@ -18,6 +18,8 @@ export class NextActionsController {
     @Query('page') page?: string, @Query('limit') limit?: string) {
     return this.actions.list(user, scope ?? 'mine', filter ?? 'all', q ?? '', Number(page ?? '1'), Number(limit ?? '20'));
   }
+  @Get('assignees')
+  assignees() { return this.actions.assignees(); }
   @Get('by-task/:taskId')
   byTask(@CurrentUser() user: AuthUser, @Param('taskId') taskId: string) {
     return this.actions.byTask(user, taskId);
