@@ -1,3 +1,5 @@
+'use client';
+
 import type { ReactNode } from 'react';
 import AuthGate, { useSession } from '../components/AuthGate';
 import AppShell from '../components/AppShell';
