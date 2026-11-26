@@ -1,4 +1,5 @@
 import {
+import { cancelTaskActions } from '../next-actions/cancel-task-actions.js';
   BadRequestException,
   ConflictException,
   Injectable,
@@ -645,6 +646,7 @@ export class MultiOrdersService {
       await tx.task.update({ where: { id: taskId }, data: {
         status: 'CLOSED', closedAt: new Date(), nextAction: null, reminderAt: null,
       } });
+      await cancelTaskActions(tx, taskId, actorId);
       await this.telegramDelivery.taskChanged(tx, taskId);
       await tx.taskActivity.create({ data: { taskId, text: 'Закупка закрыта' } });
       if (orders.some(order => order.ledgerEnabled)) {
