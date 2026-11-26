@@ -117,7 +117,7 @@ describe('CORE-09: owned actions, optimistic updates, schedules and notification
     await owner.client.patch('/api/v1/notifications/' + id + '/read').expect(200);
     await other.client.patch('/api/v1/notifications/' + id + '/read').expect(404);
     const after = await owner.client.get('/api/v1/notifications?filter=unread').expect(200);
-    expect(after.body.unreadCount).toBe(1);
+    expect(after.body.unreadCount).toBe(notifications.body.unreadCount - 1);
     await service.dispatchDue(new Date(now + 86_400_000 + 420_000));
     await service.dispatchDue(new Date(now + 86_400_000 + 420_000));
     const tomorrow = await owner.client.get('/api/v1/notifications').expect(200);
