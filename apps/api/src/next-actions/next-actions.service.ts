@@ -323,7 +323,7 @@ export class NextActionsService implements OnModuleInit, OnModuleDestroy {
             (SELECT 1 FROM ${receiptTable} r
              WHERE r."actionId"=a."id" AND r."version"=a."version" AND r."kind"='ACTION_DUE'))
           OR (a."dueAt" < ${now} AND NOT EXISTS
-            (SELECT 1 FROM "NextActionScheduleReceipt" r
+            (SELECT 1 FROM ${receiptTable} r
              WHERE r."actionId"=a."id" AND r."version"=a."version" AND r."kind"='ACTION_OVERDUE'))
         ) ORDER BY COALESCE(a."reminderAt",a."dueAt") ASC LIMIT 50
     `);
