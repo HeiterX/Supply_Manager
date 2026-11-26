@@ -34,8 +34,8 @@ export function errorMessage(error: unknown): string {
   if (error instanceof Core09Error) return error.message;
   return 'Сервер недоступен. Проверьте подключение и повторите попытку.';
 }
-export async function core09Request<T>(path: `/${string}`, signal: AbortSignal, options: RequestInit = {}): Promise<T> {
-  const response = await apiFetch(path, { ...options, signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]), cache: 'no-store' });
+export async function core09Request<T>(path: string, signal: AbortSignal, options: RequestInit = {}): Promise<T> {
+  const response = await apiFetch(path as `/${string}`, { ...options, signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]), cache: 'no-store' });
   if (!response.ok) {
     const messages: Record<number, string> = {
       401: 'Сессия завершена. Войдите повторно.', 403: 'Нет доступа к этим данным.',
