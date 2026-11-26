@@ -114,7 +114,9 @@ export default function WorkNextAction({ id, history, fallback, children, taskSt
     {message && <p role="status" className="text-sm text-emerald-700">{message}</p>}
     {error && <p role="alert" className="text-sm text-rose-700">{error}</p>}
     {state.status === 'loading' && <p role="status" className="text-sm text-muted">Загрузка действия…</p>}
-    {state.status === 'error' && <LoadError message={state.error ?? 'Ошибка загрузки'} retry={state.refresh} />}
+    {state.status === 'error' && (state.error === 'Недостаточно прав для этой операции.'
+      ? <p role="alert" className="text-sm text-rose-700">{state.error}</p>
+      : <LoadError message={state.error ?? 'Ошибка загрузки'} retry={state.refresh} />)}
     {state.status === 'unavailable' && <><p className="text-xs text-muted">Сервис действий недоступен; показаны прежние данные.</p>{fallback}</>}
     {state.status === 'ready' && <>
       {action ? <>
