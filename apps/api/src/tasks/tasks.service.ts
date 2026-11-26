@@ -21,6 +21,7 @@ import { normalizeCatalogText, validateTechnicalParameters } from './catalog.ser
 import { SuppliersService } from './suppliers.service.js';
 import { quotePrice, offerSnapshot } from './quote-utils.js';
 import { quantityBalance, sum, zero } from './fulfillment-balances.js';
+import { cancelTaskActions } from '../next-actions/cancel-task-actions.js';
 
 @Injectable()
 export class TasksService {
@@ -321,6 +322,8 @@ export class TasksService {
           closedAt: dto.status !== undefined ? null : undefined,
         },
       });
+
+      if (nextStatus === 'CANCELLED') await cancelTaskActions(tx, id);
 
       if (changes.length > 0) {
         await tx.taskActivity.createMany({
@@ -1932,6 +1935,7 @@ export class TasksService {
           reminderAt: null,
         },
       });
+      await cancelTaskActions(tx, taskId);
       await this.telegramDelivery.taskChanged(tx, taskId);
 
       await tx.taskActivity.create({
