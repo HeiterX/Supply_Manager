@@ -38,7 +38,7 @@ export async function core09Request<T>(path: string, signal: AbortSignal, option
   const response = await apiFetch(path as `/${string}`, { ...options, signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]), cache: 'no-store' });
   if (!response.ok) {
     const messages: Record<number, string> = {
-      401: 'Сессия завершена. Войдите повторно.', 403: 'Нет доступа к этим данным.',
+      401: 'Сессия завершена. Войдите повторно.', 403: 'Недостаточно прав для этой операции.',
       404: 'Этот раздел ещё не подключён к серверу.',
       409: 'Данные изменились. Обновите действие и повторите операцию.',
       400: 'Проверьте название и даты действия.', 422: 'Проверьте название и даты действия.',
