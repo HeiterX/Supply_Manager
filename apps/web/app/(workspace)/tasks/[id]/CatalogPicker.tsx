@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useState } from 'react';
 import { apiFetch } from '@/lib/api-client';
 
 export type CatalogChoice = {
@@ -24,8 +24,8 @@ export default function CatalogPicker({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
-  async function search(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function search() {
+    if (busy) return;
     setBusy(true);
     setError('');
     try {
@@ -46,18 +46,25 @@ export default function CatalogPicker({
   return (
     <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-3">
       <div className="text-xs font-semibold text-slate-700">Номенклатура — поиск и привязка</div>
-      <form onSubmit={(event) => void search(event)} className="mt-2 flex gap-2">
+      <div role="search" aria-label="Поиск номенклатуры" className="mt-2 flex gap-2">
         <input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              void search();
+            }
+          }}
+          aria-label="Название или артикул для поиска"
           placeholder="Название или артикул"
           className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
         />
-        <button type="submit" disabled={busy}
+        <button type="button" onClick={() => void search()} disabled={busy}
           className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">
           {busy ? 'Поиск...' : 'Найти'}
         </button>
-      </form>
+      </div>
       {error && <p role="alert" className="mt-2 text-xs text-rose-700">{error}</p>}
       {selectedId && <p className="mt-2 text-xs font-semibold text-emerald-700">Карточка выбрана</p>}
       {results.length > 0 && (

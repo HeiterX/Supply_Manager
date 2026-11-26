@@ -78,6 +78,7 @@ enum PurchaseRequestStatus {
 }
 
 model Task {
+  nextActions NextAction[]
   fulfillmentOperations FulfillmentOperation[]
   id          String       @id @default(uuid())
   number      Int          @unique @default(autoincrement())
@@ -470,6 +471,9 @@ model PurchaseOrderRevision {
 }
 
 model User {
+  assignedNextActions NextAction[] @relation("NextActionAssignee")
+  actionNotifications NextActionNotification[] @relation("NextActionRecipient")
+  nextActionHistory NextActionHistory[] @relation("NextActionHistoryActor")
   id String @id @default(uuid())
 
   // Данные сотрудника
@@ -877,4 +881,85 @@ model FulfillmentOperation {
 
   @@unique([taskId, key])
   @@index([taskId, createdAt])
+}
+
+
+// CORE-09: one active Next Action per Task (partial unique SQL index).
+// Completed actions remain immutable history and allow a successor.
+model NextAction {
+  id String @id @default(uuid())
+  taskId String
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  title String
+  assigneeId String?
+  assignee User? @relation("NextActionAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  dueAt DateTime?
+  reminderAt DateTime?
+  status String @default("ACTIVE")
+  version Int @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  history NextActionHistory[]
+  notifications NextActionNotification[]
+  scheduleReceipts NextActionScheduleReceipt[]
+  mutations NextActionMutation[]
+
+  @@index([taskId, status])
+  @@index([assigneeId, status, dueAt])
+  @@index([status, reminderAt])
+  @@index([status, dueAt])
+}
+
+model NextActionHistory {
+  id String @id @default(uuid())
+  actionId String
+  action NextAction @relation(fields: [actionId], references: [id], onDelete: Cascade)
+  actorId String?
+  actor User? @relation("NextActionHistoryActor", fields: [actorId], references: [id], onDelete: SetNull)
+  type String
+  comment String?
+  createdAt DateTime @default(now())
+
+  @@index([actionId, createdAt])
+}
+
+model NextActionNotification {
+  id String @id @default(uuid())
+  actionId String
+  action NextAction @relation(fields: [actionId], references: [id], onDelete: Cascade)
+  userId String
+  user User @relation("NextActionRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  eventKey String
+  type String
+  title String
+  message String?
+  readAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@unique([eventKey, userId])
+  @@index([userId, readAt, createdAt])
+  @@index([actionId, createdAt])
+}
+
+model NextActionScheduleReceipt {
+  id String @id @default(uuid())
+  actionId String
+  action NextAction @relation(fields: [actionId], references: [id], onDelete: Cascade)
+  version Int
+  kind String
+  createdAt DateTime @default(now())
+
+  @@unique([actionId, version, kind])
+}
+
+model NextActionMutation {
+  id String @id @default(uuid())
+  actionId String
+  action NextAction @relation(fields: [actionId], references: [id], onDelete: Cascade)
+  key String
+  fingerprint String
+  response Json
+  createdAt DateTime @default(now())
+
+  @@unique([actionId, key])
 }

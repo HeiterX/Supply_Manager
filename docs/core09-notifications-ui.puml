@@ -1,0 +1,26 @@
+@startuml
+title CORE-09 UI — существующий API и ожидаемый контракт
+actor Снабженец as User
+component AuthGate
+component "AppShell / Bell\nActions / Notifications\nTaskNextAction" as UI
+component "NotificationProvider\nshared feed / read" as Provider
+component "useCore09Resource\nabort / timeout / 60s visible poll" as Resource
+component "apiFetch\ncookie JWT / 401 / 403" as Client
+component "Текущий API\nauth / tasks / activities" as Existing
+component "CORE-09 API Максима\nконтракт ещё не реализован" as Proposed #FFF2CC
+database "Разрешённые объекты\nсроки / ownership / read state" as Backend
+User --> AuthGate
+AuthGate --> UI : только ADMIN / PROCUREMENT
+UI --> Provider
+UI --> Resource
+Provider --> Resource
+Resource --> Client
+Client --> Existing : текущие реальные данные
+Client ..> Proposed : предложение next-actions / notifications
+Proposed ..> Backend : серверные правила / расписание
+Client --> AuthGate : потеря сеанса / запрет
+note bottom of UI
+404: ожидание подключения, не вымышленные данные.
+Fixtures используются только в тестах.
+end note
+@enduml

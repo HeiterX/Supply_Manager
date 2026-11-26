@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { cancelTaskActions } from '../next-actions/cancel-task-actions.js';
 import { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto.js';
@@ -84,7 +85,7 @@ export class MultiOrdersService {
       : 'Контролировать оплату и поставку по заказам';
     await tx.task.update({
       where: { id: taskId },
-      data: { status: status as 'SEARCHING' | 'HANDED_OVER' | 'ORDERED' | 'WAITING_PAYMENT' | 'WAITING_SHIPMENT' | 'IN_TRANSIT' | 'READY_FOR_PICKUP' | 'RECEIVED', nextAction, reminderAt: null },
+      data: { status: status as 'SEARCHING' | 'HANDED_OVER' | 'ORDERED' | 'WAITING_PAYMENT' | 'WAITING_SHIPMENT' | 'IN_TRANSIT' | 'READY_FOR_PICKUP' | 'RECEIVED', nextAction },
     });
     await this.telegramDelivery.taskChanged(tx, taskId);
   }
@@ -645,6 +646,7 @@ export class MultiOrdersService {
       await tx.task.update({ where: { id: taskId }, data: {
         status: 'CLOSED', closedAt: new Date(), nextAction: null, reminderAt: null,
       } });
+      await cancelTaskActions(tx, taskId, actorId);
       await this.telegramDelivery.taskChanged(tx, taskId);
       await tx.taskActivity.create({ data: { taskId, text: 'Закупка закрыта' } });
       if (orders.some(order => order.ledgerEnabled)) {

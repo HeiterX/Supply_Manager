@@ -247,6 +247,28 @@ export class TelegramDeliveryService implements OnModuleInit, OnModuleDestroy {
         return;
       }
     }
+    // CORE-09: cancel stale/out-of-scope action notices immediately before sending.
+    // A queued outbox record does not grant permanent access after reassignment.
+    if (row.eventKey.startsWith('core09:')) {
+      const parts = row.eventKey.split(':');
+      const version = Number(parts[2]);
+      const action = (parts.length === 4 || (parts.length === 5 && parts[3] === 'ACTION_OVERDUE')) && Number.isSafeInteger(version)
+        ? await this.prisma.nextAction.findUnique({
+            where: { id: parts[1] },
+            include: { task: { select: { status: true } } },
+          }) : null;
+      const valid = action &&
+        action.assigneeId === row.userId &&
+        action.version === version &&
+        (action.status === 'ACTIVE' || (parts[3] === 'COMPLETED' && action.status === 'COMPLETED')) &&
+        !['CLOSED','CANCELLED'].includes(action.task.status);
+      if (!valid) {
+        await this.prisma.telegramDelivery.update({
+          where: { id: row.id }, data: { status: 'CANCELLED' },
+        });
+        return;
+      }
+    }
     try {
       const sent = await this.telegram.send(
         row.chatId,

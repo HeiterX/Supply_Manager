@@ -431,6 +431,55 @@ test('CORE-14 keyboard, error handling and axe checks', { timeout: 105000 }, asy
     }
   });
 
+  await suite.test('catalog lookup inside item editor never nests forms or submits the item', async () => {
+    const hydrationErrors = [];
+    const onConsole = (message) => {
+      if (message.type() === 'error' && /form.*descendant|hydration error|hydration failed/i.test(message.text())) {
+        hydrationErrors.push(message.text());
+      }
+    };
+    page.on('console', onConsole);
+    let lookups = 0;
+    let saves = 0;
+    await page.route('**/api/v1/catalog?*', async route => {
+      lookups += 1;
+      await route.fulfill({
+        status: 200, json: [],
+        headers: { 'access-control-allow-origin': web.origin, 'access-control-allow-credentials': 'true' },
+      });
+    });
+    await page.route('**/api/v1/tasks/*/items', async route => {
+      if (route.request().method() === 'POST') saves += 1;
+      await route.continue();
+    });
+    try {
+      await goto(page, `/tasks/${task.id}?tab=items`);
+      await page.getByRole('button', { name: /Добавить позицию/ }).first().click();
+      const dialog = page.getByRole('dialog', { name: 'Новая позиция' });
+      await dialog.waitFor();
+      assert.equal(await dialog.locator('form').count(), 1, 'The item editor must have only its outer save form');
+      assert.equal(await dialog.locator('form form').count(), 0);
+      const search = dialog.getByRole('textbox', { name: 'Название или артикул для поиска' });
+      await search.fill('QA-10');
+      const firstLookup = page.waitForResponse(response =>
+        response.url().includes('/catalog?q=QA-10') && response.request().method() === 'GET');
+      await search.press('Enter');
+      await firstLookup;
+      const secondLookup = page.waitForResponse(response =>
+        response.url().includes('/catalog?q=QA-10') && response.request().method() === 'GET');
+      await dialog.getByRole('search', { name: 'Поиск номенклатуры' }).getByRole('button', { name: 'Найти' }).click();
+      await secondLookup;
+      assert.equal(await dialog.isVisible(), true);
+      assert.equal(lookups, 2, 'Enter and Find must trigger only catalog lookups');
+      assert.equal(saves, 0, 'Catalog search must not submit an item');
+      assert.deepEqual(hydrationErrors, []);
+    } finally {
+      page.off('console', onConsole);
+      await page.unroute('**/api/v1/catalog?*');
+      await page.unroute('**/api/v1/tasks/*/items');
+    }
+  });
+
   await suite.test('destructive item action names the target, defaults to cancel and submits once', async () => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await goto(page, `/tasks/${task.id}?tab=items`);
