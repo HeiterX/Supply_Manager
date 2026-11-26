@@ -1,0 +1,43 @@
+@startuml
+title CORE-09 — Next Action, напоминания и уведомления
+left to right direction
+actor "Снабженец" as User
+actor "Администратор" as Admin
+rectangle "Next.js (CORE-12/14)" {
+  component "/actions" as Actions
+  component "/notifications + bell" as UI
+  component "Карточка закупки" as Card
+}
+rectangle "NestJS API" {
+  component "NextActionsController" as C
+  component "NextActionsService" as S
+  component "Scheduler (60s)" as Scheduler
+  component "CORE-10 Outbox" as Outbox
+}
+database "PostgreSQL 17" {
+  entity "NextAction" as A
+  entity "NextActionHistory" as H
+  entity "NextActionNotification" as N
+  entity "NextActionScheduleReceipt" as R
+  entity "NextActionMutation" as M
+}
+User --> Actions
+User --> Card
+Admin --> Actions
+Actions --> C
+Card --> C
+C --> S
+S --> A
+S --> H
+S --> M
+Scheduler --> S
+S --> R
+S --> N
+S --> Outbox
+UI --> N : через /notifications API
+note right of S
+  Проверка RBAC и владельца,
+  optimistic version + idempotency key,
+  действие отдельно от Task.deadline
+end note
+@enduml
