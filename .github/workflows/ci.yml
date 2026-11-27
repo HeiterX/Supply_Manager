@@ -25,6 +25,8 @@ jobs:
           fetch-depth: 0
       - name: Check tracked filenames for accidental private data
         run: node scripts/check-tracked-paths.mjs
+      - name: CORE-15 snapshot safety and integrity tests (no database)
+        run: node --test scripts/core15-snapshot.test.mjs
       - name: Scan new commits for secrets (redacted)
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
