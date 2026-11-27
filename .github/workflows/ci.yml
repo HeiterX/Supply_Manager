@@ -25,6 +25,8 @@ jobs:
           fetch-depth: 0
       - name: Check tracked filenames for accidental private data
         run: node scripts/check-tracked-paths.mjs
+      - name: CORE-15 snapshot safety and integrity tests (no database)
+        run: node --test scripts/core15-snapshot.test.mjs
       - name: Scan new commits for secrets (redacted)
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
@@ -198,4 +200,100 @@ jobs:
             echo "- **${{ matrix.app }}**: npm audit reported issues (exit $result). See job log for counts and advisories." >> "$GITHUB_STEP_SUMMARY"
           else
             echo "- **${{ matrix.app }}**: no findings at the requested audit threshold." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+
+  core15-snapshot:
+    name: CORE-15 — real PostgreSQL and attachments restore (synthetic)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/api/package-lock.json
+      - name: Start two distinct PostgreSQL 17 containers
+        run: |
+          docker run -d --name supply-core15-source \
+            -e POSTGRES_USER=supply -e POSTGRES_PASSWORD=ci-only-not-for-production \
+            -e POSTGRES_DB=supply_manager \
+            -p 127.0.0.1:55444:5432 postgres:17-alpine
+          docker run -d --name supply-core15-restore \
+            -e POSTGRES_USER=supply_restore -e POSTGRES_PASSWORD=ci-restore-only \
+            -e POSTGRES_DB=supply_core15_restore \
+            -p 127.0.0.1:55445:5432 postgres:17-alpine
+          for i in {1..30}; do
+            if docker exec supply-core15-source pg_isready -U supply -d supply_manager &&
+               docker exec supply-core15-restore pg_isready -U supply_restore -d supply_core15_restore; then exit 0; fi
+            sleep 1
+          done
+          exit 1
+      - name: Apply exact current migrations to synthetic source DB
+        working-directory: apps/api
+        env:
+          DATABASE_URL: postgresql://supply:ci-only-not-for-production@127.0.0.1:55444/supply_manager?schema=public
+        run: |
+          npm ci
+          npx prisma migrate deploy
+      - name: Seed synthetic DB references and private files
+        run: |
+          mkdir -p "$RUNNER_TEMP/core15-uploads/purchase-requests" "$RUNNER_TEMP/core15-uploads/offer-documents"
+          photo="123e4567-e89b-42d3-a456-426614174001-123e4567-e89b-42d3-a456-426614174002.png"
+          offer="123e4567-e89b-42d3-a456-426614174003.pdf"
+          printf '%s' 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5b8AAAAASUVORK5CYII=' | base64 -d > "$RUNNER_TEMP/core15-uploads/purchase-requests/$photo"
+          printf '%s\n' '%PDF-1.4' '1 0 obj' '<<>>' 'endobj' '%%EOF' > "$RUNNER_TEMP/core15-uploads/offer-documents/$offer"
+          hash="$(sha256sum "$RUNNER_TEMP/core15-uploads/offer-documents/$offer" | cut -d' ' -f1)"
+          bytes="$(wc -c < "$RUNNER_TEMP/core15-uploads/offer-documents/$offer")"
+          docker exec -i supply-core15-source sh -ec \
+            'PGPASSWORD="$POSTGRES_PASSWORD" exec psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<SQL
+          INSERT INTO public."Task" ("id","title","updatedAt")
+          VALUES ('123e4567-e89b-42d3-a456-426614174010','CORE15 synthetic task',now());
+          INSERT INTO public."Supplier" ("id","name","updatedAt")
+          VALUES ('123e4567-e89b-42d3-a456-426614174011','Synthetic vendor',now());
+          INSERT INTO public."SupplierOffer" ("id","taskId","supplierId","updatedAt")
+          VALUES ('123e4567-e89b-42d3-a456-426614174012',
+                  '123e4567-e89b-42d3-a456-426614174010',
+                  '123e4567-e89b-42d3-a456-426614174011',now());
+          INSERT INTO public."SupplierOfferDocument"
+            ("id","offerId","version","originalName","storageName","mimeType","size","sha256")
+          VALUES ('123e4567-e89b-42d3-a456-426614174013',
+                  '123e4567-e89b-42d3-a456-426614174012',1,'synthetic.pdf',
+                  '$offer','application/pdf',$bytes,'$hash');
+          INSERT INTO public."PurchaseRequest" ("id","title","updatedAt")
+          VALUES ('123e4567-e89b-42d3-a456-426614174014','CORE15 synthetic request',now());
+          INSERT INTO public."PurchaseRequestItem"
+            ("id","requestId","name","quantity","unit","photoPath","updatedAt")
+          VALUES ('123e4567-e89b-42d3-a456-426614174015',
+                  '123e4567-e89b-42d3-a456-426614174014',
+                  'Synthetic bearing',1,'шт.','$photo',now());
+          SQL
+      - name: Backup, verify and restore into empty independent container
+        run: |
+          node scripts/core15-snapshot.mjs backup \
+            --source-container supply-core15-source \
+            --uploads "$RUNNER_TEMP/core15-uploads" \
+            --out "$RUNNER_TEMP/core15-backups" --writes-paused
+          snapshot="$(find "$RUNNER_TEMP/core15-backups" -mindepth 1 -maxdepth 1 -type d -name 'core15-*' -print -quit)"
+          test -n "$snapshot"
+          node scripts/core15-snapshot.mjs verify --snapshot "$snapshot"
+          node scripts/core15-snapshot.mjs restore --snapshot "$snapshot" \
+            --target-container supply-core15-restore \
+            --target-uploads "$RUNNER_TEMP/core15-restored-uploads"
+          diff -rq "$RUNNER_TEMP/core15-uploads" "$RUNNER_TEMP/core15-restored-uploads"
+          test "$(docker exec supply-core15-restore sh -ec 'PGPASSWORD="$POSTGRES_PASSWORD" exec psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At -c "SELECT count(*) FROM public.\"SupplierOfferDocument\""')" = 1
+      - name: Refuse tampered snapshot and pre-existing restore destination
+        run: |
+          snapshot="$(find "$RUNNER_TEMP/core15-backups" -mindepth 1 -maxdepth 1 -type d -name 'core15-*' -print -quit)"
+          if node scripts/core15-snapshot.mjs restore --snapshot "$snapshot" \
+            --target-container supply-core15-restore \
+            --target-uploads "$RUNNER_TEMP/core15-restored-uploads"; then
+            echo "Unsafe second restore succeeded"; exit 1
+          fi
+          printf 'changed' >> "$snapshot/database.dump"
+          if node scripts/core15-snapshot.mjs verify --snapshot "$snapshot"; then
+            echo "Damaged backup was accepted"; exit 1
           fi

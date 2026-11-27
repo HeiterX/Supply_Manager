@@ -313,10 +313,12 @@ export class PurchaseRequestsService {
     const detected = await this.sanitizeImage(buffer, photo.mimetype);
 
     const filename = itemId + '-' + randomUUID() + detected.extension;
-    await mkdir(PHOTO_DIRECTORY, { recursive: true });
+    // New private media must not inherit world-readable default umask permissions.
+    // Existing upload directories are intentionally not chmod-ed during an API request.
+    await mkdir(PHOTO_DIRECTORY, { recursive: true, mode: 0o700 });
     const absolutePath = join(PHOTO_DIRECTORY, filename);
     try {
-      await writeFile(absolutePath, detected.buffer, { flag: 'wx' });
+      await writeFile(absolutePath, detected.buffer, { flag: 'wx', mode: 0o600 });
       // Atomic conditional write prevents races/replays, and checks status
       // again in case procurement accepted the request during upload.
       const result = await this.prisma.$transaction(async (tx) => {

@@ -1,0 +1,36 @@
+@startuml
+title CORE-15 / #59 — изолированный backup/restore (MVP)
+
+actor "Оператор" as Operator
+participant "Рабочий API\n(запись остановлена)" as API
+database "PostgreSQL 17\nsupply_manager/public" as DB
+collections "Приватные файлы\nuploads/{purchase-requests,offer-documents}" as Files
+participant "core15-snapshot.mjs" as CLI
+database "Каталог snapshot\n(вне Git, 0700/0600)" as Archive
+database "Отдельный PostgreSQL 17\nsupply_core15_restore" as Restored
+collections "Новый каталог\nrestored-uploads" as RestoredFiles
+
+Operator -> API: Остановить все записи
+Operator -> CLI: backup --writes-paused
+CLI -> DB: Проверить БД/версию, ссылки, счётчики
+CLI -> DB: pg_dump -Fc -n public
+CLI -> Files: Перенести разрешённые вложения
+CLI -> CLI: SHA-256, проверки всех ссылок
+CLI -> DB: Повторная сверка ссылок/счётчиков
+CLI -> Archive: Опубликовать manifest + dump + файлы
+Operator -> CLI: verify --snapshot
+CLI -> Archive: Проверить manifest, размер, хеши
+Operator -> CLI: restore --target-container supply-core15-restore
+CLI -> Archive: Проверить целостность до любых записей
+CLI -> Restored: Отказать, если БД не пустая или неверное имя
+CLI -> RestoredFiles: Скопировать во временный закрытый каталог
+CLI -> Restored: pg_restore --exit-on-error
+CLI -> Restored: Сверить число записей и ссылки
+CLI -> RestoredFiles: Проверить хеши, опубликовать каталог
+CLI --> Operator: RESTORE OK или отказ
+note right of Operator
+Не запускать restore на рабочем контейнере.
+Реальные RPO/RTO и права через API
+проверяются отдельно на чистой машине.
+end note
+@enduml

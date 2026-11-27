@@ -1,6 +1,6 @@
 import 'dotenv/config';
 
-import { readdir, unlink } from 'node:fs/promises';
+import { readdir, stat, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { ValidationPipe, type INestApplication } from '@nestjs/common';
@@ -416,6 +416,15 @@ describe('Purchase requests (e2e)', () => {
         contentType: 'image/png',
       })
       .expect(201);
+
+    if (process.platform !== 'win32') {
+      const row = await prisma.purchaseRequestItem.findUniqueOrThrow({
+        where: { id: publicItemIds[0] },
+        select: { photoPath: true },
+      });
+      const photo = await stat(join(process.cwd(), 'uploads', 'purchase-requests', row.photoPath!));
+      expect(photo.mode & 0o077).toBe(0);
+    }
 
     await request(app.getHttpServer())
       .post(uploadUrl)
