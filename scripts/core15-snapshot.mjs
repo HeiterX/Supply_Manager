@@ -268,6 +268,11 @@ async function restore(flags) {
     'Restore container must use PostgreSQL 17');
   assert(dockerQuery(target, "SELECT count(*) FROM pg_catalog.pg_tables WHERE schemaname='public'") === '0',
     'Target database already has tables; refusing to overwrite');
+  // pg_dump -n public emits CREATE SCHEMA public. A new PostgreSQL 17 database
+  // already has this empty schema, so remove it WITHOUT CASCADE before restore.
+  // This is allowed only after the isolated container/name/database/emptiness guards.
+  // Any unexpected object or dependency makes DROP fail rather than deleting data.
+  dockerQuery(target, 'DROP SCHEMA public');
   await mkdir(dirname(targetUploads), { recursive: true });
   const stage = targetUploads + '.partial-' + randomBytes(4).toString('hex');
   await mkdir(stage, { mode: 0o700 });
